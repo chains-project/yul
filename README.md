@@ -1,6 +1,11 @@
 # yul
 
-A Claude Code `PreToolUse` hook that keeps Maven dependencies current. When Claude writes a `pom.xml`, the hook checks any newly added/changed dependency against Maven Central and blocks the write (exit 2) if it's pinned to an outdated version, so Claude sees the correct version on stderr and retries. Other files and untouched dependencies pass through untouched; resolver/network errors fail open.
+A Claude Code `PreToolUse` hook that keeps dependencies current. When Claude writes a manifest, the hook checks any newly added/changed dependency pinned with an exact version and blocks the write (exit 2) if it's outdated, so Claude sees the correct version on stderr and retries. Other files and untouched dependencies pass through untouched; resolver/network errors fail open.
+
+Supported manifests:
+- `pom.xml` — Maven Central
+- `requirements.txt` — PyPI, `==` pins only
+- `pyproject.toml` — PyPI, `[project.dependencies]` / `[project.optional-dependencies]`, `==` pins only
 
 ## Usage
 

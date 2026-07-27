@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/chains-project/yul/pkg/maven"
+	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
 )
 
@@ -16,6 +17,8 @@ import (
 // each ecosystem's checker is implemented.
 var checkers = []manifestchecker.ManifestChecker{
 	maven.Checker{},
+	pypi.RequirementsChecker{},
+	pypi.PyprojectChecker{},
 }
 
 func checkerFor(filename string) manifestchecker.ManifestChecker {
@@ -79,7 +82,11 @@ func runHook() {
 
 	fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
 	for _, m := range mismatches {
-		fmt.Fprintf(os.Stderr, "  %s:%s  %s -> %s\n", m.Namespace, m.Name, m.Current, m.Latest)
+		name := m.Name
+		if m.Namespace != "" {
+			name = m.Namespace + ":" + m.Name
+		}
+		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, m.Latest)
 	}
 	os.Exit(2)
 }
