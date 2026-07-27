@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/chains-project/yul/pkg/maven"
+	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
 )
@@ -19,6 +20,7 @@ var checkers = []manifestchecker.ManifestChecker{
 	maven.Checker{},
 	pypi.RequirementsChecker{},
 	pypi.PyprojectChecker{},
+	npm.Checker{},
 }
 
 func checkerFor(filename string) manifestchecker.ManifestChecker {

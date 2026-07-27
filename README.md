@@ -6,6 +6,7 @@ Supported manifests:
 - `pom.xml` — Maven Central
 - `requirements.txt` — PyPI, `==` pins only
 - `pyproject.toml` — PyPI, `[project.dependencies]` / `[project.optional-dependencies]`, `==` pins only
+- `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
 
 ## Usage
 
