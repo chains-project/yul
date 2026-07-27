@@ -15,7 +15,7 @@ Add to `.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "go run github.com/chains-project/yul@latest",
+            "command": "/home/<user>/go/bin/yul",
             "timeout": 30
           }
         ]
@@ -26,6 +26,9 @@ Add to `.claude/settings.json`:
 ```
 
 Requires Go to be installed. No other setup needed.
+
+Prefer installing the binary (`go install github.com/chains-project/yul@latest`) and pointing `command` at its absolute path instead: `go run` always exits 1 on program failure regardless of the program's actual exit code ([golang/go#17813](https://github.com/golang/go/issues/17813)), so a blocking exit 2 from this hook is flattened to exit 1, where `stderr` reports `exit status 2` but `exitCode` is `1`.
+Claude Code treats exit 1 as a non-blocking error, so the write goes through instead of being blocked. `go install` places the binary at `$GOPATH/bin` (find it with `go env GOPATH`).
 
 ### Example
 
@@ -48,7 +51,7 @@ outdated dependencies, use these versions instead:
     "stderr":"Failed with non-blocking status code: outdated dependencies, use these versions instead:\n  org.json:json  20240303 -> 20260522\nexit status 2",
     "stdout":"",
     "exitCode":1,
-    "command":"go run github.com/chains-project/yul@latest",
+    "command":"/home/aman/go/bin/yul",
     "durationMs":5349
   },
   "type":"attachment",
