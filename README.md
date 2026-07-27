@@ -30,15 +30,7 @@ Requires Go to be installed. No other setup needed.
 Prefer installing the binary (`go install github.com/chains-project/yul@latest`) and pointing `command` at its absolute path instead: `go run` always exits 1 on program failure regardless of the program's actual exit code ([golang/go#17813](https://github.com/golang/go/issues/17813)), so a blocking exit 2 from this hook is flattened to exit 1, where `stderr` reports `exit status 2` but `exitCode` is `1`.
 Claude Code treats exit 1 as a non-blocking error, so the write goes through instead of being blocked. `go install` places the binary at `$GOPATH/bin` (find it with `go env GOPATH`).
 
-### Example
-
-Claude tries to write a `pom.xml` pinning `org.json:json` to `20240303`. The hook blocks it:
-
-```
-outdated dependencies, use these versions instead:
-  org.json:json  20240303 -> 20260522
-```
-
+With `go run`, you can see below the exitCode is 1, but stderr reports exit status 2, so Claude Code treats it as a non-blocking error and lets the write go through instead of blocking it.
 ```json
 {
   "parentUuid":"3d0b0198-4c4f-473d-aca8-81aae1c47ba4",
@@ -64,6 +56,48 @@ outdated dependencies, use these versions instead:
   "sessionId":"8e78af27-6afe-4d9c-a562-baaf77b94169",
   "version":"2.1.206",
   "gitBranch":"HEAD"
+}
+```
+
+
+### Example
+
+Claude tries to write a `pom.xml` pinning `org.json:json` to `20240303`. The hook blocks it:
+
+```
+outdated dependencies, use these versions instead:
+  org.apache.pdfbox:pdfbox  3.0.3 -> 3.0.8
+```
+
+```json
+{
+  "parentUuid": "53362172-27ca-446a-9709-589501ce4343",
+  "isSidechain": false,
+  "promptId": "3a98011e-3feb-4ee4-84a8-3d42b48815a0",
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": [
+      {
+        "type": "tool_result",
+        "content": "PreToolUse:Write hook error: [/home/aman/Desktop/chains/ai-bump/yul]: outdated dependencies, use these versions instead:\n  org.apache.pdfbox:pdfbox  3.0.3 -> 3.0.8\n",
+        "is_error": true,
+        "tool_use_id": "toolu_015xUvsjc8FWGVG3QoS2Tko9"
+      }
+    ]
+  },
+  "uuid": "92b6b32d-8116-41c7-8773-c5dcb36e110b",
+  "timestamp": "2026-07-27T15:00:23.991Z",
+  "toolUseResult": "Error: PreToolUse:Write hook error: [/home/aman/Desktop/chains/ai-bump/yul]: outdated dependencies, use these versions instead:\n  org.apache.pdfbox:pdfbox  3.0.3 -> 3.0.8\n",
+  "toolDenialKind": "permission-rule",
+  "sourceToolAssistantUUID": "53362172-27ca-446a-9709-589501ce4343",
+  "session_id": "00454dc4-731b-4ec8-8263-a1741b2c6a1e",
+  "userType": "external",
+  "entrypoint": "cli",
+  "cwd": "/tmp/test",
+  "sessionId": "00454dc4-731b-4ec8-8263-a1741b2c6a1e",
+  "version": "2.1.220",
+  "gitBranch": "HEAD"
 }
 ```
 
