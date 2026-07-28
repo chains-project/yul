@@ -23,7 +23,6 @@ MANIFEST=$(echo "$C" | jq -r '.manifest')
 TYPE=$(echo "$C" | jq -r '.type')
 PROMPT=$(echo "$C" | jq -r '.prompt')
 SEED=$(echo "$C" | jq -r '.seed // empty')
-PROMPT="$PROMPT Note: it's fine if the latest version of a given package happens to be a pre-release (alpha/beta/rc) — different packages have different release conventions, so just use whatever version is actually latest."
 
 WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION"
 rm -rf "$WORKDIR"
@@ -39,7 +38,7 @@ if [ "$CONDITION" = "hook" ]; then
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
