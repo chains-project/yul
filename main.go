@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
@@ -36,13 +37,16 @@ func checkerFor(filename string) manifestchecker.ManifestChecker {
 type hookInput struct {
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
-		FilePath string `json:"file_path"`
-		Content  string `json:"content"`
+		FilePath   string `json:"file_path"`
+		Content    string `json:"content"`     // Write
+		OldString  string `json:"old_string"`  // Edit
+		NewString  string `json:"new_string"`  // Edit
+		ReplaceAll bool   `json:"replace_all"` // Edit
 	} `json:"tool_input"`
 }
 
-// runHook is a PreToolUse hook for the Write tool. It figures out which
-// ecosystem owns the manifest being written (by filename), and blocks
+// runHook is a PreToolUse hook for the Write and Edit tools. It figures out
+// which ecosystem owns the manifest being written (by filename), and blocks
 // (exit 2) if a newly added/changed dependency is pinned older than what's
 // actually released. Claude sees the block reason on stderr and can retry.
 func runHook() {
@@ -58,7 +62,7 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	if in.ToolName != "Write" {
+	if in.ToolName != "Write" && in.ToolName != "Edit" {
 		os.Exit(0)
 	}
 
@@ -67,12 +71,26 @@ func runHook() {
 		os.Exit(0) // not a manifest we know how to check
 	}
 
-	before, err := os.ReadFile(in.ToolInput.FilePath)
+	rawBefore, err := os.ReadFile(in.ToolInput.FilePath)
 	if err != nil {
-		before = nil // file doesn't exist yet: every dependency in it is new
+		rawBefore = nil // file doesn't exist yet: every dependency in it is new
+	}
+	before := string(rawBefore)
+
+	after := in.ToolInput.Content
+	if in.ToolName == "Edit" {
+		if !strings.Contains(before, in.ToolInput.OldString) {
+			// Edit tool itself would fail on this; nothing for us to check.
+			os.Exit(0)
+		}
+		count := 1
+		if in.ToolInput.ReplaceAll {
+			count = -1
+		}
+		after = strings.Replace(before, in.ToolInput.OldString, in.ToolInput.NewString, count)
 	}
 
-	mismatches, err := checker.Check(string(before), in.ToolInput.Content)
+	mismatches, err := checker.Check(before, after)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook: %v\n", err)
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
