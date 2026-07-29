@@ -20,9 +20,10 @@ func TestCheckerFor(t *testing.T) {
 		{filename: "package.json", want: npm.Checker{}},
 	}
 
+	checkers := newCheckers(nil)
 	for _, test := range tests {
 		t.Run(test.filename, func(t *testing.T) {
-			got := checkerFor(test.filename)
+			got := checkerFor(checkers, test.filename)
 			if got == nil {
 				t.Fatalf("checkerFor(%q) returned nil", test.filename)
 			}
@@ -34,7 +35,7 @@ func TestCheckerFor(t *testing.T) {
 }
 
 func TestCheckerForUnknownManifest(t *testing.T) {
-	if got := checkerFor("go.mod"); got != nil {
+	if got := checkerFor(newCheckers(nil), "go.mod"); got != nil {
 		t.Fatalf("checkerFor(%q) returned %T, want nil", "go.mod", got)
 	}
 }

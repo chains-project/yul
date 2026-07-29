@@ -1,19 +1,29 @@
 package npm
 
 import (
-	"io"
-	"net/http"
-	"strings"
+	"context"
 	"testing"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
+// fakeResolver resolves latest versions from a fixed PURL->version map, so
+// tests don't make real network requests.
+type fakeResolver struct {
+	latest  map[string]string
+	lookups int
 }
 
-func TestParsePackageJSON(t *testing.T) {
+func (r *fakeResolver) LatestVersions(ctx context.Context, purls []string) (map[string]string, error) {
+	r.lookups++
+	result := make(map[string]string, len(purls))
+	for _, purl := range purls {
+		if v, ok := r.latest[purl]; ok {
+			result[purl] = v
+		}
+	}
+	return result, nil
+}
+
+func TestParsePackageJSONPins(t *testing.T) {
 	content := `{
 		"dependencies": {
 			"runtime": "1.2.3",
@@ -34,9 +44,9 @@ func TestParsePackageJSON(t *testing.T) {
 		}
 	}`
 
-	got, err := parsePackageJSON(content)
+	got, err := parsePackageJSONPins(content)
 	if err != nil {
-		t.Fatalf("parsePackageJSON() error = %v", err)
+		t.Fatalf("parsePackageJSONPins() error = %v", err)
 	}
 
 	want := map[string]string{
@@ -48,62 +58,61 @@ func TestParsePackageJSON(t *testing.T) {
 		"peer":        "7.0.0",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parsePackageJSON() returned %d pins, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("parsePackageJSONPins() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
 	for name, version := range want {
-		if got[name] != version {
-			t.Errorf("parsePackageJSON()[%q] = %q, want %q", name, got[name], version)
+		if got[name].Version != version {
+			t.Errorf("parsePackageJSONPins()[%q].Version = %q, want %q", name, got[name].Version, version)
 		}
 	}
 }
 
-func TestParsePackageJSONEmptyAndInvalid(t *testing.T) {
-	got, err := parsePackageJSON(" \n")
+func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
+	got, err := parsePackageJSONPins(" \n")
 	if err != nil {
-		t.Fatalf("parsePackageJSON(empty) error = %v", err)
+		t.Fatalf("parsePackageJSONPins(empty) error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("parsePackageJSON(empty) = %#v, want no pins", got)
+		t.Fatalf("parsePackageJSONPins(empty) = %#v, want no pins", got)
 	}
 
-	if _, err := parsePackageJSON("{"); err == nil {
-		t.Fatal("parsePackageJSON(invalid) returned nil error")
+	if _, err := parsePackageJSONPins("{"); err == nil {
+		t.Fatal("parsePackageJSONPins(invalid) returned nil error")
 	}
 }
 
 func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
-	originalTransport := http.DefaultTransport
-	requests := 0
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		requests++
-		if req.URL.String() != "https://registry.npmjs.org/added" {
-			t.Fatalf("unexpected registry request: %s", req.URL)
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Status:     "200 OK",
-			Body:       io.NopCloser(strings.NewReader(`{"dist-tags":{"latest":"2.0.0"}}`)),
-			Header:     make(http.Header),
-		}, nil
-	})
-	t.Cleanup(func() {
-		http.DefaultTransport = originalTransport
-	})
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/added": "2.0.0"}}
 
 	before := `{"dependencies":{"existing":"1.0.0"}}`
 	after := `{"dependencies":{"existing":"1.0.0","added":"1.0.0","range":"^1.0.0"}}`
 
-	got, err := CheckPackageJSON(before, after)
+	got, err := CheckPackageJSON(before, after, res)
 	if err != nil {
 		t.Fatalf("CheckPackageJSON() error = %v", err)
 	}
-	if requests != 1 {
-		t.Fatalf("CheckPackageJSON() made %d registry requests, want 1", requests)
+	if res.lookups != 1 {
+		t.Fatalf("CheckPackageJSON() made %d resolver lookups, want 1", res.lookups)
 	}
 	if len(got) != 1 {
 		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 1: %#v", len(got), got)
 	}
 	if got[0].Name != "added" || got[0].Current != "1.0.0" || got[0].Latest != "2.0.0" {
 		t.Fatalf("CheckPackageJSON() mismatch = %#v", got[0])
+	}
+}
+
+func TestCheckPackageJSONScopedPackage(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/%40scope/pkg": "2.0.0"}}
+
+	before := `{}`
+	after := `{"dependencies":{"@scope/pkg":"1.0.0"}}`
+
+	got, err := CheckPackageJSON(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckPackageJSON() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "@scope/pkg" {
+		t.Fatalf("CheckPackageJSON() = %#v, want one mismatch for @scope/pkg", got)
 	}
 }

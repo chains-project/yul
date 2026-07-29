@@ -1,70 +1,41 @@
 package pypi
 
 import (
-	"fmt"
-	"strings"
+	"context"
 
 	"github.com/chains-project/yul/pkg/util/mismatch"
-	"github.com/pelletier/go-toml/v2"
+	"github.com/chains-project/yul/pkg/util/pins"
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
 // PyprojectChecker implements manifestchecker.ManifestChecker for
-// pyproject.toml, covering the PEP 621 standard [project] table. It does
-// not understand tool-specific dependency tables (e.g. Poetry's
-// [tool.poetry.dependencies]), which use their own version syntax.
-type PyprojectChecker struct{}
+// pyproject.toml, covering both the PEP 621 [project] table and Poetry's
+// [tool.poetry] tables (via git-pkgs/manifests).
+type PyprojectChecker struct {
+	// Resolver resolves latest released versions. main.go wires up an
+	// enrichment-backed resolver; tests inject a fake one.
+	Resolver resolver.Resolver
+}
 
 func (PyprojectChecker) Filename() string { return "pyproject.toml" }
 
-func (PyprojectChecker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckPyproject(before, after)
-}
-
-type pyprojectDoc struct {
-	Project struct {
-		Dependencies         []string            `toml:"dependencies"`
-		OptionalDependencies map[string][]string `toml:"optional-dependencies"`
-	} `toml:"project"`
-}
-
-func parsePyproject(content string) (map[string]string, error) {
-	pins := make(map[string]string)
-	if strings.TrimSpace(content) == "" {
-		return pins, nil
-	}
-
-	var doc pyprojectDoc
-	if err := toml.Unmarshal([]byte(content), &doc); err != nil {
-		return nil, fmt.Errorf("parsing pyproject.toml: %w", err)
-	}
-
-	addAll := func(reqs []string) {
-		for _, req := range reqs {
-			if name, version, ok := parseRequirementLine(req); ok {
-				pins[name] = version
-			}
-		}
-	}
-	addAll(doc.Project.Dependencies)
-	for _, reqs := range doc.Project.OptionalDependencies {
-		addAll(reqs)
-	}
-
-	return pins, nil
+func (c PyprojectChecker) Check(before, after string) ([]mismatch.Mismatch, error) {
+	return CheckPyproject(before, after, c.Resolver)
 }
 
 // CheckPyproject compares pyproject.toml content before and after a Write
-// and reports any exactly-pinned ("==") dependency in [project.dependencies]
-// or [project.optional-dependencies] that is newly added or whose pinned
-// version was just changed, and is older than the latest release on PyPI.
-func CheckPyproject(before, after string) ([]mismatch.Mismatch, error) {
-	beforePins, err := parsePyproject(before)
+// and reports any exactly-pinned ("==") dependency that is newly added or
+// whose pinned version was just changed, and doesn't match the latest
+// release res knows about. Packages the write didn't touch, or that aren't
+// pinned exactly, are left alone.
+func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+	beforePins, err := parsePypiPins("pyproject.toml", before)
 	if err != nil {
 		return nil, err
 	}
-	afterPins, err := parsePyproject(after)
+	afterPins, err := parsePypiPins("pyproject.toml", after)
 	if err != nil {
 		return nil, err
 	}
-	return diffPins(beforePins, afterPins)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
 }

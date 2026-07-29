@@ -1,50 +1,46 @@
+// Package pypi checks requirements.txt and pyproject.toml for dependencies
+// pinned older than what's actually released, using git-pkgs/manifests to
+// parse manifests and an injected resolver.Resolver to look up latest
+// releases.
 package pypi
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
+	"strings"
+
+	"github.com/git-pkgs/manifests"
+	"github.com/git-pkgs/purl"
+
+	"github.com/chains-project/yul/pkg/util/pins"
 )
 
-type Resolver struct{}
+const scheme = "pypi"
 
-type pypiResponse struct {
-	Info struct {
-		Version string `json:"version"`
-	} `json:"info"`
-}
+// parsePypiPins parses filename's content (requirements.txt or
+// pyproject.toml) and returns its exactly-pinned ("==") dependencies, keyed
+// and named by their PEP 503 normalized package name.
+func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
+	result := make(map[string]pins.Pin)
+	if strings.TrimSpace(content) == "" {
+		return result, nil
+	}
 
-// LatestVersion fetches the current release version for a package from
-// PyPI's JSON API (https://pypi.org/pypi/<name>/json), which always
-// reflects the latest non-yanked release in info.version.
-func (Resolver) LatestVersion(name string) (string, error) {
-	url := fmt.Sprintf("https://pypi.org/pypi/%s/json", name)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	parsed, err := manifests.Parse(filename, []byte(content))
 	if err != nil {
-		return "", fmt.Errorf("fetching package metadata: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("pypi returned %s for %s", resp.Status, name)
+		return nil, fmt.Errorf("parsing %s: %w", filename, err)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading response: %w", err)
+	for _, dep := range parsed.Dependencies {
+		version, ok := pins.ExactVersion(dep.Version, scheme, true)
+		if !ok {
+			continue
+		}
+		name := normalizePackageName(dep.Name)
+		result[name] = pins.Pin{
+			Name:    name,
+			Version: version,
+			PURL:    purl.BuildPURLString(scheme, name, "", ""),
+		}
 	}
-
-	var parsed pypiResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", fmt.Errorf("parsing pypi response: %w", err)
-	}
-
-	if parsed.Info.Version == "" {
-		return "", fmt.Errorf("no version found for %s", name)
-	}
-	return parsed.Info.Version, nil
+	return result, nil
 }

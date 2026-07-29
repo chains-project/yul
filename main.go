@@ -12,19 +12,25 @@ import (
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
-// checkers is the registry of manifest checkers the hook dispatches to,
-// keyed off which manifest filename each one owns. Add an entry here as
-// each ecosystem's checker is implemented.
-var checkers = []manifestchecker.ManifestChecker{
-	maven.Checker{},
-	pypi.RequirementsChecker{},
-	pypi.PyprojectChecker{},
-	npm.Checker{},
+// newCheckers builds the registry of manifest checkers the hook dispatches
+// to, keyed off which manifest filename each one owns. Add an entry here as
+// each ecosystem's checker is implemented. res is shared across the
+// checkers that resolve latest versions through git-pkgs/enrichment; maven
+// keeps its own dedicated resolver until it moves onto the shared modules
+// too (see chains-project/yul#2).
+func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
+	return []manifestchecker.ManifestChecker{
+		maven.Checker{},
+		pypi.RequirementsChecker{Resolver: res},
+		pypi.PyprojectChecker{Resolver: res},
+		npm.Checker{Resolver: res},
+	}
 }
 
-func checkerFor(filename string) manifestchecker.ManifestChecker {
+func checkerFor(checkers []manifestchecker.ManifestChecker, filename string) manifestchecker.ManifestChecker {
 	for _, c := range checkers {
 		if c.Filename() == filename {
 			return c
@@ -66,9 +72,16 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	checker := checkerFor(filepath.Base(in.ToolInput.FilePath))
+	res, err := resolver.NewEnrichmentResolver()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hook: creating resolver: %v\n", err)
+		os.Exit(0) // fail open: a resolver construction error shouldn't block the write
+	}
+
+	checker := checkerFor(newCheckers(res), filepath.Base(in.ToolInput.FilePath))
 	if checker == nil {
-		os.Exit(0) // not a manifest we know how to check
+		// manifest not known
+		os.Exit(0)
 	}
 
 	rawBefore, err := os.ReadFile(in.ToolInput.FilePath)
