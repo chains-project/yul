@@ -80,7 +80,8 @@ func runHook() {
 
 	checker := checkerFor(newCheckers(res), filepath.Base(in.ToolInput.FilePath))
 	if checker == nil {
-		os.Exit(0) // not a manifest we know how to check
+		// manifest not known
+		os.Exit(0)
 	}
 
 	rawBefore, err := os.ReadFile(in.ToolInput.FilePath)
