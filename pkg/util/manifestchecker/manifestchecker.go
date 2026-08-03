@@ -15,3 +15,13 @@ type ManifestChecker interface {
 	// mismatches for dependencies that were newly added/changed by it.
 	Check(before, after string) ([]mismatch.Mismatch, error)
 }
+
+// PathMatcher is implemented by a ManifestChecker whose manifest can't be
+// identified by a fixed basename alone, e.g. GitHub Actions workflow files,
+// which live under .github/workflows/ but can have any filename. The
+// dispatcher tries this before falling back to an exact Filename() match.
+type PathMatcher interface {
+	// MatchesPath reports whether path (as passed to the hook, typically
+	// absolute) is a manifest this checker owns.
+	MatchesPath(path string) bool
+}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
@@ -27,12 +28,25 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
+		githubactions.Checker{Resolver: res},
 	}
 }
 
-func checkerFor(checkers []manifestchecker.ManifestChecker, filename string) manifestchecker.ManifestChecker {
+// checkerFor finds the checker that owns path, the file as passed to the
+// hook (typically absolute). Most checkers claim a fixed basename; a
+// checker that instead implements manifestchecker.PathMatcher (e.g.
+// githubactions, whose workflow files have arbitrary basenames) is tried
+// first against the full path.
+func checkerFor(checkers []manifestchecker.ManifestChecker, path string) manifestchecker.ManifestChecker {
+	base := filepath.Base(path)
 	for _, c := range checkers {
-		if c.Filename() == filename {
+		if pm, ok := c.(manifestchecker.PathMatcher); ok {
+			if pm.MatchesPath(path) {
+				return c
+			}
+			continue
+		}
+		if c.Filename() == base {
 			return c
 		}
 	}
@@ -78,7 +92,7 @@ func runHook() {
 		os.Exit(0) // fail open: a resolver construction error shouldn't block the write
 	}
 
-	checker := checkerFor(newCheckers(res), filepath.Base(in.ToolInput.FilePath))
+	checker := checkerFor(newCheckers(res), in.ToolInput.FilePath)
 	if checker == nil {
 		// manifest not known
 		os.Exit(0)
