@@ -28,13 +28,13 @@ func TestCheckerMatchesPath(t *testing.T) {
 		path string
 		want bool
 	}{
-		{path: "/repo/.github/workflows/ci.yml", want: true},
-		{path: "/repo/.github/workflows/release.yaml", want: true},
 		{path: ".github/workflows/ci.yml", want: true},
-		{path: "workflow.yml", want: true}, // git-pkgs/manifests' own testing fallback
-		{path: "/repo/action.yml", want: false},
-		{path: "/repo/package.json", want: false},
-		{path: "/repo/.github/dependabot.yml", want: false},
+		{path: ".github/workflows/release.yaml", want: true},
+		{path: "/home/user/project/.github/workflows/ci.yml", want: true}, // hook file_paths are typically absolute
+		{path: "workflow.yml", want: true},                                // git-pkgs/manifests' own testing fallback
+		{path: "action.yml", want: false},
+		{path: "package.json", want: false},
+		{path: ".github/dependabot.yml", want: false},
 	}
 
 	c := Checker{}
@@ -55,7 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v3
-      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+      - uses: actions/setup-node@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.1.0
+      - uses: step-security/harden-runner@1234567890abcdef1234567890abcdef12345678 # not-a-version
+      - uses: some-org/bare-sha-action@deadbeefcafef00dfeedfacefeedfacefeedface
       - uses: my-org/local-branch-action@main
       - uses: ./local-action
       - uses: docker://alpine:3.19
@@ -72,6 +74,7 @@ jobs:
 	want := map[string]string{
 		"actions/checkout":      "v4",
 		"actions/cache/restore": "v3",
+		"actions/setup-node":    "v4.1.0", // SHA pin, version recovered from its trailing comment
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parseWorkflowPins() = %#v, want %d pins: %#v", got, len(want), want)
@@ -94,6 +97,46 @@ func TestParseWorkflowPinsEmptyAndInvalid(t *testing.T) {
 
 	if _, err := parseWorkflowPins("jobs: [this is not a map"); err == nil {
 		t.Fatal("parseWorkflowPins(invalid) returned nil error")
+	}
+}
+
+func TestParseShaComments(t *testing.T) {
+	content := "" +
+		"      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.2.1\n" +
+		"      - uses: actions/setup-node@1234567890abcdef1234567890abcdef12345678 # pinned, see SECURITY.md\n" +
+		"      - uses: actions/cache@deadbeefcafef00dfeedfacefeedfacefeedface\n" + // no comment at all
+		"      - uses: my-org/tagged-action@v2 # redundant comment on an already-tagged pin\n"
+
+	got := parseShaComments(content)
+
+	want := map[string]string{
+		"actions/checkout": "v4.2.1",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseShaComments() = %#v, want %#v", got, want)
+	}
+	for name, tag := range want {
+		if got[name] != tag {
+			t.Errorf("parseShaComments()[%q] = %q, want %q", name, got[name], tag)
+		}
+	}
+}
+
+func TestCheckWorkflowShaCommentPinBelowLatest(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4.2.1"}}
+
+	before := ""
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.0.0\n"
+
+	got, err := CheckWorkflow(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CheckWorkflow() = %#v, want 1 mismatch", got)
+	}
+	if got[0].Name != "actions/checkout" || got[0].Current != "v4.0.0" || got[0].Latest != "v4.2.1" {
+		t.Fatalf("CheckWorkflow() mismatch = %#v", got[0])
 	}
 }
 

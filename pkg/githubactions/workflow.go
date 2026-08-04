@@ -14,18 +14,35 @@
 // and is matched against the full path the hook was given.
 //
 // Tag vs. SHA pins: `uses:` refs are usually a mutable tag (@v4) or an
-// immutable full commit SHA (the security-recommended pin). There's no
-// git-pkgs/vers scheme for GitHub Actions, and even if there were,
-// "outdated" doesn't reduce to a semver comparison the way it does for
-// the other ecosystems - a commit SHA isn't a version at all. So this
-// checker doesn't reuse pins.ExactVersion/pins.Diff: it treats a ref as
-// comparable only when vers.Valid reports it looks like a version
-// (rejecting branch names and commit SHAs alike, since neither parses as
-// one), and falls back to vers.Compare's scheme-agnostic comparison
-// rather than inventing a "githubactions" vers scheme. SHA-pinned and
-// branch-pinned actions are left alone rather than flagged: verifying a
-// SHA is stale would require resolving it to a release, which is out of
-// scope here.
+// immutable full commit SHA (the security-recommended pin, and the one
+// GitHub's own hardening guidance and tools like StepSecurity's
+// pin-github-actions push toward). There's no git-pkgs/vers scheme for
+// GitHub Actions, and even if there were, "outdated" doesn't reduce to a
+// semver comparison the way it does for the other ecosystems - a commit
+// SHA isn't a version at all. So this checker doesn't reuse
+// pins.ExactVersion/pins.Diff: it treats a ref as comparable when it
+// matches vers.SemanticVersionRegex (an optional "v" then a leading
+// digit), which a branch name never does and a bare SHA never does
+// either. This is deliberately stricter than vers.Valid: that helper's
+// generic fallback parser treats almost any hyphenated string as a
+// "version" with an ignored non-numeric major (e.g. "not-a-version"
+// parses "successfully" as major 0), which would make free-text comments
+// and branch names like "release-4.0" look version-shaped when they
+// aren't.
+//
+// A SHA pin conventionally carries its human-readable version alongside
+// it as a trailing YAML comment, e.g.
+// `uses: actions/checkout@<40-hex-sha> # v4.2.1`, specifically so tools
+// (and reviewers) can tell what release the pin corresponds to without
+// resolving the commit. Since that comment isn't part of
+// git-pkgs/manifests' parsed dependency data, shaCommentPin does a second,
+// regex-based pass over the raw content to recover it, and that recovered
+// tag - not the SHA - is what gets compared and reported. This trusts the
+// comment to accurately describe the pinned commit, same as Dependabot
+// does; this checker has no independent way to confirm a SHA and its
+// comment actually match, or that the tag it names is itself an immutable
+// ref. A SHA with no such comment, or a branch pin, is left alone: there's
+// nothing to compare it against.
 //
 // Resolution coverage: whether git-pkgs/enrichment's ecosyste.ms-backed
 // resolver actually has LatestVersion data for pkg:githubactions purls
@@ -41,6 +58,7 @@ package githubactions
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/git-pkgs/manifests"
@@ -49,6 +67,36 @@ import (
 	"github.com/chains-project/yul/pkg/util/mismatch"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
+
+// shaCommentPin matches a `uses: owner/repo@<40-hex-sha> # <tag>` line -
+// see the package doc comment - capturing the action name and the tag
+// named in the comment.
+var shaCommentPin = regexp.MustCompile(`uses:\s*([^\s@]+)@[0-9a-fA-F]{40}\s*#\s*(\S+)`)
+
+// looksLikeVersion reports whether s is shaped like a version tag - an
+// optional "v"/"V" followed by a leading digit - rather than a branch
+// name, a free-text comment, or anything else with no comparable
+// version. See the package doc comment for why this is stricter than
+// vers.Valid.
+func looksLikeVersion(s string) bool {
+	return vers.SemanticVersionRegex.MatchString(s)
+}
+
+// parseShaComments scans content for the SHA-pin-with-version-comment
+// convention and returns, per action name, the version named in the
+// comment - but only when that comment text itself looks like a version;
+// an unrelated trailing comment (e.g. "# pinned for CVE-2024-1234")
+// shouldn't be mistaken for one.
+func parseShaComments(content string) map[string]string {
+	result := make(map[string]string)
+	for _, m := range shaCommentPin.FindAllStringSubmatch(content, -1) {
+		name, tag := m[1], m[2]
+		if looksLikeVersion(tag) {
+			result[name] = tag
+		}
+	}
+	return result
+}
 
 // workflowFilename is passed to manifests.Parse to select its
 // github-actions parser. The parser identifies workflows by directory
@@ -93,11 +141,13 @@ type actionPin struct {
 
 // parseWorkflowPins parses a workflow file's content and returns its
 // GitHub Action steps (`uses: owner/repo@ref`) that are pinned to
-// something that looks like a version. Docker container/service image
-// references and local actions (`uses: ./...`) are never produced by
-// git-pkgs/manifests' own dependency extraction for this purpose and are
-// skipped; branch names and commit SHAs don't parse as a version and are
-// skipped too, since there's nothing to compare them against.
+// something comparable: a ref that's version-shaped on its own (a tag),
+// or a commit SHA carrying the version-comment convention (see the
+// package doc comment and parseShaComments). Docker container/service
+// image references and local actions (`uses: ./...`) are never produced
+// by git-pkgs/manifests' own dependency extraction for this purpose and
+// are skipped; branch names and bare (uncommented) commit SHAs skip too,
+// since there's nothing to compare them against.
 func parseWorkflowPins(content string) (map[string]actionPin, error) {
 	result := make(map[string]actionPin)
 	if strings.TrimSpace(content) == "" {
@@ -108,15 +158,25 @@ func parseWorkflowPins(content string) (map[string]actionPin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing workflow: %w", err)
 	}
+	shaComments := parseShaComments(content)
 
 	for _, dep := range parsed.Dependencies {
 		if strings.HasPrefix(dep.Name, "docker://") {
 			continue // container image pins are a different ecosystem
 		}
-		if dep.Version == "" || !vers.Valid(dep.Version) {
+		if dep.Version == "" {
 			continue
 		}
-		result[dep.Name] = actionPin{name: dep.Name, version: dep.Version, purl: dep.PURL}
+
+		version := dep.Version
+		if !looksLikeVersion(version) {
+			tag, ok := shaComments[dep.Name]
+			if !ok {
+				continue
+			}
+			version = tag
+		}
+		result[dep.Name] = actionPin{name: dep.Name, version: version, purl: dep.PURL}
 	}
 	return result, nil
 }

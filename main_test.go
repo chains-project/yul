@@ -19,8 +19,8 @@ func TestCheckerFor(t *testing.T) {
 		{filename: "requirements.txt", want: pypi.RequirementsChecker{}},
 		{filename: "pyproject.toml", want: pypi.PyprojectChecker{}},
 		{filename: "package.json", want: npm.Checker{}},
-		{filename: "/repo/.github/workflows/ci.yml", want: githubactions.Checker{}},
-		{filename: "/repo/.github/workflows/release.yaml", want: githubactions.Checker{}},
+		{filename: ".github/workflows/ci.yml", want: githubactions.Checker{}},
+		{filename: "/home/user/project/.github/workflows/release.yaml", want: githubactions.Checker{}},
 	}
 
 	checkers := newCheckers(nil)
