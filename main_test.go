@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
@@ -18,6 +19,8 @@ func TestCheckerFor(t *testing.T) {
 		{filename: "requirements.txt", want: pypi.RequirementsChecker{}},
 		{filename: "pyproject.toml", want: pypi.PyprojectChecker{}},
 		{filename: "package.json", want: npm.Checker{}},
+		{filename: ".github/workflows/ci.yml", want: githubactions.Checker{}},
+		{filename: "/home/user/project/.github/workflows/release.yaml", want: githubactions.Checker{}},
 	}
 
 	checkers := newCheckers(nil)

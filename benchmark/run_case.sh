@@ -29,6 +29,7 @@ rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR/.claude"
 
 if [ "$TYPE" = "existing" ]; then
+  mkdir -p "$(dirname "$WORKDIR/$MANIFEST")"
   printf '%s' "$SEED" > "$WORKDIR/$MANIFEST"
 fi
 
@@ -59,6 +60,13 @@ fi
 
 cd "$WORKDIR"
 
+# Cap `git rev-parse --show-toplevel` at WORKDIR so Claude can't wander up
+# into the real yul checkout and find real files (e.g. .github/workflows/)
+# that make it think the task's already done.
+git init -q
+git config user.email "benchmark@example.com"
+git config user.name "benchmark"
+
 claude -p "$PROMPT" \
   --permission-mode bypassPermissions \
   --setting-sources project \
@@ -72,5 +80,9 @@ if [ -f "$MANIFEST" ]; then
 else
   echo "MANIFEST_NOT_WRITTEN" > final_manifest
 fi
+
+# Removed below so the run output doesn't end up with a
+# nested-repo gitlink when committed.
+rm -rf .git
 
 echo "done: $CASE_ID [$CONDITION] -> $WORKDIR"
