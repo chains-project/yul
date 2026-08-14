@@ -53,6 +53,10 @@ func checkerFor(checkers []manifestchecker.ManifestChecker, path string) manifes
 	return nil
 }
 
+// version is set at build time via -ldflags "-X main.version=..." (see
+// .goreleaser.yml); it stays "dev" for `go build`/`go run`.
+var version = "dev"
+
 // hookInput is the subset of Claude Code's PreToolUse hook payload we need.
 type hookInput struct {
 	ToolName  string `json:"tool_name"`
@@ -139,5 +143,9 @@ func runHook() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println(version)
+		return
+	}
 	runHook()
 }
