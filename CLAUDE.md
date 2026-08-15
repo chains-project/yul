@@ -19,7 +19,16 @@ go test ./pkg/npm/ -run TestX  # single test
 
 CI (`.github/workflows/test.yml`) just runs `go build ./...` and `go test ./... -v` on push/PR to `main`.
 
-Releases go through `.goreleaser.yml` (triggered by `.github/workflows/release.yml`), building linux/darwin amd64/arm64 binaries with `-X main.version={{.Tag}}`. `install.sh` downloads the right release binary, verifies its checksum, and installs to `~/.local/bin`.
+Releases are cut by manually dispatching `.github/workflows/release.yml` (Actions → Release → Run workflow) with a `patch` or `minor` bump — never by pushing a tag. The workflow bumps `version` in `.claude-plugin/plugin.json`, commits `Release vX.Y.Z` to `main`, tags that commit, pushes both, then runs goreleaser (`.goreleaser.yml`, linux/darwin amd64/arm64 binaries with `-X main.version={{.Tag}}`). Major bumps are deliberately not offered (a v2 module path would break `go install github.com/chains-project/yul@latest`); the workflow refuses to produce a major version >1. `install.sh` downloads the right release binary, verifies its checksum, and installs to `~/.local/bin` by default.
+
+## Claude Code plugin
+
+The repo is packaged as a Claude Code plugin, distributed through the org marketplace hosted in [chains-project/chains-hooks](https://github.com/chains-project/chains-hooks) (`/plugin marketplace add chains-project/chains-hooks`, then `/plugin install yul@chains-project`):
+
+- `.claude-plugin/plugin.json` — manifest; its `version` pins which release binary the plugin downloads, and bumping it is the marketplace's update signal (only the release workflow writes it).
+- `hooks/hooks.json` — `SessionStart` runs `scripts/ensure-yul.sh` (downloads the pinned release binary into `~/.cache/yul/v<version>/` via `install.sh`, always exits 0); `PreToolUse` on `Write|Edit` runs `scripts/hook.sh` (execs the cached binary, exits 0 if it's missing — fail open).
+
+Test the plugin locally with `claude --plugin-dir .` and `claude plugin validate .`.
 
 There is no linter config in this repo beyond `go vet`/`gofmt` defaults.
 
