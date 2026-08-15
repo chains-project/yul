@@ -37,4 +37,4 @@ There is no linter config in this repo beyond `go vet`/`gofmt` defaults.
 
 ## Using yul on this repo itself
 
-`.claude/settings.json` wires `yul` up as this repo's own `PreToolUse` hook for `Write`, pointed at the locally built binary at the repo root (`./yul`) — so writing a manifest in this repo while developing exercises the hook against itself. Rebuild that binary (`go build -o yul .`) after changing checker/resolver code for the hook to pick up the change.
+`.claude/settings.json` wires `yul` up as this repo's own `PreToolUse` hook for `Write`, pointed at the locally built binary at the repo root via `$CLAUDE_PROJECT_DIR/yul` (Claude Code sets `$CLAUDE_PROJECT_DIR` to the project root when running hooks, so the shared config works on any checkout) — so writing a manifest in this repo while developing exercises the hook against itself. Build the binary once with `go build -o yul .`; until it exists the hook is a silent no-op. Rebuild it after changing checker/resolver code for the hook to pick up the change. Personal hook/settings overrides go in `.claude/settings.local.json` (gitignored).
