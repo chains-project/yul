@@ -9,9 +9,33 @@ Supported manifests:
 - `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
 - `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
 
-## Install
+## Install as a Claude Code plugin (recommended)
 
-If you have Go installed, this is the preferred way to install `yul`:
+Inside Claude Code, run:
+
+```
+/plugin marketplace add chains-project/yul
+/plugin install yul@chains-project
+```
+
+The install dialog lets you pick a scope (all your projects, or just the current one). That's it — the plugin registers the `PreToolUse` hook and, on session start, downloads the checksum-verified `yul` release binary matching the plugin version into `~/.cache/yul/`. Until the binary is present (first session, offline), the hook fails open. Plugin updates and binary updates are one event: the pinned version lives in the plugin manifest.
+
+To enable it for everyone working in a repo, check this into the repo's `.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "chains-project": {
+      "source": { "source": "github", "repo": "chains-project/yul" }
+    }
+  },
+  "enabledPlugins": { "yul@chains-project": true }
+}
+```
+
+## Manual install
+
+If you have Go installed, this is the preferred way to install the `yul` binary yourself:
 
 ```sh
 go install github.com/chains-project/yul@latest
@@ -27,9 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/chains-project/yul/main/install.sh 
 
 This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`).
 
-## Usage
+## Manual usage
 
-Add to `.claude/settings.json`:
+If you installed the binary manually instead of using the plugin, add to `.claude/settings.json`:
 
 ```json
 {

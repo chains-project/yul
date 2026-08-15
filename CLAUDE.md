@@ -21,6 +21,16 @@ CI (`.github/workflows/test.yml`) just runs `go build ./...` and `go test ./... 
 
 Releases go through `.goreleaser.yml` (triggered by `.github/workflows/release.yml`), building linux/darwin amd64/arm64 binaries with `-X main.version={{.Tag}}`. `install.sh` downloads the right release binary, verifies its checksum, and installs to `~/.local/bin`.
 
+## Claude Code plugin
+
+The repo doubles as a Claude Code plugin and its own marketplace (`/plugin marketplace add chains-project/yul`, then `/plugin install yul@chains-project`):
+
+- `.claude-plugin/plugin.json` — manifest; its `version` pins which release binary the plugin downloads, and bumping it is the marketplace's update signal (only the release workflow writes it).
+- `.claude-plugin/marketplace.json` — makes the repo directly installable (plugin source `./`).
+- `hooks/hooks.json` — `SessionStart` runs `scripts/ensure-yul.sh` (downloads the pinned release binary into `~/.cache/yul/v<version>/` via `install.sh`, always exits 0); `PreToolUse` on `Write|Edit` runs `scripts/hook.sh` (execs the cached binary, exits 0 if it's missing — fail open).
+
+Test the plugin locally with `claude --plugin-dir .` and `claude plugin validate .`.
+
 There is no linter config in this repo beyond `go vet`/`gofmt` defaults.
 
 ## Benchmark
