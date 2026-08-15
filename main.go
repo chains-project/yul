@@ -19,12 +19,10 @@ import (
 // newCheckers builds the registry of manifest checkers the hook dispatches
 // to, keyed off which manifest filename each one owns. Add an entry here as
 // each ecosystem's checker is implemented. res is shared across the
-// checkers that resolve latest versions through git-pkgs/enrichment; maven
-// keeps its own dedicated resolver until it moves onto the shared modules
-// too (see chains-project/yul#2).
+// checkers that resolve latest versions through git-pkgs/enrichment.
 func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 	return []manifestchecker.ManifestChecker{
-		maven.Checker{},
+		maven.Checker{Resolver: res},
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
