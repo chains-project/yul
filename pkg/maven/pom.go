@@ -79,6 +79,9 @@ func mavenPinnedVersion(requirement string) (string, bool) {
 // not match the latest release known to res. Untouched and non-concrete
 // declarations are ignored.
 func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+	if res == nil {
+		return nil, fmt.Errorf("maven: resolver is nil")
+	}
 	beforePins, err := parsePOMPins(before)
 	if err != nil {
 		return nil, err
