@@ -14,7 +14,7 @@ Supported manifests:
 Inside Claude Code, run:
 
 ```
-/plugin marketplace add chains-project/yul
+/plugin marketplace add chains-project/chains-hooks
 /plugin install yul@chains-project
 ```
 
@@ -26,7 +26,7 @@ To enable it for everyone working in a repo, check this into the repo's `.claude
 {
   "extraKnownMarketplaces": {
     "chains-project": {
-      "source": { "source": "github", "repo": "chains-project/yul" }
+      "source": { "source": "github", "repo": "chains-project/chains-hooks" }
     }
   },
   "enabledPlugins": { "yul@chains-project": true }

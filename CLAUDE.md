@@ -23,10 +23,9 @@ Releases are cut by manually dispatching `.github/workflows/release.yml` (Action
 
 ## Claude Code plugin
 
-The repo doubles as a Claude Code plugin and its own marketplace (`/plugin marketplace add chains-project/yul`, then `/plugin install yul@chains-project`):
+The repo is packaged as a Claude Code plugin, distributed through the org marketplace hosted in [chains-project/chains-hooks](https://github.com/chains-project/chains-hooks) (`/plugin marketplace add chains-project/chains-hooks`, then `/plugin install yul@chains-project`):
 
 - `.claude-plugin/plugin.json` — manifest; its `version` pins which release binary the plugin downloads, and bumping it is the marketplace's update signal (only the release workflow writes it).
-- `.claude-plugin/marketplace.json` — makes the repo directly installable (plugin source `./`).
 - `hooks/hooks.json` — `SessionStart` runs `scripts/ensure-yul.sh` (downloads the pinned release binary into `~/.cache/yul/v<version>/` via `install.sh`, always exits 0); `PreToolUse` on `Write|Edit` runs `scripts/hook.sh` (execs the cached binary, exits 0 if it's missing — fail open).
 
 Test the plugin locally with `claude --plugin-dir .` and `claude plugin validate .`.
