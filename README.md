@@ -11,13 +11,21 @@ Supported manifests:
 
 ## Install
 
+If you have Go installed, this is the preferred way to install `yul`:
+
+```sh
+go install github.com/chains-project/yul@latest
+```
+
+This places the binary at `$(go env GOPATH)/bin`. Unlike a `curl | sh` script, `go install` builds from the module proxy over a verified, checksummed (`GONOSUMCHECK`/`go.sum`-backed) supply chain, so you're not piping an arbitrary internet script into your shell.
+
+If you don't have Go installed:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/chains-project/yul/main/install.sh | sh
 ```
 
-This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`). No Go toolchain required.
-
-If you have Go installed, `go install github.com/chains-project/yul@latest` works too and places the binary at `$(go env GOPATH)/bin`.
+This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`).
 
 ## Usage
 
