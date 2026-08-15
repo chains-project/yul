@@ -21,9 +21,8 @@ Inside Claude Code, run:
 The install dialog lets you pick a scope (all your projects, or just the current one). That's it — nothing is written to your `settings.json` beyond enabling the plugin; the hook wiring ships inside the plugin itself (`hooks/hooks.json`), which Claude Code discovers when it clones this repo and registers on every session:
 
 - **On session start**, `scripts/ensure-yul.sh` downloads the checksum-verified release binary pinned by `.claude-plugin/plugin.json` into `~/.cache/yul/v<version>/`. Once the binary is there, this is an instant no-op; on any failure it exits 0 and never blocks the session.
-- **On every `Write`/`Edit`**, `scripts/hook.sh` execs that cached binary, so yul's exit code (2 = block, with the correct versions on stderr) reaches Claude Code directly. Until the binary exists (first session still downloading, offline machine), the hook fails open — same stance yul takes on resolver errors.
 
-Plugin updates and binary updates are one event: the release workflow bumps `version` in the plugin manifest, which is both the marketplace's update signal and the binary pin (and it changes the cache path, so a stale binary can never be mistaken for the new one).
+Plugin updates and binary updates are automated. Whenever we update `yul`, claude will get the updated release.
 
 To enable it for everyone working in a repo, check this into the repo's `.claude/settings.json`:
 
