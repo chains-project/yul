@@ -1,17 +1,29 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        type: choice
+        required: true
+        options:
+          - patch
+          - minor
 
 permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
+      - name: Refuse to release from a non-main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "releases must be cut from main, got ${GITHUB_REF}" >&2
+          exit 1
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -21,6 +33,39 @@ jobs:
           go-version-file: go.mod
 
       - run: go test ./...
+
+      - name: Bump plugin version, commit, and tag
+        id: bump
+        run: |
+          set -eu
+          current="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' .claude-plugin/plugin.json | head -n1)"
+          [ -n "$current" ] || { echo "no version found in .claude-plugin/plugin.json" >&2; exit 1; }
+
+          major="${current%%.*}"
+          rest="${current#*.}"
+          minor="${rest%%.*}"
+          patch="${rest#*.}"
+
+          case "${{ inputs.bump }}" in
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "unknown bump type: ${{ inputs.bump }}" >&2; exit 1 ;;
+          esac
+
+          [ "$major" -le 1 ] || { echo "major version >1 would break the go install path (needs /v${major} suffix); refusing" >&2; exit 1; }
+
+          next="${major}.${minor}.${patch}"
+          echo "bumping ${current} -> ${next}"
+
+          sed -i "s/\"version\": *\"${current}\"/\"version\": \"${next}\"/" .claude-plugin/plugin.json
+          grep -q "\"version\": \"${next}\"" .claude-plugin/plugin.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/plugin.json
+          git commit -m "Release v${next}"
+          git tag "v${next}"
+          git push origin main "v${next}"
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
