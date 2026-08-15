@@ -42,11 +42,11 @@ esac
 
 if [ -z "$version" ]; then
 	version="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" |
-		grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+		grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
 	[ -n "$version" ] || die "could not determine latest release; set YUL_VERSION to install a specific version"
 fi
 
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/yul.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
 archive="yul_${os}_${arch}.tar.gz"
