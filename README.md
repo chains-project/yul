@@ -9,6 +9,24 @@ Supported manifests:
 - `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
 - `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
 
+## Install
+
+If you have Go installed, this is the preferred way to install `yul`:
+
+```sh
+go install github.com/chains-project/yul@latest
+```
+
+This places the binary at `$(go env GOPATH)/bin`. Unlike a `curl | sh` script, `go install` builds from the module proxy over a verified, checksummed (`GONOSUMCHECK`/`go.sum`-backed) supply chain, so you're not piping an arbitrary internet script into your shell.
+
+If you don't have Go installed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/chains-project/yul/main/install.sh | sh
+```
+
+This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`).
+
 ## Usage
 
 Add to `.claude/settings.json`:
@@ -32,10 +50,8 @@ Add to `.claude/settings.json`:
 }
 ```
 
-Requires Go to be installed. No other setup needed.
-
-Prefer installing the binary (`go install github.com/chains-project/yul@latest`) and pointing `command` at its absolute path instead: `go run` always exits 1 on program failure regardless of the program's actual exit code ([golang/go#17813](https://github.com/golang/go/issues/17813)), so a blocking exit 2 from this hook is flattened to exit 1, where `stderr` reports `exit status 2` but `exitCode` is `1`.
-Claude Code treats exit 1 as a non-blocking error, so the write goes through instead of being blocked. `go install` places the binary at `$GOPATH/bin` (find it with `go env GOPATH`).
+Point `command` at the installed binary's absolute path (`~/.local/bin/yul` if you used the installer above, or `$(go env GOPATH)/bin/yul` if you used `go install`) — never at `go run`: `go run` always exits 1 on program failure regardless of the program's actual exit code ([golang/go#17813](https://github.com/golang/go/issues/17813)), so a blocking exit 2 from this hook is flattened to exit 1, where `stderr` reports `exit status 2` but `exitCode` is `1`.
+Claude Code treats exit 1 as a non-blocking error, so the write goes through instead of being blocked.
 
 With `go run`, you can see below the exitCode is 1, but stderr reports exit status 2, so Claude Code treats it as a non-blocking error and lets the write go through instead of blocking it.
 ```json
