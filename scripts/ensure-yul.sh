@@ -10,8 +10,18 @@ root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
 version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n1)"
 [ -n "$version" ] || exit 0
 
-cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/yul/v${version}"
-[ -x "$cache_dir/yul" ] && exit 0
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/yul"
+cache_dir="$cache_root/v${version}"
 
-YUL_VERSION="v${version}" YUL_INSTALL_DIR="$cache_dir" sh "$root/install.sh" >/dev/null 2>&1 || true
+if [ ! -x "$cache_dir/yul" ]; then
+	YUL_VERSION="v${version}" YUL_INSTALL_DIR="$cache_dir" sh "$root/install.sh" >/dev/null 2>&1 || true
+fi
+
+# Once the pinned binary is in place, prune caches left behind by other
+# versions (each release adds ~8 MB and nothing else deletes them).
+if [ -x "$cache_dir/yul" ]; then
+	for dir in "$cache_root"/v*/; do
+		[ -d "$dir" ] && [ "$dir" != "$cache_dir/" ] && rm -rf "$dir"
+	done
+fi
 exit 0
