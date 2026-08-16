@@ -45,7 +45,7 @@ latest_tag="$(curl -fsSL --max-time 5 "https://api.github.com/repos/chains-proje
 	grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')"
 
 if [ -n "$latest_tag" ] && version_gt "$latest_tag" "$version"; then
-	notice="yul: a newer release (v${latest_tag}) is available; this session is running the cached v${version}. To pick it up now: \`claude plugin update yul@chains-project\`, then /reload-plugins (or restart). To stop seeing this: add \"autoUpdate\": true to the chains-project entry under extraKnownMarketplaces in ~/.claude/settings.json, so Claude Code updates it in the background automatically (this is off by default for third-party marketplaces)."
+	notice="yul: a newer release (v${latest_tag}) is available; this session is running the cached v${version}. To pick it up now: \`claude plugin update yul@chains-project\`, then /reload-plugins (or restart). To stop seeing this: add \"autoUpdate\": true to the chains-project entry under extraKnownMarketplaces, wherever it's registered (~/.claude/settings.json for user scope, .claude/settings.json for project scope, or .claude/settings.local.json for local scope), so Claude Code updates it in the background automatically (this is off by default for third-party marketplaces)."
 	escaped="$(printf '%s' "$notice" | sed 's/\\/\\\\/g; s/"/\\"/g')"
 	printf '{"systemMessage":"%s"}\n' "$escaped"
 fi
