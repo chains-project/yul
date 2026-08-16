@@ -2,16 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
+	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
@@ -140,10 +143,157 @@ func runHook() {
 	os.Exit(2)
 }
 
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(version)
+// scanCacheTTL is how long a project scan's cached findings are reused
+// before session-scan.sh triggers a fresh one. A yul upgrade always forces
+// a rescan regardless of TTL (see scan.Cache.Fresh), since a newer build
+// may parse or resolve differently.
+const scanCacheTTL = time.Hour * 24 * 7
+
+// sessionStartInput is the subset of Claude Code's SessionStart hook
+// payload we need, read from stdin when --project-dir isn't passed.
+type sessionStartInput struct {
+	CWD string `json:"cwd"`
+}
+
+// runScan is a SessionStart hook for the "scan" subcommand. It walks the
+// project for every exactly-pinned dependency across all known manifest
+// kinds (not just ones a Write/Edit just touched), reusing a cached result
+// up to scanCacheTTL old, and emits any findings as additionalContext so
+// Claude can ask the user whether to update them. It never blocks session
+// startup: any failure here just means no context gets added.
+func runScan(args []string) {
+	fset := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fset.SetOutput(io.Discard)
+	projectDir := fset.String("project-dir", "", "project directory to scan (default: SessionStart hook's cwd, or $PWD)")
+	if err := fset.Parse(args); err != nil {
+		os.Exit(0)
+	}
+
+	dir := *projectDir
+	if dir == "" {
+		if raw, err := io.ReadAll(os.Stdin); err == nil {
+			var in sessionStartInput
+			if json.Unmarshal(raw, &in) == nil {
+				dir = in.CWD
+			}
+		}
+	}
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			os.Exit(0)
+		}
+	}
+
+	cacheHome := os.Getenv("XDG_CACHE_HOME")
+	if cacheHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			os.Exit(0)
+		}
+		cacheHome = filepath.Join(home, ".cache")
+	}
+
+	cachePath, err := scan.CachePath(cacheHome, dir)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	// Matching checkers (Filename/MatchesPath) needs no resolver, so this
+	// hash is network-free and cheap enough to compute on every session
+	// start, unlike a full rescan.
+	matchers := newCheckers(nil)
+	hash, err := scan.Hash(dir, matchers)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	now := time.Now()
+	cached, hadCache := scan.LoadCache(cachePath)
+	if hadCache && cached.Fresh(version, scanCacheTTL, now, hash) {
+		emitScanContext(scan.Unnotified(cached.Findings, cached.Notified), cached.ScannedAt)
 		return
+	}
+
+	res, err := resolver.NewEnrichmentResolver()
+	if err != nil {
+		os.Exit(0) // fail open: don't add context, don't block startup
+	}
+
+	findings, err := scan.Dir(dir, newCheckers(res))
+	if err != nil {
+		os.Exit(0)
+	}
+
+	// Diff against what the *previous* cache already surfaced (even though
+	// it's now stale) before overwriting it, so re-mentioning something
+	// unrelated changing in the manifest doesn't also re-nag about a
+	// finding the user already saw and chose to ignore.
+	toNotify := scan.Unnotified(findings, cached.Notified)
+
+	// Cache the result even if it's empty, so a clean project doesn't get
+	// re-resolved every session either. Notified is set to the full
+	// findings list, not just toNotify: everything computed this scan
+	// counts as "surfaced" now, whether or not the user acts on it.
+	_ = scan.SaveCache(cachePath, scan.Cache{
+		YulVersion:    version,
+		ManifestsHash: hash,
+		ScannedAt:     now,
+		ProjectDir:    dir,
+		Findings:      findings,
+		Notified:      findings,
+	})
+
+	emitScanContext(toNotify, now)
+}
+
+// emitScanContext prints the SessionStart hook JSON that adds findings to
+// Claude's context, or nothing if there's nothing to report.
+func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
+	if len(findings) == 0 {
+		os.Exit(0)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
+		scannedAt.Format("2006-01-02"), len(findings))
+	for _, f := range findings {
+		name := f.Name
+		if f.Namespace != "" {
+			name = f.Namespace + ":" + f.Name
+		}
+		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, f.Latest)
+	}
+	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
+
+	out := struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}{}
+	out.HookSpecificOutput.HookEventName = "SessionStart"
+	out.HookSpecificOutput.AdditionalContext = b.String()
+
+	raw, err := json.Marshal(out)
+	if err != nil {
+		os.Exit(0)
+	}
+	os.Stdout.Write(raw)
+	os.Exit(0)
+}
+
+func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version":
+			fmt.Println(version)
+			return
+		case "scan":
+			runScan(os.Args[2:])
+			return
+		}
 	}
 	runHook()
 }
