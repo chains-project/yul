@@ -18,6 +18,11 @@ type Cache struct {
 	ScannedAt     time.Time `json:"scanned_at"`
 	ProjectDir    string    `json:"project_dir"`
 	Findings      []Finding `json:"findings"`
+	// Notified is the set of findings already surfaced to the user as of
+	// this scan, so a later scan (fresh-cache reuse or a full rescan
+	// triggered by an unrelated manifest edit) only asks about ones that
+	// are new or have drifted since, instead of repeating itself forever.
+	Notified []Finding `json:"notified"`
 }
 
 // Fresh reports whether the cache can be reused as-is: it was written by

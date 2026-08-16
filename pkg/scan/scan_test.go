@@ -10,6 +10,7 @@ import (
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
 )
 
 type stubResolver map[string]string
@@ -88,6 +89,32 @@ func TestDirSkipsUpToDatePins(t *testing.T) {
 	}
 	if len(findings) != 0 {
 		t.Fatalf("got %d findings, want 0: %+v", len(findings), findings)
+	}
+}
+
+func TestUnnotified(t *testing.T) {
+	okhttp := Finding{File: "pom.xml", Mismatch: mismatch.Mismatch{Namespace: "com.squareup.okhttp3", Name: "okhttp", Current: "4.9.0", Latest: "4.12.0"}}
+	leftPad := Finding{File: "package.json", Mismatch: mismatch.Mismatch{Name: "left-pad", Current: "1.0.0", Latest: "1.3.0"}}
+	okhttpNewerRelease := Finding{File: "pom.xml", Mismatch: mismatch.Mismatch{Namespace: "com.squareup.okhttp3", Name: "okhttp", Current: "4.9.0", Latest: "5.0.0"}}
+
+	tests := []struct {
+		name      string
+		current   []Finding
+		notified  []Finding
+		wantCount int
+	}{
+		{"nothing notified yet: everything is new", []Finding{okhttp, leftPad}, nil, 2},
+		{"already notified: nothing new", []Finding{okhttp}, []Finding{okhttp}, 0},
+		{"one already notified, one new", []Finding{okhttp, leftPad}, []Finding{okhttp}, 1},
+		{"same package, latest drifted further: counts as new", []Finding{okhttpNewerRelease}, []Finding{okhttp}, 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := Unnotified(test.current, test.notified)
+			if len(got) != test.wantCount {
+				t.Fatalf("Unnotified() = %+v, want %d finding(s)", got, test.wantCount)
+			}
+		})
 	}
 }
 

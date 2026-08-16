@@ -23,6 +23,31 @@ type Finding struct {
 	mismatch.Mismatch
 }
 
+// key identifies a Finding for notification purposes: same file, same
+// package, same pinned version, same latest release. If any of those
+// changes — the pin moved, or upstream cut a newer release — it's treated
+// as a distinct finding worth surfacing again.
+func (f Finding) key() string {
+	return f.File + "\x00" + f.Namespace + "\x00" + f.Name + "\x00" + f.Current + "\x00" + f.Latest
+}
+
+// Unnotified returns the findings in current that aren't in notified, so a
+// scan doesn't ask about the same outdated pin every session — only about
+// ones that are new, or have drifted further since they were last surfaced.
+func Unnotified(current, notified []Finding) []Finding {
+	seen := make(map[string]bool, len(notified))
+	for _, f := range notified {
+		seen[f.key()] = true
+	}
+	var out []Finding
+	for _, f := range current {
+		if !seen[f.key()] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // skipDirs are directories never worth descending into: they hold
 // dependencies' own manifests (vendored copies, installed packages), not
 // the project's.

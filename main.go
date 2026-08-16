@@ -210,8 +210,9 @@ func runScan(args []string) {
 	}
 
 	now := time.Now()
-	if cached, ok := scan.LoadCache(cachePath); ok && cached.Fresh(version, scanCacheTTL, now, hash) {
-		emitScanContext(cached.Findings, cached.ScannedAt)
+	cached, hadCache := scan.LoadCache(cachePath)
+	if hadCache && cached.Fresh(version, scanCacheTTL, now, hash) {
+		emitScanContext(scan.Unnotified(cached.Findings, cached.Notified), cached.ScannedAt)
 		return
 	}
 
@@ -225,17 +226,26 @@ func runScan(args []string) {
 		os.Exit(0)
 	}
 
+	// Diff against what the *previous* cache already surfaced (even though
+	// it's now stale) before overwriting it, so re-mentioning something
+	// unrelated changing in the manifest doesn't also re-nag about a
+	// finding the user already saw and chose to ignore.
+	toNotify := scan.Unnotified(findings, cached.Notified)
+
 	// Cache the result even if it's empty, so a clean project doesn't get
-	// re-resolved every session either.
+	// re-resolved every session either. Notified is set to the full
+	// findings list, not just toNotify: everything computed this scan
+	// counts as "surfaced" now, whether or not the user acts on it.
 	_ = scan.SaveCache(cachePath, scan.Cache{
 		YulVersion:    version,
 		ManifestsHash: hash,
 		ScannedAt:     now,
 		ProjectDir:    dir,
 		Findings:      findings,
+		Notified:      findings,
 	})
 
-	emitScanContext(findings, now)
+	emitScanContext(toNotify, now)
 }
 
 // emitScanContext prints the SessionStart hook JSON that adds findings to
