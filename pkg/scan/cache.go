@@ -13,17 +13,21 @@ import (
 // SessionStart hooks in the same project don't re-resolve every pinned
 // dependency against its registry on every session.
 type Cache struct {
-	YulVersion string    `json:"yul_version"`
-	ScannedAt  time.Time `json:"scanned_at"`
-	ProjectDir string    `json:"project_dir"`
-	Findings   []Finding `json:"findings"`
+	YulVersion    string    `json:"yul_version"`
+	ManifestsHash string    `json:"manifests_hash"`
+	ScannedAt     time.Time `json:"scanned_at"`
+	ProjectDir    string    `json:"project_dir"`
+	Findings      []Finding `json:"findings"`
 }
 
 // Fresh reports whether the cache can be reused as-is: it was written by
 // the same yul build (an upgrade always forces a rescan, since a newer yul
-// may resolve or parse differently) and within ttl of now.
-func (c Cache) Fresh(yulVersion string, ttl time.Duration, now time.Time) bool {
-	return c.YulVersion == yulVersion && now.Sub(c.ScannedAt) < ttl
+// may resolve or parse differently), within ttl of now, and manifestsHash
+// (from Hash, computed cheaply with no network calls) still matches — a
+// manifest edited since the cache was written, by hand or otherwise, always
+// forces a rescan regardless of ttl.
+func (c Cache) Fresh(yulVersion string, ttl time.Duration, now time.Time, manifestsHash string) bool {
+	return c.YulVersion == yulVersion && c.ManifestsHash == manifestsHash && now.Sub(c.ScannedAt) < ttl
 }
 
 // CachePath returns where the scan cache for projectDir lives, namespaced

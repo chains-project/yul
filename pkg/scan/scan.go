@@ -6,6 +6,8 @@
 package scan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,13 +37,18 @@ var skipDirs = map[string]bool{
 	"__pycache__":  true,
 }
 
-// Dir walks root and reports a Finding for every exactly-pinned dependency,
-// across every manifest kind checkers know about, that's pinned older than
-// the latest release. Files a checker can't parse or that a resolver can't
-// look up are skipped rather than failing the whole scan, since one bad
-// manifest shouldn't hide findings from the rest of the project.
-func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, error) {
-	var findings []Finding
+// manifest is a matched manifest file found while walking a project.
+type manifest struct {
+	rel     string
+	checker manifestchecker.ManifestChecker
+	content []byte
+}
+
+// walk finds every file under root that some checker owns, skipping
+// dependency/build directories that hold other projects' manifests, not
+// this project's.
+func walk(root string, checkers []manifestchecker.ManifestChecker) ([]manifest, error) {
+	var found []manifest
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -70,17 +77,37 @@ func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, er
 			rel = path
 		}
 
-		mismatches, err := checker.Check("", string(content))
-		if err != nil {
-			return nil // resolver/parse error on this file: fail open, keep scanning
-		}
-		for _, m := range mismatches {
-			findings = append(findings, Finding{File: rel, Mismatch: m})
-		}
+		found = append(found, manifest{rel: rel, checker: checker, content: content})
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	sort.Slice(found, func(i, j int) bool { return found[i].rel < found[j].rel })
+	return found, nil
+}
+
+// Dir walks root and reports a Finding for every exactly-pinned dependency,
+// across every manifest kind checkers know about, that's pinned older than
+// the latest release. Files a checker can't parse or that a resolver can't
+// look up are skipped rather than failing the whole scan, since one bad
+// manifest shouldn't hide findings from the rest of the project.
+func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, error) {
+	manifests, err := walk(root, checkers)
+	if err != nil {
+		return nil, err
+	}
+
+	var findings []Finding
+	for _, m := range manifests {
+		mismatches, err := m.checker.Check("", string(m.content))
+		if err != nil {
+			continue // resolver/parse error on this file: fail open, keep scanning
+		}
+		for _, mm := range mismatches {
+			findings = append(findings, Finding{File: m.rel, Mismatch: mm})
+		}
 	}
 
 	sort.Slice(findings, func(i, j int) bool {
@@ -90,6 +117,27 @@ func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, er
 		return findings[i].Name < findings[j].Name
 	})
 	return findings, nil
+}
+
+// Hash fingerprints the content of every manifest file checkers would look
+// at under root, with no network calls. A cached scan is only safe to reuse
+// if this matches the hash from when the cache was written — otherwise a
+// manifest edited outside a Write/Edit (e.g. by hand, or by git) would keep
+// reporting stale findings until the cache's TTL happens to expire.
+func Hash(root string, checkers []manifestchecker.ManifestChecker) (string, error) {
+	manifests, err := walk(root, checkers)
+	if err != nil {
+		return "", err
+	}
+
+	h := sha256.New()
+	for _, m := range manifests {
+		h.Write([]byte(m.rel))
+		h.Write([]byte{0})
+		h.Write(m.content)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // checkerFor mirrors main.checkerFor: most checkers claim a fixed basename,

@@ -200,8 +200,17 @@ func runScan(args []string) {
 		os.Exit(0)
 	}
 
+	// Matching checkers (Filename/MatchesPath) needs no resolver, so this
+	// hash is network-free and cheap enough to compute on every session
+	// start, unlike a full rescan.
+	matchers := newCheckers(nil)
+	hash, err := scan.Hash(dir, matchers)
+	if err != nil {
+		os.Exit(0)
+	}
+
 	now := time.Now()
-	if cached, ok := scan.LoadCache(cachePath); ok && cached.Fresh(version, scanCacheTTL, now) {
+	if cached, ok := scan.LoadCache(cachePath); ok && cached.Fresh(version, scanCacheTTL, now, hash) {
 		emitScanContext(cached.Findings, cached.ScannedAt)
 		return
 	}
@@ -219,10 +228,11 @@ func runScan(args []string) {
 	// Cache the result even if it's empty, so a clean project doesn't get
 	// re-resolved every session either.
 	_ = scan.SaveCache(cachePath, scan.Cache{
-		YulVersion: version,
-		ScannedAt:  now,
-		ProjectDir: dir,
-		Findings:   findings,
+		YulVersion:    version,
+		ManifestsHash: hash,
+		ScannedAt:     now,
+		ProjectDir:    dir,
+		Findings:      findings,
 	})
 
 	emitScanContext(findings, now)

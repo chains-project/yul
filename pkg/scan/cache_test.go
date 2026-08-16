@@ -13,15 +13,17 @@ func TestCacheFresh(t *testing.T) {
 		cache   Cache
 		version string
 		ttl     time.Duration
+		hash    string
 		want    bool
 	}{
-		{"fresh", Cache{YulVersion: "1.0.0", ScannedAt: now.Add(-time.Hour)}, "1.0.0", 24 * time.Hour, true},
-		{"expired", Cache{YulVersion: "1.0.0", ScannedAt: now.Add(-48 * time.Hour)}, "1.0.0", 24 * time.Hour, false},
-		{"version bump forces rescan", Cache{YulVersion: "1.0.0", ScannedAt: now}, "1.0.1", 24 * time.Hour, false},
+		{"fresh", Cache{YulVersion: "1.0.0", ManifestsHash: "h1", ScannedAt: now.Add(-time.Hour)}, "1.0.0", 24 * time.Hour, "h1", true},
+		{"expired", Cache{YulVersion: "1.0.0", ManifestsHash: "h1", ScannedAt: now.Add(-48 * time.Hour)}, "1.0.0", 24 * time.Hour, "h1", false},
+		{"version bump forces rescan", Cache{YulVersion: "1.0.0", ManifestsHash: "h1", ScannedAt: now}, "1.0.1", 24 * time.Hour, "h1", false},
+		{"manifest changed forces rescan", Cache{YulVersion: "1.0.0", ManifestsHash: "h1", ScannedAt: now}, "1.0.0", 24 * time.Hour, "h2", false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := test.cache.Fresh(test.version, test.ttl, now); got != test.want {
+			if got := test.cache.Fresh(test.version, test.ttl, now, test.hash); got != test.want {
 				t.Errorf("Fresh() = %v, want %v", got, test.want)
 			}
 		})

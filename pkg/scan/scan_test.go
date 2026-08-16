@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chains-project/yul/pkg/maven"
@@ -87,5 +88,37 @@ func TestDirSkipsUpToDatePins(t *testing.T) {
 	}
 	if len(findings) != 0 {
 		t.Fatalf("got %d findings, want 0: %+v", len(findings), findings)
+	}
+}
+
+func TestHashChangesWhenManifestContentChanges(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "pom.xml"), pom)
+	checkers := []manifestchecker.ManifestChecker{maven.Checker{}}
+
+	before, err := Hash(root, checkers)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a manifest edited by hand, outside the PreToolUse hook: the
+	// hash must change so a stale cache doesn't get reused for it.
+	writeFile(t, filepath.Join(root, "pom.xml"), strings.Replace(pom, "4.9.0", "4.8.0", 1))
+
+	after, err := Hash(root, checkers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("Hash() did not change after manifest content changed")
+	}
+
+	// Re-hashing unchanged content must be stable and match a fresh scan.
+	repeat, err := Hash(root, checkers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repeat != after {
+		t.Fatalf("Hash() is not stable across calls: %q != %q", repeat, after)
 	}
 }
