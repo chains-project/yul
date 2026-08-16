@@ -4,18 +4,19 @@ go 1.26.1
 
 require (
 	github.com/git-pkgs/enrichment v0.6.4
-	github.com/git-pkgs/manifests v0.6.1
-	github.com/git-pkgs/purl v0.1.15
-	github.com/git-pkgs/vers v0.3.0
+	github.com/git-pkgs/manifests v0.9.0
+	github.com/git-pkgs/purl v0.1.16
+	github.com/git-pkgs/vers v0.3.1
 )
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
-	github.com/bazelbuild/buildtools v0.0.0-20260622120422-77b9b380c0a4 // indirect
+	github.com/bazelbuild/buildtools v0.0.0-20260716142318-04cf7de1434f // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/ecosyste-ms/ecosystems-go v0.4.0 // indirect
 	github.com/git-pkgs/packageurl-go v0.3.1 // indirect
-	github.com/git-pkgs/pom v0.1.5 // indirect
+	github.com/git-pkgs/pom v0.1.7 // indirect
 	github.com/git-pkgs/registries v0.6.4 // indirect
 	github.com/git-pkgs/spdx v0.1.4 // indirect
 	github.com/git-pkgs/vulns v0.2.1 // indirect

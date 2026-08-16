@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -9,6 +10,12 @@ import (
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
 )
+
+type stubResolver struct{}
+
+func (*stubResolver) LatestVersions(context.Context, []string) (map[string]string, error) {
+	return nil, nil
+}
 
 func TestCheckerFor(t *testing.T) {
 	tests := []struct {
@@ -40,5 +47,16 @@ func TestCheckerFor(t *testing.T) {
 func TestCheckerForUnknownManifest(t *testing.T) {
 	if got := checkerFor(newCheckers(nil), "go.mod"); got != nil {
 		t.Fatalf("checkerFor(%q) returned %T, want nil", "go.mod", got)
+	}
+}
+
+func TestNewCheckersWiresResolverIntoMaven(t *testing.T) {
+	res := &stubResolver{}
+	checker, ok := checkerFor(newCheckers(res), "pom.xml").(maven.Checker)
+	if !ok {
+		t.Fatal("pom.xml checker is not maven.Checker")
+	}
+	if checker.Resolver != res {
+		t.Fatal("maven.Checker does not use the shared resolver")
 	}
 }
