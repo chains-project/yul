@@ -2,6 +2,7 @@ package githubactions
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -128,7 +129,7 @@ func TestCheckWorkflowShaCommentPinBelowLatest(t *testing.T) {
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.0.0\n"
 
-	got, err := CheckWorkflow(before, after, res)
+	got, err := CheckWorkflow(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckWorkflow() error = %v", err)
 	}
@@ -146,7 +147,7 @@ func TestCheckWorkflowFreshPinBelowLatest(t *testing.T) {
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
 
-	got, err := CheckWorkflow(before, after, res)
+	got, err := CheckWorkflow(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckWorkflow() error = %v", err)
 	}
@@ -167,7 +168,7 @@ func TestCheckWorkflowFreshPinAtLatest(t *testing.T) {
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
 
-	got, err := CheckWorkflow(before, after, res)
+	got, err := CheckWorkflow(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckWorkflow() error = %v", err)
 	}
@@ -186,7 +187,7 @@ func TestCheckWorkflowIgnoresShaAndBranchPins(t *testing.T) {
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678\n      - uses: actions/checkout@main\n"
 
-	got, err := CheckWorkflow(before, after, res)
+	got, err := CheckWorkflow(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckWorkflow() error = %v", err)
 	}
@@ -204,7 +205,7 @@ func TestCheckWorkflowSkipsUntouchedStep(t *testing.T) {
 	before := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n"
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n      - run: echo hi\n"
 
-	got, err := CheckWorkflow(before, after, res)
+	got, err := CheckWorkflow(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckWorkflow() error = %v", err)
 	}
@@ -222,7 +223,7 @@ func TestCheckWorkflowReportsChangedPin(t *testing.T) {
 	before := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v3\n"
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v3.5.0\n"
 
-	got, err := CheckWorkflow(before, after, res)
+	got, err := CheckWorkflow(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckWorkflow() error = %v", err)
 	}
@@ -240,7 +241,91 @@ func TestCheckWorkflowFailsOpenOnUnresolvedAction(t *testing.T) {
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: some-org/unlisted-action@v1\n"
 
-	if _, err := CheckWorkflow(before, after, res); err == nil {
+	if _, err := CheckWorkflow(before, after, res, nil); err == nil {
 		t.Fatal("CheckWorkflow() returned nil error, want an error for an unresolved action")
+	}
+}
+
+// fakeShaResolver resolves SHAs from a fixed "repo@tag" -> sha map, or
+// returns an error if err is set (to exercise the fail-open path).
+type fakeShaResolver struct {
+	sha map[string]string
+	err error
+}
+
+func (r *fakeShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
+	if r.err != nil {
+		return "", r.err
+	}
+	sha, ok := r.sha[repo+"@"+tag]
+	if !ok {
+		return "", fmt.Errorf("no sha for %s@%s", repo, tag)
+	}
+	return sha, nil
+}
+
+func TestCheckWorkflowSuggestsShaPin(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/cache": "v4.2.1"}}
+	sha := &fakeShaResolver{sha: map[string]string{
+		"actions/cache@v4.2.1": "8e8c483db84b4bee98b60c0593521ed34d9990e8",
+	}}
+
+	before := ""
+	// A subpath action ("actions/cache/restore") - repoOf must strip the
+	// subpath down to "actions/cache" before asking the SHA resolver.
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/cache/restore@v4\n"
+
+	got, err := CheckWorkflow(before, after, res, sha)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CheckWorkflow() = %#v, want 1 mismatch", got)
+	}
+	want := "8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4.2.1"
+	if got[0].Suggested != want {
+		t.Errorf("CheckWorkflow() Suggested = %q, want %q", got[0].Suggested, want)
+	}
+	if got[0].Latest != "v4.2.1" {
+		t.Errorf("CheckWorkflow() Latest = %q, want %q (unchanged even though Suggested is set)", got[0].Latest, "v4.2.1")
+	}
+}
+
+func TestCheckWorkflowShaLookupFailsOpen(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4.2.1"}}
+	sha := &fakeShaResolver{err: fmt.Errorf("network error")}
+
+	before := ""
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+
+	got, err := CheckWorkflow(before, after, res, sha)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v, want nil (SHA lookup failures shouldn't fail the check)", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CheckWorkflow() = %#v, want 1 mismatch", got)
+	}
+	if got[0].Suggested != "" {
+		t.Errorf("CheckWorkflow() Suggested = %q, want empty on a failed SHA lookup", got[0].Suggested)
+	}
+	if got[0].Latest != "v4.2.1" {
+		t.Errorf("CheckWorkflow() Latest = %q, want %q", got[0].Latest, "v4.2.1")
+	}
+}
+
+func TestRepoOf(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"actions/checkout", "actions/checkout"},
+		{"actions/cache/restore", "actions/cache"},
+		{"actions/cache/save", "actions/cache"},
+		{"single-name", "single-name"},
+	}
+	for _, test := range tests {
+		if got := repoOf(test.name); got != test.want {
+			t.Errorf("repoOf(%q) = %q, want %q", test.name, got, test.want)
+		}
 	}
 }

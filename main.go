@@ -29,7 +29,7 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
-		githubactions.Checker{Resolver: res},
+		githubactions.Checker{Resolver: res, Sha: githubactions.GitHubShaResolver{}},
 	}
 }
 
@@ -138,7 +138,11 @@ func runHook() {
 		if m.Namespace != "" {
 			name = m.Namespace + ":" + m.Name
 		}
-		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, m.Latest)
+		latest := m.Latest
+		if m.Suggested != "" {
+			latest = m.Suggested
+		}
+		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
 	}
 	os.Exit(2)
 }
@@ -263,7 +267,11 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		if f.Namespace != "" {
 			name = f.Namespace + ":" + f.Name
 		}
-		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, f.Latest)
+		latest := f.Latest
+		if f.Suggested != "" {
+			latest = f.Suggested
+		}
+		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
 
