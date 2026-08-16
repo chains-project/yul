@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/chains-project/yul/pkg/githubactions"
+	"github.com/chains-project/yul/pkg/golang"
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
@@ -28,6 +29,7 @@ func TestCheckerFor(t *testing.T) {
 		{filename: "package.json", want: npm.Checker{}},
 		{filename: ".github/workflows/ci.yml", want: githubactions.Checker{}},
 		{filename: "/home/user/project/.github/workflows/release.yaml", want: githubactions.Checker{}},
+		{filename: "go.mod", want: golang.Checker{}},
 	}
 
 	checkers := newCheckers(nil)
@@ -45,8 +47,8 @@ func TestCheckerFor(t *testing.T) {
 }
 
 func TestCheckerForUnknownManifest(t *testing.T) {
-	if got := checkerFor(newCheckers(nil), "go.mod"); got != nil {
-		t.Fatalf("checkerFor(%q) returned %T, want nil", "go.mod", got)
+	if got := checkerFor(newCheckers(nil), "Cargo.toml"); got != nil {
+		t.Fatalf("checkerFor(%q) returned %T, want nil", "Cargo.toml", got)
 	}
 }
 
