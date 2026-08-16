@@ -6,12 +6,8 @@
 #
 # Also checks whether a newer yul release exists than the plugin version this
 # install currently resolves to, and if so prints a top-level systemMessage
-# (shown straight to the user's terminal, the same channel Claude Code uses
-# for its own update notices) rather than hookSpecificOutput.additionalContext
-# (which only Claude sees). The marketplace source for yul is unpinned, but
-# Claude Code doesn't re-resolve a plugin's source on every session, so a
-# user can otherwise sit on a stale cached version indefinitely with no
-# signal that a newer one shipped.
+# shown straight to the user's terminal, the same channel Claude Code uses
+# for its own update notices.
 set -u
 
 root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
