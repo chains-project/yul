@@ -46,4 +46,21 @@ There is no linter config in this repo beyond `go vet`/`gofmt` defaults.
 
 ## Using yul on this repo itself
 
-`.claude/settings.json` wires `yul` up as this repo's own `PreToolUse` hook for `Write`, pointed at the locally built binary at the repo root via `$CLAUDE_PROJECT_DIR/yul` (Claude Code sets `$CLAUDE_PROJECT_DIR` to the project root when running hooks, so the shared config works on any checkout) — so writing a manifest in this repo while developing exercises the hook against itself. Build the binary once with `go build -o yul .`; until it exists the hook is a silent no-op. Rebuild it after changing checker/resolver code for the hook to pick up the change. Personal hook/settings overrides go in `.claude/settings.local.json` (gitignored).
+`.claude/settings.json` enables the `yul` plugin at project scope (`extraKnownMarketplaces` + `enabledPlugins`), so anyone opening this repo in Claude Code gets the hook after accepting the trust prompt — running the pinned **release** binary from `~/.cache/yul/`, not your working tree. To exercise a locally built binary while developing, build it with `go build -o yul .` and wire it up in `.claude/settings.local.json` (gitignored):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/yul", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Rebuild the binary after changing checker/resolver code for the hook to pick up the change. Note both hooks run in this setup — the local one and the plugin's release binary.

@@ -24,6 +24,8 @@ The install dialog lets you pick a scope (all your projects, or just the current
 
 Plugin updates and binary updates are automated. Whenever we update `yul`, claude will get the updated release.
 
+### Enabling it for a whole team
+
 To enable it for everyone working in a repo, check this into the repo's `.claude/settings.json`:
 
 ```json
@@ -36,6 +38,10 @@ To enable it for everyone working in a repo, check this into the repo's `.claude
   "enabledPlugins": { "yul@chains-project": true }
 }
 ```
+
+The `extraKnownMarketplaces` entry matters: it tells collaborators' Claude Code where `yul@chains-project` lives, so they don't need to have added the marketplace themselves.
+
+Collaborators then don't run any install commands. The first time they start Claude Code in the repo, it reads the checked-in settings, asks them to confirm they trust the `chains-project` marketplace and the `yul` plugin, and — once accepted — installs the plugin and downloads the release binary on session start. Declining just leaves the plugin disabled for them; nothing else breaks. Updates are picked up automatically as new plugin versions are released.
 
 ## Manual install
 
