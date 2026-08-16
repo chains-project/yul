@@ -3,6 +3,13 @@
 # in the cache, downloading it from GitHub Releases if not. Always exits 0 so
 # a network failure never breaks session startup (the PreToolUse hook fails
 # open until the binary exists).
+#
+# Also checks whether a newer yul release exists than the plugin version this
+# install currently resolves to, and if so prints SessionStart hook JSON
+# telling Claude to let the user know. The marketplace source for yul is
+# unpinned, but Claude Code doesn't re-resolve a plugin's source on every
+# session, so a user can otherwise sit on a stale cached version indefinitely
+# with no signal that a newer one shipped.
 set -u
 
 root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
@@ -24,4 +31,21 @@ if [ -x "$cache_dir/yul" ]; then
 		[ -d "$dir" ] && [ "$dir" != "$cache_dir/" ] && rm -rf "$dir"
 	done
 fi
+
+# version_gt A B: true (exit 0) if dotted-numeric version A > B.
+version_gt() {
+	[ "$1" = "$2" ] && return 1
+	highest="$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)"
+	[ "$highest" = "$1" ]
+}
+
+latest_tag="$(curl -fsSL --max-time 5 "https://api.github.com/repos/chains-project/yul/releases/latest" 2>/dev/null |
+	grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')"
+
+if [ -n "$latest_tag" ] && version_gt "$latest_tag" "$version"; then
+	context="A newer yul release (v${latest_tag}) is available; this session is running the cached v${version}. Let the user know, and suggest they run \`/plugin marketplace update chains-project\` (or reinstall the yul plugin) to pick it up."
+	escaped="$(printf '%s' "$context" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+	printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$escaped"
+fi
+
 exit 0
