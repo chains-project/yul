@@ -10,8 +10,7 @@ import (
 )
 
 // Cache is the on-disk record of a project's last full scan, so repeated
-// SessionStart hooks in the same project don't re-resolve every pinned
-// dependency against its registry on every session.
+// SessionStart hooks don't rescan on every session.
 type Cache struct {
 	YulVersion    string    `json:"yul_version"`
 	ManifestsHash string    `json:"manifests_hash"`
@@ -25,12 +24,8 @@ type Cache struct {
 	Notified []Finding `json:"notified"`
 }
 
-// Fresh reports whether the cache can be reused as-is: it was written by
-// the same yul build (an upgrade always forces a rescan, since a newer yul
-// may resolve or parse differently), within ttl of now, and manifestsHash
-// (from Hash, computed cheaply with no network calls) still matches — a
-// manifest edited since the cache was written, by hand or otherwise, always
-// forces a rescan regardless of ttl.
+// Fresh reports whether the cache can be reused as-is.
+// Returns false if the yul version or manifests hash changed, or if the cache is older than ttl.
 func (c Cache) Fresh(yulVersion string, ttl time.Duration, now time.Time, manifestsHash string) bool {
 	return c.YulVersion == yulVersion && c.ManifestsHash == manifestsHash && now.Sub(c.ScannedAt) < ttl
 }
