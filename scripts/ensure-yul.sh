@@ -5,11 +5,13 @@
 # open until the binary exists).
 #
 # Also checks whether a newer yul release exists than the plugin version this
-# install currently resolves to, and if so prints SessionStart hook JSON
-# telling Claude to let the user know. The marketplace source for yul is
-# unpinned, but Claude Code doesn't re-resolve a plugin's source on every
-# session, so a user can otherwise sit on a stale cached version indefinitely
-# with no signal that a newer one shipped.
+# install currently resolves to, and if so prints a top-level systemMessage
+# (shown straight to the user's terminal, the same channel Claude Code uses
+# for its own update notices) rather than hookSpecificOutput.additionalContext
+# (which only Claude sees). The marketplace source for yul is unpinned, but
+# Claude Code doesn't re-resolve a plugin's source on every session, so a
+# user can otherwise sit on a stale cached version indefinitely with no
+# signal that a newer one shipped.
 set -u
 
 root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
@@ -43,9 +45,9 @@ latest_tag="$(curl -fsSL --max-time 5 "https://api.github.com/repos/chains-proje
 	grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')"
 
 if [ -n "$latest_tag" ] && version_gt "$latest_tag" "$version"; then
-	context="A newer yul release (v${latest_tag}) is available; this session is running the cached v${version}. Let the user know, and suggest they run \`/plugin marketplace update chains-project\` (or reinstall the yul plugin) to pick it up."
-	escaped="$(printf '%s' "$context" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-	printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$escaped"
+	notice="yul: a newer release (v${latest_tag}) is available; this session is running the cached v${version}. Run \`/plugin marketplace update chains-project\` (or reinstall the yul plugin) to pick it up."
+	escaped="$(printf '%s' "$notice" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+	printf '{"systemMessage":"%s"}\n' "$escaped"
 fi
 
 exit 0
