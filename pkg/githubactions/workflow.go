@@ -112,6 +112,13 @@ type Checker struct {
 	// Resolver resolves latest released versions. main.go wires up an
 	// enrichment-backed resolver; tests inject a fake one.
 	Resolver resolver.Resolver
+
+	// Sha resolves a release tag's commit SHA, so mismatches can suggest
+	// the `@<sha> # <tag>` pin convention (see CheckWorkflow). Optional:
+	// a nil Sha just leaves Mismatch.Suggested unset, falling back to the
+	// bare tag - the same fail-open treatment given to any other
+	// resolver error here.
+	Sha ShaResolver
 }
 
 // Filename is documentation-only here: workflow files don't share a
@@ -127,7 +134,7 @@ func (Checker) MatchesPath(path string) bool {
 }
 
 func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckWorkflow(before, after, c.Resolver)
+	return CheckWorkflow(before, after, c.Resolver, c.Sha)
 }
 
 // actionPin is a GitHub Action reference pinned to a version-like tag
@@ -186,7 +193,7 @@ func parseWorkflowPins(content string) (map[string]actionPin, error) {
 // whose pinned ref was just changed, and doesn't match the latest
 // release res knows about. References the write didn't touch, or that
 // aren't pinned to something version-shaped, are left alone.
-func CheckWorkflow(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseWorkflowPins(before)
 	if err != nil {
 		return nil, err
@@ -231,5 +238,16 @@ func CheckWorkflow(before, after string, res resolver.Resolver) ([]mismatch.Mism
 			})
 		}
 	}
+
+	if shaRes != nil {
+		for i := range mismatches {
+			sha, err := shaRes.ResolveSHA(context.Background(), repoOf(mismatches[i].Name), mismatches[i].Latest)
+			if err != nil {
+				continue // fail open: report the plain tag instead
+			}
+			mismatches[i].Suggested = fmt.Sprintf("%s # %s", sha, mismatches[i].Latest)
+		}
+	}
+
 	return mismatches, nil
 }
