@@ -246,14 +246,14 @@ func TestCheckWorkflowFailsOpenOnUnresolvedAction(t *testing.T) {
 	}
 }
 
-// fakeShaResolver resolves SHAs from a fixed "repo@tag" -> sha map, or
+// mockShaResolver resolves SHAs from a fixed "repo@tag" -> sha map, or
 // returns an error if err is set (to exercise the fail-open path).
-type fakeShaResolver struct {
+type mockShaResolver struct {
 	sha map[string]string
 	err error
 }
 
-func (r *fakeShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
+func (r *mockShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
 	if r.err != nil {
 		return "", r.err
 	}
@@ -266,7 +266,7 @@ func (r *fakeShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (str
 
 func TestCheckWorkflowSuggestsShaPin(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/cache": "v4.2.1"}}
-	sha := &fakeShaResolver{sha: map[string]string{
+	sha := &mockShaResolver{sha: map[string]string{
 		"actions/cache@v4.2.1": "8e8c483db84b4bee98b60c0593521ed34d9990e8",
 	}}
 
@@ -293,7 +293,7 @@ func TestCheckWorkflowSuggestsShaPin(t *testing.T) {
 
 func TestCheckWorkflowShaLookupFailsOpen(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4.2.1"}}
-	sha := &fakeShaResolver{err: fmt.Errorf("network error")}
+	sha := &mockShaResolver{err: fmt.Errorf("network error")}
 
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"

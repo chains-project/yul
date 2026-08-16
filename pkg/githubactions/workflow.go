@@ -193,16 +193,6 @@ func parseWorkflowPins(content string) (map[string]actionPin, error) {
 // whose pinned ref was just changed, and doesn't match the latest
 // release res knows about. References the write didn't touch, or that
 // aren't pinned to something version-shaped, are left alone.
-//
-// Every reported mismatch's replacement is meant to land pinned to a
-// commit SHA, not a mutable tag - the security-recommended convention
-// this repo's own workflows use (see the package doc comment). When
-// shaRes is non-nil, CheckWorkflow resolves the latest release's commit
-// SHA and sets Mismatch.Suggested to "<sha> # <tag>" accordingly; a
-// failed lookup (network error, unknown tag, ...) just leaves Suggested
-// unset for that mismatch rather than failing the whole check, so a
-// GitHub API hiccup degrades to reporting the plain tag instead of
-// blocking nothing at all.
 func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseWorkflowPins(before)
 	if err != nil {

@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-// ShaResolver resolves the commit SHA a released tag points to, so
-// CheckWorkflow can suggest the `@<sha> # <tag>` pin convention (see the
-// package doc comment's "Tag vs. SHA pins" section) instead of just the
-// bare tag.
 type ShaResolver interface {
 	// ResolveSHA returns the commit SHA that tag points to in repo (an
 	// "owner/name" GitHub repository, not an action's possibly-nested
@@ -25,9 +21,6 @@ type ShaResolver interface {
 // resolver.EnrichmentResolver's defaultTimeout.
 const defaultShaTimeout = 10 * time.Second
 
-// githubAPIBaseURL is the real GitHub API base; overridable per-instance
-// (see GitHubShaResolver.baseURL) so tests can point at an httptest
-// server instead.
 const githubAPIBaseURL = "https://api.github.com"
 
 // GitHubShaResolver resolves tags to commit SHAs through the GitHub REST
@@ -88,8 +81,8 @@ func (g GitHubShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (st
 }
 
 // repoOf reduces an action name to the "owner/repo" GitHub repository it
-// lives in, stripping any subpath (e.g. "actions/cache/restore" for a
-// subdirectory action lives in the actions/cache repo).
+// lives in, stripping any subpath (e.g. "actions/cache/restore" ->
+// "actions/cache", a subdirectory action in the actions/cache repo).
 func repoOf(name string) string {
 	parts := strings.SplitN(name, "/", 3)
 	if len(parts) < 2 {
