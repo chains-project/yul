@@ -29,6 +29,7 @@ func TestExactVersion(t *testing.T) {
 		{name: "pypi != is not exact", spec: "!=2.0.0", scheme: "pypi", requireOperator: true},
 		{name: "pypi bounded range is not exact", spec: ">=1.0.0,<2.0.0", scheme: "pypi", requireOperator: true},
 		{name: "pypi redundant exact bound collapses to exact", spec: "==2.0.0,<3.0.0", scheme: "pypi", requireOperator: true, want: "2.0.0", wantOK: true},
+		{name: "pypi unrelated exclusion remains exact", spec: "==2.0.0,!=3.0.0", scheme: "pypi", requireOperator: true, want: "2.0.0", wantOK: true},
 		{name: "pypi bare version is not exact when operator required", spec: "1.2.3", scheme: "pypi", requireOperator: true},
 		{name: "pypi caret is not exact", spec: "^1.2.3", scheme: "pypi", requireOperator: true},
 		{name: "pypi empty spec is not exact", spec: "", scheme: "pypi", requireOperator: true},
@@ -93,11 +94,15 @@ func TestDiff(t *testing.T) {
 }
 
 func TestDiffSkipsUntouchedAndUpToDatePins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "1.0.0"}}
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/current": "1.0.0",
+		"pkg:npm/newer":   "1.0.0",
+	}}
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
 		"current": {Name: "current", Version: "1.0.0", PURL: "pkg:npm/current"},
+		"newer":   {Name: "newer", Version: "2.0.0", PURL: "pkg:npm/newer"},
 	}
 
 	got, err := Diff(context.Background(), before, after, "npm", res)
@@ -105,7 +110,28 @@ func TestDiffSkipsUntouchedAndUpToDatePins(t *testing.T) {
 		t.Fatalf("Diff() error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("Diff() = %#v, want no mismatches for an up-to-date pin", got)
+		t.Fatalf("Diff() = %#v, want no mismatches for current or newer pins", got)
+	}
+}
+
+func TestDiffChecksReplacementAtSameLocation(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/replacement": "2.0.0",
+	}}
+
+	before := map[string]Pin{
+		"dependencies/package": {Name: "original", Version: "1.0.0", PURL: "pkg:npm/original"},
+	}
+	after := map[string]Pin{
+		"dependencies/package": {Name: "replacement", Version: "1.0.0", PURL: "pkg:npm/replacement"},
+	}
+
+	got, err := Diff(context.Background(), before, after, "npm", res)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "replacement" || got[0].Latest != "2.0.0" {
+		t.Fatalf("Diff() = %#v, want replacement mismatch", got)
 	}
 }
 

@@ -71,7 +71,7 @@ import (
 // shaCommentPin matches a `uses: owner/repo@<40-hex-sha> # <tag>` line -
 // see the package doc comment - capturing the action name and the tag
 // named in the comment.
-var shaCommentPin = regexp.MustCompile(`uses:\s*([^\s@]+)@[0-9a-fA-F]{40}\s*#\s*(\S+)`)
+var shaCommentPin = regexp.MustCompile(`uses:\s*([^\s@]+)@([0-9a-fA-F]{40})\s*#\s*(\S+)`)
 
 // looksLikeVersion reports whether s is shaped like a version tag - an
 // optional "v"/"V" followed by a leading digit - rather than a branch
@@ -83,16 +83,15 @@ func looksLikeVersion(s string) bool {
 }
 
 // parseShaComments scans content for the SHA-pin-with-version-comment
-// convention and returns, per action name, the version named in the
-// comment - but only when that comment text itself looks like a version;
-// an unrelated trailing comment (e.g. "# pinned for CVE-2024-1234")
-// shouldn't be mistaken for one.
+// convention and returns the version named for each action and SHA pair,
+// but only when that comment text itself looks like a version. Keying by
+// both values keeps repeated uses of the same action distinct.
 func parseShaComments(content string) map[string]string {
 	result := make(map[string]string)
 	for _, m := range shaCommentPin.FindAllStringSubmatch(content, -1) {
-		name, tag := m[1], m[2]
+		name, sha, tag := m[1], strings.ToLower(m[2]), m[3]
 		if looksLikeVersion(tag) {
-			result[name] = tag
+			result[name+"@"+sha] = tag
 		}
 	}
 	return result
@@ -152,7 +151,7 @@ type actionPin struct {
 // or a commit SHA carrying the version-comment convention (see the
 // package doc comment and parseShaComments). Docker container/service
 // image references and local actions (`uses: ./...`) are never produced
-// by git-pkgs/manifests' own dependency extraction for this purpose and
+// by git-pkgs/manifests' own declarations for this purpose and
 // are skipped; branch names and bare (uncommented) commit SHAs skip too,
 // since there's nothing to compare them against.
 func parseWorkflowPins(content string) (map[string]actionPin, error) {
@@ -167,30 +166,31 @@ func parseWorkflowPins(content string) (map[string]actionPin, error) {
 	}
 	shaComments := parseShaComments(content)
 
-	for _, dep := range parsed.Dependencies {
-		if strings.HasPrefix(dep.Name, "docker://") {
-			continue // container image pins are a different ecosystem
-		}
-		if dep.Version == "" {
+	for _, declaration := range parsed.Declarations {
+		if declaration.Version == "" {
 			continue
 		}
 
-		version := dep.Version
+		version := declaration.Version
 		if !looksLikeVersion(version) {
-			tag, ok := shaComments[dep.Name]
+			tag, ok := shaComments[declaration.Name+"@"+strings.ToLower(version)]
 			if !ok {
 				continue
 			}
 			version = tag
 		}
-		result[dep.Name] = actionPin{name: dep.Name, version: version, purl: dep.PURL}
+		result[declaration.Location] = actionPin{
+			name:    declaration.Name,
+			version: version,
+			purl:    declaration.PURL,
+		}
 	}
 	return result, nil
 }
 
 // CheckWorkflow compares workflow content before and after a Write and
 // reports any version-pinned action reference that is newly added or
-// whose pinned ref was just changed, and doesn't match the latest
+// whose pinned ref was just changed, and is older than the latest
 // release res knows about. References the write didn't touch, or that
 // aren't pinned to something version-shaped, are left alone.
 func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolver) ([]mismatch.Mismatch, error) {
@@ -204,8 +204,8 @@ func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolv
 	}
 
 	var changed []actionPin
-	for name, pin := range afterPins {
-		if prior, ok := beforePins[name]; ok && prior.version == pin.version {
+	for location, pin := range afterPins {
+		if prior, ok := beforePins[location]; ok && prior == pin {
 			continue // untouched by this write
 		}
 		changed = append(changed, pin)
@@ -230,7 +230,7 @@ func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolv
 		if !ok {
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.name)
 		}
-		if vers.Compare(pin.version, latestVersion) != 0 {
+		if vers.Compare(pin.version, latestVersion) < 0 {
 			mismatches = append(mismatches, mismatch.Mismatch{
 				Name:    pin.name,
 				Current: pin.version,

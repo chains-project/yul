@@ -2,14 +2,17 @@ package githubactions
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	githubforge "github.com/git-pkgs/forge/github"
 )
 
+// ShaResolver resolves GitHub refs to commit SHAs for suggested immutable
+// action pins.
 type ShaResolver interface {
 	// ResolveSHA returns the commit SHA that tag points to in repo (an
 	// "owner/name" GitHub repository, not an action's possibly-nested
@@ -21,63 +24,56 @@ type ShaResolver interface {
 // resolver.EnrichmentResolver's defaultTimeout.
 const defaultShaTimeout = 10 * time.Second
 
-const githubAPIBaseURL = "https://api.github.com"
-
-// GitHubShaResolver resolves tags to commit SHAs through the GitHub REST
-// API (GET /repos/{repo}/commits/{tag}), which reports the commit a tag
-// points to whether it's lightweight or annotated. Requests are
-// unauthenticated unless GITHUB_TOKEN is set, in which case it's sent to
-// raise the otherwise low unauthenticated rate limit.
+// GitHubShaResolver resolves tags through git-pkgs/forge. Requests are
+// unauthenticated unless GITHUB_TOKEN is set.
 type GitHubShaResolver struct {
 	// Client is the HTTP client to use; a zero-value resolver builds one
 	// with defaultShaTimeout on first use.
 	Client *http.Client
 
-	// baseURL overrides githubAPIBaseURL; unexported, for tests only.
+	// baseURL overrides forge's public GitHub API URL for tests.
 	baseURL string
 }
 
+type userAgentTransport struct {
+	base http.RoundTripper
+}
+
+// RoundTrip sends req with yul's User-Agent without mutating the caller's
+// request.
+func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header.Set("User-Agent", "yul")
+	return t.base.RoundTrip(clone)
+}
+
+// ResolveSHA returns the full commit SHA for tag in an owner/repo GitHub
+// repository.
 func (g GitHubShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
 	client := g.Client
 	if client == nil {
 		client = &http.Client{Timeout: defaultShaTimeout}
 	}
+	httpClient := *client
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpClient.Transport = userAgentTransport{base: transport}
 
 	base := g.baseURL
 	if base == "" {
-		base = githubAPIBaseURL
+		base = githubforge.DefaultAPIBaseURL
 	}
-	url := fmt.Sprintf("%s/repos/%s/commits/%s", base, repo, tag)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		return "", fmt.Errorf("invalid GitHub repository %q", repo)
+	}
+	resolver, err := githubforge.NewCommitResolverWithBase(base, os.Getenv("GITHUB_TOKEN"), &httpClient)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("creating GitHub commit resolver: %w", err)
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "yul")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github API %s: status %d", url, resp.StatusCode)
-	}
-
-	var body struct {
-		SHA string `json:"sha"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", err
-	}
-	if body.SHA == "" {
-		return "", fmt.Errorf("github API %s: response had no sha", url)
-	}
-	return body.SHA, nil
+	return resolver.ResolveCommit(ctx, owner, name, tag)
 }
 
 // repoOf reduces an action name to the "owner/repo" GitHub repository it
