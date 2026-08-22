@@ -25,15 +25,15 @@ docs = [
 		t.Fatalf("parsePypiPins() error = %v", err)
 	}
 	want := map[string]string{
-		"requests": "2.32.4",
-		"pytest":   "8.3.5",
+		"project/dependencies/requests":             requestsLatestVersion,
+		"project/optional-dependencies/test/pytest": "8.3.5",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parsePypiPins() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
-	for name, version := range want {
-		if got[name].Version != version {
-			t.Errorf("parsePypiPins()[%q].Version = %q, want %q", name, got[name].Version, version)
+	for location, version := range want {
+		if got[location].Version != version {
+			t.Errorf("parsePypiPins()[%q].Version = %q, want %q", location, got[location].Version, version)
 		}
 	}
 }
@@ -69,7 +69,7 @@ func TestParsePyprojectPinsEmptyAndInvalid(t *testing.T) {
 }
 
 func TestCheckPyprojectOnlyChecksChangedPins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:pypi/httpx": "0.28.1"}}
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/httpx": httpxLatestVersion}}
 
 	before := "[project]\nname = \"demo\"\ndependencies = [\"click==8.1.3\"]\n"
 	after := "[project]\nname = \"demo\"\ndependencies = [\"click==8.1.3\", \"httpx==0.27.0\"]\n"
@@ -78,7 +78,7 @@ func TestCheckPyprojectOnlyChecksChangedPins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckPyproject() error = %v", err)
 	}
-	if len(got) != 1 || got[0].Name != "httpx" || got[0].Current != "0.27.0" || got[0].Latest != "0.28.1" {
+	if len(got) != 1 || got[0].Name != "httpx" || got[0].Current != "0.27.0" || got[0].Latest != httpxLatestVersion {
 		t.Fatalf("CheckPyproject() = %#v, want one mismatch for httpx", got)
 	}
 }

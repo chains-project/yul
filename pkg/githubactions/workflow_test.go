@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+const (
+	checkoutActionName  = "actions/checkout"
+	checkoutActionPURL  = "pkg:githubactions/actions/checkout"
+	latestActionVersion = "v4.2.1"
+)
+
 // fakeResolver resolves latest versions from a fixed PURL->version map, so
 // tests don't make real network requests.
 type fakeResolver struct {
@@ -55,6 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       - uses: actions/cache/restore@v3
       - uses: actions/setup-node@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.1.0
       - uses: step-security/harden-runner@1234567890abcdef1234567890abcdef12345678 # not-a-version
@@ -72,17 +79,22 @@ jobs:
 		t.Fatalf("parseWorkflowPins() error = %v", err)
 	}
 
-	want := map[string]string{
-		"actions/checkout":      "v4",
-		"actions/cache/restore": "v3",
-		"actions/setup-node":    "v4.1.0", // SHA pin, version recovered from its trailing comment
+	want := map[string]struct {
+		name    string
+		version string
+	}{
+		"jobs/build/steps/actions%2Fcheckout":        {checkoutActionName, "v4"},
+		"jobs/build/steps/actions%2Fcheckout/2":      {checkoutActionName, "v3"},
+		"jobs/build/steps/actions%2Fcache%2Frestore": {"actions/cache/restore", "v3"},
+		"jobs/build/steps/actions%2Fsetup-node":      {"actions/setup-node", "v4.1.0"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parseWorkflowPins() = %#v, want %d pins: %#v", got, len(want), want)
 	}
-	for name, version := range want {
-		if got[name].version != version {
-			t.Errorf("parseWorkflowPins()[%q].version = %q, want %q", name, got[name].version, version)
+	for location, expected := range want {
+		if got[location].name != expected.name || got[location].version != expected.version {
+			t.Errorf("parseWorkflowPins()[%q] = %#v, want name %q and version %q",
+				location, got[location], expected.name, expected.version)
 		}
 	}
 }
@@ -104,6 +116,7 @@ func TestParseWorkflowPinsEmptyAndInvalid(t *testing.T) {
 func TestParseShaComments(t *testing.T) {
 	content := "" +
 		"      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.2.1\n" +
+		"      - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678 # v3.6.0\n" +
 		"      - uses: actions/setup-node@1234567890abcdef1234567890abcdef12345678 # pinned, see SECURITY.md\n" +
 		"      - uses: actions/cache@deadbeefcafef00dfeedfacefeedfacefeedface\n" + // no comment at all
 		"      - uses: my-org/tagged-action@v2 # redundant comment on an already-tagged pin\n"
@@ -111,7 +124,8 @@ func TestParseShaComments(t *testing.T) {
 	got := parseShaComments(content)
 
 	want := map[string]string{
-		"actions/checkout": "v4.2.1",
+		"actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678": latestActionVersion,
+		"actions/checkout@1234567890abcdef1234567890abcdef12345678": "v3.6.0",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parseShaComments() = %#v, want %#v", got, want)
@@ -124,7 +138,7 @@ func TestParseShaComments(t *testing.T) {
 }
 
 func TestCheckWorkflowShaCommentPinBelowLatest(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4.2.1"}}
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
 
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678 # v4.0.0\n"
@@ -136,13 +150,13 @@ func TestCheckWorkflowShaCommentPinBelowLatest(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("CheckWorkflow() = %#v, want 1 mismatch", got)
 	}
-	if got[0].Name != "actions/checkout" || got[0].Current != "v4.0.0" || got[0].Latest != "v4.2.1" {
+	if got[0].Name != checkoutActionName || got[0].Current != "v4.0.0" || got[0].Latest != latestActionVersion {
 		t.Fatalf("CheckWorkflow() mismatch = %#v", got[0])
 	}
 }
 
 func TestCheckWorkflowFreshPinBelowLatest(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4.2.1"}}
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
 
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
@@ -157,13 +171,13 @@ func TestCheckWorkflowFreshPinBelowLatest(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("CheckWorkflow() = %#v, want 1 mismatch", got)
 	}
-	if got[0].Name != "actions/checkout" || got[0].Current != "v4" || got[0].Latest != "v4.2.1" {
+	if got[0].Name != checkoutActionName || got[0].Current != "v4" || got[0].Latest != latestActionVersion {
 		t.Fatalf("CheckWorkflow() mismatch = %#v", got[0])
 	}
 }
 
 func TestCheckWorkflowFreshPinAtLatest(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4"}}
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: "v4"}}
 
 	before := ""
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
@@ -174,6 +188,21 @@ func TestCheckWorkflowFreshPinAtLatest(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("CheckWorkflow() = %#v, want no mismatches for an up-to-date pin", got)
+	}
+}
+
+func TestCheckWorkflowFreshPinNewerThanLatest(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: "v4"}}
+
+	before := ""
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v5\n"
+
+	got, err := CheckWorkflow(before, after, res, nil)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckWorkflow() = %#v, want no mismatch for a newer pin", got)
 	}
 }
 
@@ -218,7 +247,7 @@ func TestCheckWorkflowSkipsUntouchedStep(t *testing.T) {
 }
 
 func TestCheckWorkflowReportsChangedPin(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4"}}
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: "v4"}}
 
 	before := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v3\n"
 	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v3.5.0\n"
@@ -232,6 +261,36 @@ func TestCheckWorkflowReportsChangedPin(t *testing.T) {
 	}
 	if got[0].Current != "v3.5.0" || got[0].Latest != "v4" {
 		t.Fatalf("CheckWorkflow() mismatch = %#v", got[0])
+	}
+}
+
+func TestCheckWorkflowReportsReplacedActionAtSameLocation(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/setup-node": "v5"}}
+
+	before := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/setup-node@v4\n"
+
+	got, err := CheckWorkflow(before, after, res, nil)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "actions/setup-node" || got[0].Latest != "v5" {
+		t.Fatalf("CheckWorkflow() = %#v, want setup-node mismatch", got)
+	}
+}
+
+func TestCheckWorkflowReportsRepinnedShaWithSameCommentTag(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
+
+	before := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v4.0.0\n"
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v4.0.0\n"
+
+	got, err := CheckWorkflow(before, after, res, nil)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != checkoutActionName || got[0].Current != "v4.0.0" || got[0].Latest != latestActionVersion {
+		t.Fatalf("CheckWorkflow() = %#v, want a mismatch for the re-pinned SHA even though its comment tag is unchanged", got)
 	}
 }
 
@@ -265,7 +324,7 @@ func (r *mockShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (str
 }
 
 func TestCheckWorkflowSuggestsShaPin(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/cache": "v4.2.1"}}
+	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/cache": latestActionVersion}}
 	sha := &mockShaResolver{sha: map[string]string{
 		"actions/cache@v4.2.1": "8e8c483db84b4bee98b60c0593521ed34d9990e8",
 	}}
@@ -286,13 +345,13 @@ func TestCheckWorkflowSuggestsShaPin(t *testing.T) {
 	if got[0].Suggested != want {
 		t.Errorf("CheckWorkflow() Suggested = %q, want %q", got[0].Suggested, want)
 	}
-	if got[0].Latest != "v4.2.1" {
-		t.Errorf("CheckWorkflow() Latest = %q, want %q (unchanged even though Suggested is set)", got[0].Latest, "v4.2.1")
+	if got[0].Latest != latestActionVersion {
+		t.Errorf("CheckWorkflow() Latest = %q, want %q (unchanged even though Suggested is set)", got[0].Latest, latestActionVersion)
 	}
 }
 
 func TestCheckWorkflowShaLookupFailsOpen(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:githubactions/actions/checkout": "v4.2.1"}}
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
 	sha := &mockShaResolver{err: fmt.Errorf("network error")}
 
 	before := ""
@@ -308,8 +367,8 @@ func TestCheckWorkflowShaLookupFailsOpen(t *testing.T) {
 	if got[0].Suggested != "" {
 		t.Errorf("CheckWorkflow() Suggested = %q, want empty on a failed SHA lookup", got[0].Suggested)
 	}
-	if got[0].Latest != "v4.2.1" {
-		t.Errorf("CheckWorkflow() Latest = %q, want %q", got[0].Latest, "v4.2.1")
+	if got[0].Latest != latestActionVersion {
+		t.Errorf("CheckWorkflow() Latest = %q, want %q", got[0].Latest, latestActionVersion)
 	}
 }
 
@@ -318,7 +377,7 @@ func TestRepoOf(t *testing.T) {
 		name string
 		want string
 	}{
-		{"actions/checkout", "actions/checkout"},
+		{checkoutActionName, checkoutActionName},
 		{"actions/cache/restore", "actions/cache"},
 		{"actions/cache/save", "actions/cache"},
 		{"single-name", "single-name"},

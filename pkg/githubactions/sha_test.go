@@ -12,8 +12,10 @@ func TestGitHubShaResolverResolvesSha(t *testing.T) {
 		if want := "/repos/actions/checkout/commits/v4.2.1"; r.URL.Path != want {
 			t.Errorf("request path = %q, want %q", r.URL.Path, want)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"sha": "8e8c483db84b4bee98b60c0593521ed34d9990e8"}`))
+		if got := r.Header.Get("User-Agent"); got != "yul" {
+			t.Errorf("User-Agent = %q, want yul", got)
+		}
+		_, _ = w.Write([]byte("8e8c483db84b4bee98b60c0593521ed34d9990e8"))
 	}))
 	defer srv.Close()
 
@@ -40,13 +42,18 @@ func TestGitHubShaResolverErrorsOnNon200(t *testing.T) {
 }
 
 func TestGitHubShaResolverErrorsOnEmptySha(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	}))
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer srv.Close()
 
 	res := GitHubShaResolver{Client: srv.Client(), baseURL: srv.URL}
 	if _, err := res.ResolveSHA(context.Background(), "actions/checkout", "v4.2.1"); err == nil {
 		t.Fatal("ResolveSHA() returned nil error, want an error on an empty sha")
+	}
+}
+
+func TestGitHubShaResolverRejectsInvalidRepository(t *testing.T) {
+	res := GitHubShaResolver{}
+	if _, err := res.ResolveSHA(context.Background(), "checkout", "v4.2.1"); err == nil {
+		t.Fatal("ResolveSHA() returned nil error for invalid repository")
 	}
 }

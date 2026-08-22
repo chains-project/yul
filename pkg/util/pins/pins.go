@@ -26,9 +26,8 @@ type Pin struct {
 
 // ExactVersion reports whether spec pins a package to exactly one version
 // under the given vers scheme (e.g. "npm", "pypi"), returning that version.
-// Anything looser (a range, a wildcard, a dist-tag, multiple specifiers, an
-// exclusion) reports ok=false, since there's nothing exact to compare
-// against a latest release.
+// Anything looser (a range, a wildcard, or a dist-tag) reports ok=false,
+// since there's nothing exact to compare against a latest release.
 //
 // requireOperator rejects a bare version literal with no leading operator
 // at all. pypi needs this: a bare version in a Poetry dependency table
@@ -44,43 +43,33 @@ func ExactVersion(spec, scheme string, requireOperator bool) (string, bool) {
 		return "", false
 	}
 
-	normalized := spec
-	if scheme == "pypi" {
-		// vers's constraint parser only recognizes a single "=" for exact
-		// matches; PEP 440's "==" would otherwise leave a stray "=" in the
-		// version string.
-		normalized = strings.Replace(normalized, "==", "=", 1)
-	}
-
-	r, err := vers.ParseNative(normalized, scheme)
+	r, err := vers.ParseNative(spec, scheme)
 	if err != nil {
 		return "", false
 	}
-	if len(r.Exclusions) != 0 || len(r.Intervals) != 1 {
+	version, ok := r.ExactVersion()
+	if !ok {
 		return "", false
 	}
 
-	iv := r.Intervals[0]
-	if iv.Min == "" || iv.Max == "" || iv.Min != iv.Max || !iv.MinInclusive || !iv.MaxInclusive {
-		return "", false
-	}
 	// Guards against syntax vers's generic constraint parser accepts as a
 	// literal "exact version" only because it doesn't recognize the
 	// operator (e.g. Poetry's "^1.2.3" caret syntax under the pypi scheme).
-	if !vers.ValidWithScheme(iv.Min, scheme) {
+	if !vers.ValidWithScheme(version, scheme) {
 		return "", false
 	}
-	return iv.Min, true
+	return version, true
 }
 
 // Diff reports pins in after that are new or whose version changed from
-// before, and whose pinned version doesn't match the latest release res
+// before, and whose pinned version is older than the latest release res
 // knows about (compared under scheme's ordering rules). Pins left
-// untouched by the write are ignored even if outdated.
+// untouched by the write are ignored even if outdated. Moving a declaration
+// to a different logical location counts as a change.
 func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	var changed []Pin
-	for name, pin := range after {
-		if prior, ok := before[name]; ok && prior.Version == pin.Version {
+	for location, pin := range after {
+		if prior, ok := before[location]; ok && prior == pin {
 			continue // untouched by this write
 		}
 		changed = append(changed, pin)
@@ -105,7 +94,7 @@ func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res 
 		if !ok {
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
 		}
-		if vers.CompareWithScheme(pin.Version, latestVersion, scheme) != 0 {
+		if vers.CompareWithScheme(pin.Version, latestVersion, scheme) < 0 {
 			mismatches = append(mismatches, mismatch.Mismatch{
 				Namespace: pin.Namespace,
 				Name:      pin.Name,
