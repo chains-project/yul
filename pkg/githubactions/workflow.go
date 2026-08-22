@@ -140,9 +140,17 @@ func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
 // (never a branch name or commit SHA - see the package doc comment),
 // along with the PURL to resolve its latest version through.
 type actionPin struct {
-	name    string // e.g. "actions/checkout", or "actions/cache/restore" for a subpath action
-	version string // the ref as written, e.g. "v4" - never rewritten or v-stripped
-	purl    string
+	name string // e.g. "actions/checkout", or "actions/cache/restore" for a subpath action
+	// version is the comparable version: the ref as written for a tag
+	// pin, or the trailing comment's tag for a SHA pin - never rewritten
+	// or v-stripped.
+	version string
+	// ref is the raw declaration.Version (the actual tag or SHA in the
+	// `uses:` line), kept only so change detection notices a ref move
+	// (e.g. re-pinning to a new SHA) even when its comment tag - and so
+	// version - stays the same.
+	ref  string
+	purl string
 }
 
 // parseWorkflowPins parses a workflow file's content and returns its
@@ -182,6 +190,7 @@ func parseWorkflowPins(content string) (map[string]actionPin, error) {
 		result[declaration.Location] = actionPin{
 			name:    declaration.Name,
 			version: version,
+			ref:     declaration.Version,
 			purl:    declaration.PURL,
 		}
 	}

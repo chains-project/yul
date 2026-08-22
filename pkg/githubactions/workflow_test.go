@@ -279,6 +279,21 @@ func TestCheckWorkflowReportsReplacedActionAtSameLocation(t *testing.T) {
 	}
 }
 
+func TestCheckWorkflowReportsRepinnedShaWithSameCommentTag(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
+
+	before := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v4.0.0\n"
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v4.0.0\n"
+
+	got, err := CheckWorkflow(before, after, res, nil)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != checkoutActionName || got[0].Current != "v4.0.0" || got[0].Latest != latestActionVersion {
+		t.Fatalf("CheckWorkflow() = %#v, want a mismatch for the re-pinned SHA even though its comment tag is unchanged", got)
+	}
+}
+
 func TestCheckWorkflowFailsOpenOnUnresolvedAction(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{}}
 
