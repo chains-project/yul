@@ -27,6 +27,7 @@ func TestParsePackageJSONPins(t *testing.T) {
 	content := `{
 		"dependencies": {
 			"runtime": "1.2.3",
+			"alias": "npm:@scope/actual@8.0.0",
 			"prerelease": "2.0.0-rc.1",
 			"build": "3.0.0+metadata",
 			"range": "^4.0.0",
@@ -50,20 +51,24 @@ func TestParsePackageJSONPins(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"runtime":     "1.2.3",
-		"prerelease":  "2.0.0-rc.1",
-		"build":       "3.0.0+metadata",
-		"development": "5.0.0",
-		"optional":    "6.0.0",
-		"peer":        "7.0.0",
+		"dependencies/runtime":          "1.2.3",
+		"dependencies/alias":            "8.0.0",
+		"dependencies/prerelease":       "2.0.0-rc.1",
+		"dependencies/build":            "3.0.0+metadata",
+		"devDependencies/development":   "5.0.0",
+		"optionalDependencies/optional": "6.0.0",
+		"peerDependencies/peer":         "7.0.0",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parsePackageJSONPins() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
-	for name, version := range want {
-		if got[name].Version != version {
-			t.Errorf("parsePackageJSONPins()[%q].Version = %q, want %q", name, got[name].Version, version)
+	for location, version := range want {
+		if got[location].Version != version {
+			t.Errorf("parsePackageJSONPins()[%q].Version = %q, want %q", location, got[location].Version, version)
 		}
+	}
+	if pin := got["dependencies/alias"]; pin.Name != "@scope/actual" || pin.PURL != "pkg:npm/%40scope/actual" {
+		t.Errorf("alias pin = %#v, want canonical target package", pin)
 	}
 }
 

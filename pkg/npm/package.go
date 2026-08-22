@@ -45,19 +45,23 @@ func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 		return nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
-	for _, dep := range parsed.Dependencies {
-		version, ok := pins.ExactVersion(dep.Version, scheme, false)
+	for _, declaration := range parsed.Declarations {
+		version, ok := pins.ExactVersion(declaration.Version, scheme, false)
 		if !ok {
 			continue
 		}
-		result[dep.Name] = pins.Pin{Name: dep.Name, Version: version, PURL: dep.PURL}
+		result[declaration.Location] = pins.Pin{
+			Name:    declaration.Name,
+			Version: version,
+			PURL:    declaration.PURL,
+		}
 	}
 	return result, nil
 }
 
 // CheckPackageJSON compares package.json content before and after a Write
 // and reports any exactly-pinned package that is newly added or whose
-// pinned version was just changed, and doesn't match the latest release res
+// pinned version was just changed, and is older than the latest release res
 // knows about. Packages the write didn't touch, or that aren't pinned
 // exactly, are left alone.
 func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {

@@ -46,6 +46,9 @@ Collaborators then don't run any install commands. The first time they start Cla
 
 ## Manual install
 
+> [!NOTE] Prefer this method if you want control over which version you run.
+> The `/plugin` installs above updates automatically as new releases ship.
+
 If you have Go installed, this is the preferred way to install the `yul` binary yourself:
 
 ```sh

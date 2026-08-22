@@ -2,6 +2,11 @@ package pypi
 
 import "testing"
 
+const (
+	requestsLatestVersion = "2.32.4"
+	httpxLatestVersion    = "0.28.1"
+)
+
 func TestParseRequirementsPins(t *testing.T) {
 	content := `
 # application dependencies
@@ -16,16 +21,27 @@ httpx[http2] == 0.28.1 ; python_version >= "3.10"
 		t.Fatalf("parsePypiPins() error = %v", err)
 	}
 	want := map[string]string{
-		"requests": "2.32.4",
-		"httpx":    "0.28.1",
+		"requirements/requests": requestsLatestVersion,
+		"requirements/httpx":    httpxLatestVersion,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("parsePypiPins() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
-	for name, version := range want {
-		if got[name].Version != version {
-			t.Errorf("parsePypiPins()[%q].Version = %q, want %q", name, got[name].Version, version)
+	for location, version := range want {
+		if got[location].Version != version {
+			t.Errorf("parsePypiPins()[%q].Version = %q, want %q", location, got[location].Version, version)
 		}
+	}
+}
+
+func TestParseRequirementsPinsUsesCanonicalPURL(t *testing.T) {
+	got, err := parsePypiPins("requirements.txt", "Django_Rest.Framework==1.0\n")
+	if err != nil {
+		t.Fatalf("parsePypiPins() error = %v", err)
+	}
+	pin := got["requirements/django-rest-framework"]
+	if pin.Name != "django-rest.framework" || pin.PURL != "pkg:pypi/django-rest.framework" {
+		t.Fatalf("canonical pin = %#v", pin)
 	}
 }
 
@@ -56,7 +72,7 @@ ranged>=2.0.0,<3.0.0
 }
 
 func TestCheckRequirementsOnlyChecksChangedPins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": "2.32.4"}}
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": requestsLatestVersion}}
 
 	before := "existing==1.0.0\n"
 	after := "existing==1.0.0\nrequests==2.31.0\nflask>=3.0.0\n"
@@ -71,7 +87,7 @@ func TestCheckRequirementsOnlyChecksChangedPins(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("CheckRequirements() returned %d mismatches, want 1: %#v", len(got), got)
 	}
-	if got[0].Name != "requests" || got[0].Current != "2.31.0" || got[0].Latest != "2.32.4" {
+	if got[0].Name != "requests" || got[0].Current != "2.31.0" || got[0].Latest != requestsLatestVersion {
 		t.Fatalf("CheckRequirements() mismatch = %#v", got[0])
 	}
 }
