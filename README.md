@@ -163,3 +163,22 @@ outdated dependencies, use these versions instead:
 ```
 
 Claude reads this from stderr and rewrites the manifest with the correct version.
+
+## Why some ecosystems need this more than others
+
+`yul` only ever fires on a manifest write that hand-pins an exact, already-stale version. Some ecosystems have a CLI command that resolves and writes the latest version for you, so Claude reaches for that instead of typing a version number — which means there's nothing stale for the hook to catch. Others have no such command, so Claude has to type a version from memory (often stale, since that's frozen at training time), which is exactly the case `yul` is built to guard.
+
+This was observed empirically across the `benchmark/` scaffolding runs (see [`benchmark/runs`](benchmark/runs), and the [write-up](https://chains.proj.kth.se/ai-bump.html)): in the `nohook` condition, Claude's own tool choice split cleanly along these lines.
+
+| Ecosystem | Direct "give me latest" command? | What Claude actually did (nohook) |
+| --- | --- | --- |
+| Go (`go.mod`) | Yes — `go get <module>` / `go mod tidy` | Ran `go get`, which hits the module proxy and writes the resolved latest version itself. Nothing to catch. |
+| npm (`package.json`) | Yes — `npm install <pkg>` | Ran `npm install`, which resolves the latest release and writes it (as a `^` range) at install time, before any Write/Edit reaches the hook. |
+| pip (`requirements.txt`) | No | `pip install <pkg>` installs into the venv but doesn't add the package to `requirements.txt` — Claude typed the line by hand (often unpinned, or an exact `==` pin recalled from memory). |
+| PyPI (`pyproject.toml`) | No | Same gap as pip — no command resolves a version straight into `[project.dependencies]`, so Claude hand-typed the pin (or a `>=` range). |
+| Maven (`pom.xml`) | No | There's no Maven equivalent of `npm install`/`go get` that adds a resolved `<dependency>` block; Claude always hand-typed the `<version>`. |
+| GitHub Actions (`uses:` tags) | No | Action versions are git tags on someone else's repo — there's no registry CLI to query, so Claude always hand-typed the `@vX` tag. |
+
+`go.mod` and `package.json` are exactly the two manifests where the 
+ecosystem's own tooling already avoids the stale-pin problem.
+However, `yul` still acts as a safety net for those ecosystems.
