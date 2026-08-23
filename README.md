@@ -9,6 +9,7 @@ Supported manifests:
 - `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
 - `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
 - `go.mod` — Go modules, `require` entries (single-line and block form, direct and indirect)
+- `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins only (a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin)
 
 ## Install as a Claude Code plugin (recommended)
 
