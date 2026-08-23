@@ -47,8 +47,6 @@ func TestCheckerFor(t *testing.T) {
 }
 
 func TestCheckerForUnknownManifest(t *testing.T) {
-	// Cargo.toml stands in for an unsupported manifest now that go.mod (the
-	// previous stand-in) has its own checker.
 	if got := checkerFor(newCheckers(nil), "Cargo.toml"); got != nil {
 		t.Fatalf("checkerFor(%q) returned %T, want nil", "Cargo.toml", got)
 	}
