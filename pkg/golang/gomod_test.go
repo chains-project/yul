@@ -138,8 +138,7 @@ require github.com/example/added v1.0.0
 // TestCheckGoModPseudoVersionComparesOlderThanTaggedRelease covers the
 // go.mod-specific gotcha noted in the package doc comment: a pseudo-version
 // (an untagged commit pin) always compares as older than any real tagged
-// release under the "golang" vers scheme, even though pinning one can be a
-// deliberate, valid choice.
+// release under the "golang" vers scheme.
 func TestCheckGoModPseudoVersionComparesOlderThanTaggedRelease(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:golang/github.com/example/added": "v1.2.3"}}
 
