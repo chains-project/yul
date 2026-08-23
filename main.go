@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chains-project/yul/pkg/githubactions"
+	"github.com/chains-project/yul/pkg/golang"
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
@@ -30,6 +31,7 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
 		githubactions.Checker{Resolver: res, Sha: githubactions.GitHubShaResolver{}},
+		golang.Checker{Resolver: res},
 	}
 }
 
