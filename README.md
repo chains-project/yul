@@ -179,4 +179,6 @@ This was observed empirically across the `benchmark/` scaffolding runs (see [`be
 | Maven (`pom.xml`) | No | There's no Maven equivalent of `npm install`/`go get` that adds a resolved `<dependency>` block; Claude always hand-typed the `<version>`. |
 | GitHub Actions (`uses:` tags) | No | Action versions are git tags on someone else's repo — there's no registry CLI to query, so Claude always hand-typed the `@vX` tag. |
 
-`go.mod` and `package.json` are exactly the two manifests where the ecosystem's own tooling already avoids the stale-pin problem — which is also why the two `go-0N` and several `npm-0N` benchmark runs above land on the latest version even in the `nohook` condition. Everywhere else, the hook is doing real work.
+`go.mod` and `package.json` are exactly the two manifests where the 
+ecosystem's own tooling already avoids the stale-pin problem.
+However, `yul` still acts as a safety net for those ecosystems.
