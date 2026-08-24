@@ -47,8 +47,8 @@ func TestCheckerFor(t *testing.T) {
 }
 
 func TestCheckerForUnknownManifest(t *testing.T) {
-	if got := checkerFor(newCheckers(nil), "Cargo.toml"); got != nil {
-		t.Fatalf("checkerFor(%q) returned %T, want nil", "Cargo.toml", got)
+	if got := checkerFor(newCheckers(nil), "Gemfile"); got != nil {
+		t.Fatalf("checkerFor(%q) returned %T, want nil", "Gemfile", got)
 	}
 }
 

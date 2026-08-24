@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chains-project/yul/pkg/cargo"
 	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/golang"
 	"github.com/chains-project/yul/pkg/maven"
@@ -32,6 +33,7 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		npm.Checker{Resolver: res},
 		githubactions.Checker{Resolver: res, Sha: githubactions.GitHubShaResolver{}},
 		golang.Checker{Resolver: res},
+		cargo.Checker{Resolver: res},
 	}
 }
 

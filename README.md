@@ -9,6 +9,7 @@ Supported manifests:
 - `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
 - `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
 - `go.mod` — Go modules, `require` entries (single-line and block form, direct and indirect)
+- `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins only (a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin)
 
 ## Install as a Claude Code plugin (recommended)
 
@@ -178,7 +179,9 @@ This was observed empirically across the `benchmark/` scaffolding runs (see [`be
 | PyPI (`pyproject.toml`) | No | Same gap as pip — no command resolves a version straight into `[project.dependencies]`, so Claude hand-typed the pin (or a `>=` range). |
 | Maven (`pom.xml`) | No | There's no Maven equivalent of `npm install`/`go get` that adds a resolved `<dependency>` block; Claude always hand-typed the `<version>`. |
 | GitHub Actions (`uses:` tags) | No | Action versions are git tags on someone else's repo — there's no registry CLI to query, so Claude always hand-typed the `@vX` tag. |
+| Cargo (`Cargo.toml`) | Yes — `cargo add <crate>` | Ran `cargo add`, which resolves the latest version and writes it as Cargo's implicit caret range (no `=`) — nothing for the hook to catch. |
 
-`go.mod` and `package.json` are exactly the two manifests where the 
+`go.mod`, `package.json`, and `Cargo.toml` are the manifests where the
 ecosystem's own tooling already avoids the stale-pin problem.
 However, `yul` still acts as a safety net for those ecosystems.
+
