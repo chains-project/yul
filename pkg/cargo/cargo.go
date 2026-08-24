@@ -4,39 +4,21 @@
 //
 // Design notes (see chains-project/yul#4):
 //
-// What counts as an "exact pin": Cargo's default requirement operator is
-// caret, so a bare version like `serde = "1.2.3"` means `^1.2.3`, not an
-// exact pin - only an explicit `=1.2.3` is exact. requireOperator=true is
-// passed to pins.ExactVersion for this, matching pyproject.toml's Poetry
-// tables (same "bare version is a range" gotcha). In practice
-// git-pkgs/vers' "cargo" scheme already parses a bare version natively as a
-// caret range, so ExactVersion would reject it even with
-// requireOperator=false; the flag is kept anyway for defense-in-depth and to
-// document the intent explicitly, same as pyproject.go.
+// Cargo's default requirement operator is caret, so a bare version like
+// `serde = "1.2.3"` means `^1.2.3`, not an exact pin - only `=1.2.3` counts.
+// requireOperator=true enforces this in pins.ExactVersion, matching
+// pyproject.toml's Poetry tables (git-pkgs/vers already treats a bare
+// version as a caret range under the "cargo" scheme, so this is mostly
+// documentation of intent).
 //
-// Table-form dependencies (`regex = { version = "1.2.3" }`) go through the
-// same ExactVersion check as string-form ones - git-pkgs/manifests already
-// extracts the "version" key for both. Local path dependencies
-// (`{ path = "../local" }`) are dropped by the parser entirely, and
-// workspace-inherited dependencies (`{ workspace = true }`) come through
-// with version "*", which ExactVersion rejects like any other non-exact
-// spec.
+// git-pkgs/manifests' Cargo.toml parser doesn't populate
+// ParseResult.Declarations like npm/pypi/maven/github_actions do, so pins
+// are keyed by scope+name instead of a declaration location.
 //
-// Parser coverage: unlike npm/pypi/maven/github_actions, git-pkgs/manifests'
-// Cargo.toml parser doesn't populate ParseResult.Declarations, so there's no
-// stable per-declaration Location to key pins by. This checker instead
-// builds its own key from scope+name (dependencies/dev-dependencies/
-// build-dependencies sections can each pin the same crate independently),
-// the same Dependencies-based fallback pkg/golang uses for go.mod.
-//
-// Resolution coverage: whether git-pkgs/enrichment's ecosyste.ms-backed
-// resolver actually has LatestVersion data for pkg:cargo purls wasn't
-// verified against the live API when this was written (network access to
-// packages.ecosyste.ms wasn't available in that environment, same gap noted
-// in pkg/golang and pkg/githubactions). If it doesn't, every changed crate
-// simply fails to resolve, which - per pins.Diff's existing "no latest
-// version found" behavior - the hook already treats as fail-open, so this
-// degrades safely to "never blocks" rather than blocking incorrectly.
+// Resolution coverage: whether git-pkgs/enrichment resolves pkg:cargo purls
+// wasn't verified against the live API in this environment (same gap noted
+// in pkg/golang and pkg/githubactions); an unresolvable purl simply fails
+// open per pins.Diff.
 package cargo
 
 import (
@@ -82,6 +64,9 @@ func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, dep := range parsed.Dependencies {
+		// Local path deps (`{ path = "../local" }`) are already dropped by
+		// the parser; workspace-inherited deps come through as "*", which
+		// ExactVersion rejects below.
 		version, ok := pins.ExactVersion(dep.Version, scheme, true)
 		if !ok {
 			continue
