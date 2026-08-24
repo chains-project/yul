@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/chains-project/yul/pkg/bazel"
 	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/golang"
 	"github.com/chains-project/yul/pkg/maven"
@@ -30,6 +31,7 @@ func TestCheckerFor(t *testing.T) {
 		{filename: ".github/workflows/ci.yml", want: githubactions.Checker{}},
 		{filename: "/home/user/project/.github/workflows/release.yaml", want: githubactions.Checker{}},
 		{filename: "go.mod", want: golang.Checker{}},
+		{filename: "MODULE.bazel", want: bazel.Checker{}},
 	}
 
 	checkers := newCheckers(nil)
