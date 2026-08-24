@@ -10,6 +10,8 @@ Supported manifests:
 - `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
 - `go.mod` — Go modules, `require` entries (single-line and block form, direct and indirect)
 - `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins only (a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin)
+- `Podfile` — CocoaPods, `pod` declarations, exact version pins only (a `~>` pessimistic-operator constraint is a range, not a pin)
+- `MODULE.bazel` — Bazel modules (bzlmod), `bazel_dep` entries (dev and non-dev)
 
 ## Install as a Claude Code plugin (recommended)
 
@@ -180,6 +182,8 @@ This was observed empirically across the `benchmark/` scaffolding runs (see [`be
 | Maven (`pom.xml`) | No | There's no Maven equivalent of `npm install`/`go get` that adds a resolved `<dependency>` block; Claude always hand-typed the `<version>`. |
 | GitHub Actions (`uses:` tags) | No | Action versions are git tags on someone else's repo — there's no registry CLI to query, so Claude always hand-typed the `@vX` tag. |
 | Cargo (`Cargo.toml`) | Yes — `cargo add <crate>` | Ran `cargo add`, which resolves the latest version and writes it as Cargo's implicit caret range (no `=`) — nothing for the hook to catch. |
+| CocoaPods (`Podfile`) | No | `pod install`/`pod update` only resolve versions for pods already listed in the Podfile — neither one adds a new `pod` line. Adding a dependency means hand-typing `pod "Name", "x.y.z"`, so there's no CLI path that keeps Claude from typing a stale version. |
+| Bazel (`MODULE.bazel`) | No | There's no `bazel add`-style command that resolves a module's latest Bazel Central Registry release and writes it into `MODULE.bazel`; a `bazel_dep(name = ..., version = ...)` entry is always hand-typed. |
 
 `go.mod`, `package.json`, and `Cargo.toml` are the manifests where the
 ecosystem's own tooling already avoids the stale-pin problem.
