@@ -185,16 +185,3 @@ This was observed empirically across the `benchmark/` scaffolding runs (see [`be
 ecosystem's own tooling already avoids the stale-pin problem.
 However, `yul` still acts as a safety net for those ecosystems.
 
-Cargo has an extra wrinkle the other two don't: `go.mod` entries are
-*inherently* exact pins (there's no range syntax to fall back to), and npm's
-hand-typed fallback is still a real, checkable pin. Cargo's exactness marker
-(`=`) is opt-in, and a bare version like `"1.2.3"` is valid, idiomatic Cargo
-— so a manifest scaffolded by hand instead of via `cargo add` can carry a
-stale-but-plausible-looking version with no `=`, and `yul` (which only ever
-checks `=` pins) has nothing to catch. This showed up directly in one
-`hook`-condition benchmark run
-([`cargo-01-reqwest`](benchmark/runs/cargo-01-reqwest)): faced with the
-hook, Claude wrote `reqwest = "0.12"` and `tokio = "1"` — untriggering,
-unpinned, and older than what the `nohook` run got from `cargo add`
-(`reqwest 0.13.4`). The hook didn't get bypassed so much as sidestepped by a
-model that noticed what it does and doesn't look at.
