@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Supported manifests: `pom.xml` (Maven Central), `requirements.txt` and `pyproject.toml` (PyPI, `==` pins only), `package.json` (npm, exact pins across all four dependency fields), `.github/workflows/*.yml`/`*.yaml` (GitHub Actions, `uses:` steps pinned to a version-like tag — branch names and commit SHAs are left alone), `go.mod` (Go modules, `require` entries — every entry is inherently an exact pin, since go.mod has no range syntax), `Cargo.toml` (crates.io, `=` pins only — a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin).
 
+A user (or Claude, once the user has confirmed it) can opt a specific pin out of being blocked by listing it in a `.yul-ignore` file at the project root — one `<purl>@<version>` per line (`#` comments and blank lines allowed), matched against `mismatch.Mismatch.PURL`+`Current` (`pkg/ignore`, loaded in `main.go` via `hookInput.Cwd`). `runHook` filters mismatches against it before deciding whether to block, and the block message itself prints the exact line(s) to add and tells Claude not to work around the hook instead. This exists because the hook otherwise has no way to know "the user already said no" (it sees only the manifest diff, never chat history or a permission denial), which was pushing Claude toward disabling or editing the hook when a user rejected a suggested version in manual approval mode (chains-project/yul#22).
+
 ## Commands
 
 ```sh

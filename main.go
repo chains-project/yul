@@ -13,11 +13,13 @@ import (
 	"github.com/chains-project/yul/pkg/cargo"
 	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/golang"
+	"github.com/chains-project/yul/pkg/ignore"
 	"github.com/chains-project/yul/pkg/maven"
 	"github.com/chains-project/yul/pkg/npm"
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -64,7 +66,10 @@ var version = "dev"
 
 // hookInput is the subset of Claude Code's PreToolUse hook payload we need.
 type hookInput struct {
-	ToolName  string `json:"tool_name"`
+	ToolName string `json:"tool_name"`
+	// Cwd is the session's working directory, used to locate a project's
+	// .yul-ignore file (see pkg/ignore).
+	Cwd       string `json:"cwd"`
 	ToolInput struct {
 		FilePath   string `json:"file_path"`
 		Content    string `json:"content"`     // Write
@@ -72,6 +77,20 @@ type hookInput struct {
 		NewString  string `json:"new_string"`  // Edit
 		ReplaceAll bool   `json:"replace_all"` // Edit
 	} `json:"tool_input"`
+}
+
+// filterIgnored drops any mismatch the project's .yul-ignore file (see
+// pkg/ignore) already covers, so a pin the user has explicitly chosen to
+// keep doesn't keep re-blocking the same write.
+func filterIgnored(mismatches []mismatch.Mismatch, ignored ignore.Set) []mismatch.Mismatch {
+	var kept []mismatch.Mismatch
+	for _, m := range mismatches {
+		if ignored.Contains(m.PURL, m.Current) {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return kept
 }
 
 // runHook is a PreToolUse hook for the Write and Edit tools. It figures out
@@ -132,6 +151,7 @@ func runHook() {
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
 	}
 
+	mismatches = filterIgnored(mismatches, ignore.Load(in.Cwd))
 	if len(mismatches) == 0 {
 		os.Exit(0)
 	}
@@ -147,6 +167,13 @@ func runHook() {
 			latest = m.Suggested
 		}
 		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
+	}
+	fmt.Fprintf(os.Stderr, "\nIf the user does not want one of these updated, do not edit, disable, or otherwise work around this hook. Confirm with the user, then add the matching line(s) below to %s at the project root (create it if missing) and retry the original write unchanged:\n", ignore.Filename)
+	for _, m := range mismatches {
+		if m.PURL == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  %s@%s\n", m.PURL, m.Current)
 	}
 	os.Exit(2)
 }

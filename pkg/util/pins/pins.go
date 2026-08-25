@@ -100,6 +100,7 @@ func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res 
 				Name:      pin.Name,
 				Current:   pin.Version,
 				Latest:    latestVersion,
+				PURL:      pin.PURL,
 			})
 		}
 	}

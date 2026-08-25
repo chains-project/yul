@@ -167,6 +167,17 @@ outdated dependencies, use these versions instead:
 
 Claude reads this from stderr and rewrites the manifest with the correct version.
 
+#### Keeping a pin the hook would otherwise block
+
+Sometimes you don't want a dependency bumped — you're intentionally staying on an older release for compatibility, or you've already told Claude "no" and don't want to relitigate it every time the file gets touched. The hook can't see chat history or permission decisions, so it has no other way to know that on its own, and blocking a write it can't get out of is exactly what pushes Claude toward disabling or editing the hook instead. `yul` prints the fix for this in the same block message: add the listed `<purl>@<version>` line(s) to a `.yul-ignore` file at the project root (create it if it doesn't exist yet) and retry the original write unchanged. Blank lines and lines starting with `#` are ignored, so it doubles as a place to leave a note about why:
+
+```
+# staying on this pin for compatibility with our internal fork
+pkg:npm/lodash@4.17.20
+```
+
+Once a pin is listed there, the hook stops flagging that exact package/version pair — check the file in so the whole team's decision sticks. A pin isn't grandfathered in forever: if the manifest is later changed to an even older or different version, that's a new write the hook checks against `.yul-ignore` fresh.
+
 #### Initial scan
 
 If you are already working on a project and then you install the hook,

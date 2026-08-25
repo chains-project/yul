@@ -244,6 +244,7 @@ func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolv
 				Name:    pin.name,
 				Current: pin.version,
 				Latest:  latestVersion,
+				PURL:    pin.purl,
 			})
 		}
 	}
