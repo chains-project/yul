@@ -124,6 +124,8 @@ With `go run`, you can see below the exitCode is 1, but stderr reports exit stat
 
 ### Example
 
+#### Hook blocks a stale pin
+
 Claude tries to write a `pom.xml` pinning `org.json:json` to `20240303`. The hook blocks it:
 
 ```
@@ -164,6 +166,16 @@ outdated dependencies, use these versions instead:
 ```
 
 Claude reads this from stderr and rewrites the manifest with the correct version.
+
+#### Initial scan
+
+If you are already working on a project and then you install the hook,
+`yul` does an init-scan and asks you if you want to update any stale pins it finds. If you say yes,
+it updates on the fly, else, it remembers your decision and does not prompt 
+you later.
+
+![init-scan](docs/init-scan.png)
+
 
 ## Why some ecosystems need this more than others
 
