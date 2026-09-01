@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
 	"github.com/chains-project/yul/pkg/util/mismatch"
@@ -124,16 +125,29 @@ func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, er
 		return nil, err
 	}
 
-	var findings []Finding
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		findings []Finding
+	)
+	// Each manifest is checked in its own goroutine.
+	// Each goroutine bundles all the mismatches so that it can be queried later.
 	for _, m := range manifests {
-		mismatches, err := m.checker.Check("", string(m.content))
-		if err != nil {
-			continue // resolver/parse error on this file: fail open, keep scanning
-		}
-		for _, mm := range mismatches {
-			findings = append(findings, Finding{File: m.rel, Mismatch: mm})
-		}
+		wg.Add(1)
+		go func(m manifest) {
+			defer wg.Done()
+			mismatches, err := m.checker.Check("", string(m.content))
+			if err != nil {
+				return // resolver/parse error on this file: fail open, keep scanning
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, mm := range mismatches {
+				findings = append(findings, Finding{File: m.rel, Mismatch: mm})
+			}
+		}(m)
 	}
+	wg.Wait()
 
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].File != findings[j].File {
