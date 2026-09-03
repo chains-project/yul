@@ -96,6 +96,8 @@ func TestUnnotified(t *testing.T) {
 	okhttp := Finding{File: "pom.xml", Mismatch: mismatch.Mismatch{Namespace: "com.squareup.okhttp3", Name: "okhttp", Current: "4.9.0", Latest: "4.12.0"}}
 	leftPad := Finding{File: "package.json", Mismatch: mismatch.Mismatch{Name: "left-pad", Current: "1.0.0", Latest: "1.3.0"}}
 	okhttpNewerRelease := Finding{File: "pom.xml", Mismatch: mismatch.Mismatch{Namespace: "com.squareup.okhttp3", Name: "okhttp", Current: "4.9.0", Latest: "5.0.0"}}
+	fakeDep := Finding{File: "pom.xml", Mismatch: mismatch.Mismatch{Namespace: "com.example", Name: "invented", Current: "1.0.0", Kind: mismatch.KindMissingPackage}}
+	fakeDepNowReal := Finding{File: "pom.xml", Mismatch: mismatch.Mismatch{Namespace: "com.example", Name: "invented", Current: "1.0.0", Latest: "1.2.0"}}
 
 	tests := []struct {
 		name      string
@@ -107,6 +109,8 @@ func TestUnnotified(t *testing.T) {
 		{"already notified: nothing new", []Finding{okhttp}, []Finding{okhttp}, 0},
 		{"one already notified, one new", []Finding{okhttp, leftPad}, []Finding{okhttp}, 1},
 		{"same package, latest drifted further: counts as new", []Finding{okhttpNewerRelease}, []Finding{okhttp}, 1},
+		{"hallucinated package already notified: nothing new", []Finding{fakeDep}, []Finding{fakeDep}, 0},
+		{"hallucinated package now resolves to a real outdated pin: counts as new", []Finding{fakeDepNowReal}, []Finding{fakeDep}, 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

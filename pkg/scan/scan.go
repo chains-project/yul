@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
@@ -25,11 +26,12 @@ type Finding struct {
 }
 
 // key identifies a Finding for notification purposes: same file, same
-// package, same pinned version, same latest release. If any of those
-// changes — the pin moved, or upstream cut a newer release — it's treated
-// as a distinct finding worth surfacing again.
+// package, same pinned version, same latest release, same kind. If any of
+// those changes — the pin moved, upstream cut a newer release, or a
+// hallucinated coordinate became an outdated one — it's treated as a
+// distinct finding worth surfacing again.
 func (f Finding) key() string {
-	return f.File + "\x00" + f.Namespace + "\x00" + f.Name + "\x00" + f.Current + "\x00" + f.Latest
+	return f.File + "\x00" + f.Namespace + "\x00" + f.Name + "\x00" + f.Current + "\x00" + f.Latest + "\x00" + strconv.Itoa(int(f.Kind))
 }
 
 // Unnotified returns the findings in current that aren't in notified, so a

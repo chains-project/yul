@@ -2,7 +2,10 @@ package maven
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/mismatch"
 )
 
 type fakeResolver struct {
@@ -19,6 +22,28 @@ func (r *fakeResolver) LatestVersions(_ context.Context, purls []string) (map[st
 		}
 	}
 	return result, nil
+}
+
+// fakeExistence answers from a "groupId:artifactId" -> Existence map.
+// Coordinates absent from the map are assumed fully real (Package and
+// Version both true), so a test only has to spell out the hallucinated
+// ones. A non-nil err is returned for every lookup, simulating an
+// inconclusive network failure.
+type fakeExistence struct {
+	known map[string]Existence
+	err   error
+	calls int
+}
+
+func (f *fakeExistence) Existence(_ context.Context, groupID, artifactID, _ string) (Existence, error) {
+	f.calls++
+	if f.err != nil {
+		return Existence{}, f.err
+	}
+	if ex, ok := f.known[groupID+":"+artifactID]; ok {
+		return ex, nil
+	}
+	return Existence{Package: true, Version: true}, nil
 }
 
 func TestParsePOMPinsCollectsSupportedDeclarations(t *testing.T) {
@@ -215,7 +240,7 @@ func TestCheckPOMOnlyChecksChangedPinnedCoordinates(t *testing.T) {
 		<dependency><groupId>org.example</groupId><artifactId>property</artifactId><version>${property.version}</version></dependency>
 	</dependencies></project>`
 
-	got, err := CheckPOM(before, after, res)
+	got, err := CheckPOM(before, after, res, nil)
 	if err != nil {
 		t.Fatalf("CheckPOM() error = %v", err)
 	}
@@ -230,5 +255,136 @@ func TestCheckPOMOnlyChecksChangedPinnedCoordinates(t *testing.T) {
 		got[0].Current != "1.0.0" ||
 		got[0].Latest != "2.0.0" {
 		t.Fatalf("CheckPOM() mismatch = %#v", got[0])
+	}
+}
+
+// pomWith wraps one or more <dependency> blocks in a minimal project.
+func pomWith(deps string) string {
+	return `<project><dependencies>` + deps + `</dependencies></project>`
+}
+
+func dep(group, artifact, version string) string {
+	return `<dependency><groupId>` + group + `</groupId><artifactId>` + artifact +
+		`</artifactId><version>` + version + `</version></dependency>`
+}
+
+func TestCheckPOMFlagsHallucinatedPackage(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{}}
+	exist := &fakeExistence{known: map[string]Existence{
+		"com.example:invented-lib": {Package: false},
+	}}
+
+	after := pomWith(dep("com.example", "invented-lib", "1.0.0"))
+
+	got, err := CheckPOM("", after, res, exist)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if res.lookups != 0 {
+		t.Fatalf("CheckPOM() resolved %d latest versions, want 0 (missing package dropped before Diff)", res.lookups)
+	}
+	if len(got) != 1 || got[0].Kind != mismatch.KindMissingPackage ||
+		got[0].Namespace != "com.example" || got[0].Name != "invented-lib" || got[0].Current != "1.0.0" {
+		t.Fatalf("CheckPOM() = %#v, want one KindMissingPackage mismatch", got)
+	}
+}
+
+func TestCheckPOMFlagsHallucinatedVersion(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{}}
+	exist := &fakeExistence{known: map[string]Existence{
+		"com.example:real-lib": {Package: true, Version: false},
+	}}
+
+	after := pomWith(dep("com.example", "real-lib", "9.9.9"))
+
+	got, err := CheckPOM("", after, res, exist)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if res.lookups != 0 {
+		t.Fatalf("CheckPOM() resolved %d latest versions, want 0 (missing version dropped before Diff)", res.lookups)
+	}
+	if len(got) != 1 || got[0].Kind != mismatch.KindMissingVersion ||
+		got[0].Name != "real-lib" || got[0].Current != "9.9.9" {
+		t.Fatalf("CheckPOM() = %#v, want one KindMissingVersion mismatch", got)
+	}
+}
+
+func TestCheckPOMHallucinatedAndOutdatedCombine(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:maven/com.example/real": "2.0.0"}}
+	exist := &fakeExistence{known: map[string]Existence{
+		"com.example:fake": {Package: false},
+	}}
+
+	after := pomWith(dep("com.example", "fake", "1.0.0") + dep("com.example", "real", "1.0.0"))
+
+	got, err := CheckPOM("", after, res, exist)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("CheckPOM() returned %d mismatches, want 2: %#v", len(got), got)
+	}
+	byName := map[string]mismatch.Mismatch{}
+	for _, m := range got {
+		byName[m.Name] = m
+	}
+	if byName["fake"].Kind != mismatch.KindMissingPackage {
+		t.Errorf("fake dep = %#v, want KindMissingPackage", byName["fake"])
+	}
+	if byName["real"].Kind != mismatch.KindOutdated || byName["real"].Latest != "2.0.0" {
+		t.Errorf("real dep = %#v, want outdated -> 2.0.0", byName["real"])
+	}
+}
+
+func TestCheckPOMExistenceInconclusiveFailsOpen(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:maven/com.example/lib": "1.0.0"}}
+	exist := &fakeExistence{err: errors.New("dial tcp: timeout")}
+
+	after := pomWith(dep("com.example", "lib", "1.0.0"))
+
+	got, err := CheckPOM("", after, res, exist)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if exist.calls != 1 {
+		t.Fatalf("CheckPOM() made %d existence calls, want 1", exist.calls)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckPOM() = %#v, want no mismatches when existence is inconclusive", got)
+	}
+}
+
+func TestCheckPOMIgnoresUntouchedHallucination(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{}}
+	exist := &fakeExistence{known: map[string]Existence{
+		"com.example:fake": {Package: false},
+	}}
+
+	pom := pomWith(dep("com.example", "fake", "1.0.0"))
+
+	got, err := CheckPOM(pom, pom, res, exist)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if exist.calls != 0 {
+		t.Fatalf("CheckPOM() made %d existence calls for an untouched pin, want 0", exist.calls)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckPOM() = %#v, want nothing for an untouched hallucinated pin", got)
+	}
+}
+
+func TestCheckPOMNilExistenceSkipsHallucinationCheck(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:maven/com.example/lib": "1.0.0"}}
+
+	after := pomWith(dep("com.example", "lib", "1.0.0"))
+
+	got, err := CheckPOM("", after, res, nil)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckPOM() = %#v, want nothing", got)
 	}
 }

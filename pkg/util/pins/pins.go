@@ -61,21 +61,35 @@ func ExactVersion(spec, scheme string, requireOperator bool) (string, bool) {
 	return version, true
 }
 
+// Changed returns the pins in after that are new or whose value differs
+// from the pin at the same location in before, keyed by that location.
+// Pins left untouched by the write are omitted. Moving a declaration to a
+// different logical location counts as a change.
+func Changed(before, after map[string]Pin) map[string]Pin {
+	changed := make(map[string]Pin)
+	for location, pin := range after {
+		if prior, ok := before[location]; ok && prior == pin {
+			continue // untouched by this write
+		}
+		changed[location] = pin
+	}
+	return changed
+}
+
 // Diff reports pins in after that are new or whose version changed from
 // before, and whose pinned version is older than the latest release res
 // knows about (compared under scheme's ordering rules). Pins left
 // untouched by the write are ignored even if outdated. Moving a declaration
 // to a different logical location counts as a change.
 func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
-	var changed []Pin
-	for location, pin := range after {
-		if prior, ok := before[location]; ok && prior == pin {
-			continue // untouched by this write
-		}
-		changed = append(changed, pin)
-	}
-	if len(changed) == 0 {
+	changedByLocation := Changed(before, after)
+	if len(changedByLocation) == 0 {
 		return nil, nil
+	}
+
+	changed := make([]Pin, 0, len(changedByLocation))
+	for _, pin := range changedByLocation {
+		changed = append(changed, pin)
 	}
 
 	purls := make([]string, len(changed))
