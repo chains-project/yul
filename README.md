@@ -2,6 +2,8 @@
 
 A Claude Code `PreToolUse` hook that keeps dependencies current. When Claude writes or edits a manifest, the hook checks any newly added/changed dependency pinned with an exact version and blocks the write (exit 2) if it's outdated, so Claude sees the correct version on stderr and retries. Other files and untouched dependencies pass through untouched; resolver/network errors fail open.
 
+For `pom.xml`, the hook also blocks a newly added `<dependency>` whose `groupId:artifactId` — or whose pinned `<version>` — doesn't exist on Maven Central at all, a coordinate the model hallucinated rather than one that's merely out of date.
+
 Supported manifests:
 - `pom.xml` — Maven Central
 - `requirements.txt` — PyPI, `==` pins only
@@ -166,6 +168,18 @@ outdated dependencies, use these versions instead:
 ```
 
 Claude reads this from stderr and rewrites the manifest with the correct version.
+
+#### Hook blocks a hallucinated Maven dependency
+
+Claude tries to write a `pom.xml` pinning `com.example:supercache` to `1.0.0`, a package that doesn't exist on Maven Central, and `com.google.guava:guava` to `99.0-jre`, a version that was never released. The hook blocks it:
+
+```
+problems with new dependencies:
+  com.example:supercache  does not exist - hallucinated package, remove it or use a real coordinate
+  com.google.guava:guava  version 99.0-jre was never published - hallucinated version
+```
+
+Claude reads this from stderr and removes the invented dependency (or replaces it with a real one).
 
 #### Initial scan
 

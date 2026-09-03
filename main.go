@@ -18,6 +18,7 @@ import (
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -25,9 +26,17 @@ import (
 // to, keyed off which manifest filename each one owns. Add an entry here as
 // each ecosystem's checker is implemented. res is shared across the
 // checkers that resolve latest versions through git-pkgs/enrichment.
+//
+// A nil res means the caller only needs Filename/MatchesPath matching (the
+// network-free scan-hash pass), so the network-backed helpers - maven's
+// hallucination check included - are left unset.
 func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
+	var mavenExistence maven.ExistenceChecker
+	if res != nil {
+		mavenExistence = maven.NewMavenCentralExistenceChecker()
+	}
 	return []manifestchecker.ManifestChecker{
-		maven.Checker{Resolver: res},
+		maven.Checker{Resolver: res, Existence: mavenExistence},
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
@@ -136,19 +145,53 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+	if anyHallucinated(mismatches) {
+		fmt.Fprintln(os.Stderr, "problems with new dependencies:")
+	} else {
+		fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+	}
 	for _, m := range mismatches {
-		name := m.Name
-		if m.Namespace != "" {
-			name = m.Namespace + ":" + m.Name
-		}
+		fmt.Fprintf(os.Stderr, "  %s  %s\n", coordName(m.Namespace, m.Name), mismatchDetail(m))
+	}
+	os.Exit(2)
+}
+
+// coordName renders a dependency's display name, joining a non-empty
+// namespace (Maven groupId, GitHub Actions owner) to the name.
+func coordName(namespace, name string) string {
+	if namespace != "" {
+		return namespace + ":" + name
+	}
+	return name
+}
+
+// mismatchDetail renders the part of a report line after the name: a
+// version bump for an outdated pin, or an explanation for a hallucinated
+// coordinate or version.
+func mismatchDetail(m mismatch.Mismatch) string {
+	switch m.Kind {
+	case mismatch.KindMissingPackage:
+		return "does not exist - hallucinated package, remove it or use a real coordinate"
+	case mismatch.KindMissingVersion:
+		return "version " + m.Current + " was never published - hallucinated version"
+	default:
 		latest := m.Latest
 		if m.Suggested != "" {
 			latest = m.Suggested
 		}
-		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
+		return m.Current + " -> " + latest
 	}
-	os.Exit(2)
+}
+
+// anyHallucinated reports whether any mismatch is a missing package or
+// version rather than a plain outdated pin.
+func anyHallucinated(ms []mismatch.Mismatch) bool {
+	for _, m := range ms {
+		if m.Kind != mismatch.KindOutdated {
+			return true
+		}
+	}
+	return false
 }
 
 // scanCacheTTL is how long a project scan's cached findings are reused
@@ -263,21 +306,22 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		os.Exit(0)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
-		scannedAt.Format("2006-01-02"), len(findings))
-	for _, f := range findings {
-		name := f.Name
-		if f.Namespace != "" {
-			name = f.Namespace + ":" + f.Name
-		}
-		latest := f.Latest
-		if f.Suggested != "" {
-			latest = f.Suggested
-		}
-		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
+	headline := "pinned dependencies older than the latest release"
+	mismatches := make([]mismatch.Mismatch, len(findings))
+	for i, f := range findings {
+		mismatches[i] = f.Mismatch
 	}
-	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
+	if anyHallucinated(mismatches) {
+		headline = "dependency problems"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d %s:\n",
+		scannedAt.Format("2006-01-02"), len(findings), headline)
+	for _, f := range findings {
+		fmt.Fprintf(&b, "  %s: %s  %s\n", f.File, coordName(f.Namespace, f.Name), mismatchDetail(f.Mismatch))
+	}
+	b.WriteString("Ask the user whether they'd like these fixed before making any other changes to these files.")
 
 	out := struct {
 		HookSpecificOutput struct {

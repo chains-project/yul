@@ -60,6 +60,47 @@ func (r *fakeResolver) LatestVersions(ctx context.Context, purls []string) (map[
 	return result, nil
 }
 
+func TestChanged(t *testing.T) {
+	before := map[string]Pin{
+		"untouched": {Name: "untouched", Version: "1.0.0", PURL: "pkg:npm/untouched"},
+		"bumped":    {Name: "bumped", Version: "1.0.0", PURL: "pkg:npm/bumped"},
+		"location":  {Name: "moved", Version: "1.0.0", PURL: "pkg:npm/moved"},
+	}
+	after := map[string]Pin{
+		"untouched":    {Name: "untouched", Version: "1.0.0", PURL: "pkg:npm/untouched"},
+		"bumped":       {Name: "bumped", Version: "2.0.0", PURL: "pkg:npm/bumped"},
+		"new-location": {Name: "moved", Version: "1.0.0", PURL: "pkg:npm/moved"},
+		"added":        {Name: "added", Version: "1.0.0", PURL: "pkg:npm/added"},
+	}
+
+	got := Changed(before, after)
+
+	want := map[string]string{"bumped": "bumped", "new-location": "moved", "added": "added"}
+	if len(got) != len(want) {
+		t.Fatalf("Changed() = %#v, want %d entries", got, len(want))
+	}
+	for location, name := range want {
+		pin, ok := got[location]
+		if !ok {
+			t.Errorf("Changed() missing %q", location)
+			continue
+		}
+		if pin.Name != name {
+			t.Errorf("Changed()[%q].Name = %q, want %q", location, pin.Name, name)
+		}
+	}
+	if _, ok := got["untouched"]; ok {
+		t.Error("Changed() included an untouched pin")
+	}
+}
+
+func TestChangedEmptyWhenIdentical(t *testing.T) {
+	m := map[string]Pin{"a": {Name: "a", Version: "1.0.0", PURL: "pkg:npm/a"}}
+	if got := Changed(m, m); len(got) != 0 {
+		t.Fatalf("Changed(identical) = %#v, want empty", got)
+	}
+}
+
 func TestDiff(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{
 		"pkg:npm/added":   "2.0.0",
