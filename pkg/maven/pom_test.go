@@ -232,3 +232,78 @@ func TestCheckPOMOnlyChecksChangedPinnedCoordinates(t *testing.T) {
 		t.Fatalf("CheckPOM() mismatch = %#v", got[0])
 	}
 }
+
+// TestCheckPOMResolvesPropertyVersion covers the case yul used to miss
+// entirely: a dependency version written as "${x.version}" with x.version
+// itself defined in <properties>, which is how most real-world POMs (e.g.
+// mockito.version, spring.version) pin shared dependency versions.
+func TestCheckPOMResolvesPropertyVersion(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:maven/org.mockito/mockito-core": "5.14.2"}}
+
+	before := ""
+	after := `<project>
+		<properties><mockito.version>5.11.0</mockito.version></properties>
+		<dependencies>
+			<dependency><groupId>org.mockito</groupId><artifactId>mockito-core</artifactId><version>${mockito.version}</version></dependency>
+		</dependencies>
+	</project>`
+
+	got, err := CheckPOM(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if res.lookups != 1 {
+		t.Fatalf("CheckPOM() made %d resolver lookups, want 1", res.lookups)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CheckPOM() returned %d mismatches, want 1: %#v", len(got), got)
+	}
+	if got[0].Namespace != "org.mockito" ||
+		got[0].Name != "mockito-core" ||
+		got[0].Current != "5.11.0" ||
+		got[0].Latest != "5.14.2" {
+		t.Fatalf("CheckPOM() mismatch = %#v", got[0])
+	}
+}
+
+// TestCheckPOMSkipsUnresolvablePropertyVersion covers properties yul still
+// can't and shouldn't resolve: undefined names, built-ins like
+// project.version, and multi-token values ("1.0.${qualifier}").
+func TestCheckPOMSkipsUnresolvablePropertyVersion(t *testing.T) {
+	res := &fakeResolver{}
+
+	after := `<project>
+		<properties><chained.version>${undefined}</chained.version></properties>
+		<dependencies>
+			<dependency><groupId>org.example</groupId><artifactId>undefined-prop</artifactId><version>${nope}</version></dependency>
+			<dependency><groupId>org.example</groupId><artifactId>builtin-prop</artifactId><version>${project.version}</version></dependency>
+			<dependency><groupId>org.example</groupId><artifactId>chained-prop</artifactId><version>${chained.version}</version></dependency>
+			<dependency><groupId>org.example</groupId><artifactId>partial-prop</artifactId><version>1.0.${qualifier}</version></dependency>
+		</dependencies>
+	</project>`
+
+	got, err := CheckPOM("", after, res)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if res.lookups != 0 {
+		t.Fatalf("CheckPOM() made %d resolver lookups, want 0", res.lookups)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckPOM() returned %d mismatches, want 0: %#v", len(got), got)
+	}
+}
+
+func TestParsePOMPropertiesIgnoresNamespaceAndMalformedXML(t *testing.T) {
+	content := `<project xmlns="http://maven.apache.org/POM/4.0.0">
+		<properties><mockito.version>5.11.0</mockito.version></properties>
+	</project>`
+	props := parsePOMProperties(content)
+	if props["mockito.version"] != "5.11.0" {
+		t.Fatalf("parsePOMProperties() = %#v, want mockito.version=5.11.0", props)
+	}
+
+	if props := parsePOMProperties("<project>"); props != nil {
+		t.Fatalf("parsePOMProperties(invalid) = %#v, want nil", props)
+	}
+}
