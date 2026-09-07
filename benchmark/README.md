@@ -18,33 +18,42 @@ prompt in a real, citable source instead of an invented scenario:
 - **Java/Maven** and **GitHub Actions**: no case-level natural-language
   benchmark exists for either ecosystem (BUMP records commits, not prompts,
   and nothing comparable exists for Actions), so instead of writing a
-  purpose description by hand, every prompt is the **verbatim title of a
-  real, verified `dependabot[bot]`/`renovate[bot]` pull request** that
-  bumped that exact dependency/action in a real public repo — fetched and
-  checked against the live PR, not reconstructed. The dependency/action
-  choice itself is grounded in real frequency data: Maven picks (`slf4j-api`,
-  `jackson-databind`, `spring-core`, ...) come from occurrence counts in
-  [BUMP](https://github.com/chains-project/bump) (Reyes, Gamage, Skoglund,
-  Baudry & Monperrus, SANER 2024, arXiv:2401.09906) — 571 reproducible real
-  breaking dependency updates mined from 153 real Java projects; GitHub
-  Actions picks (`checkout`, `setup-python`, `cache`, ...) come from Decan &
-  Mens, "On the outdatedness of workflows in the GitHub Actions ecosystem"
-  (Journal of Systems and Software, 2023, ~1M real workflows mined) plus
-  Codecov's marketplace usage writeup. Each case's seed manifest pins the
-  exact old version the real PR bumped *from*, and the prompt names the
-  exact version the real PR bumped *to* — which, since these are historical
-  PRs, is itself now stale. That directly exercises yul's core claim: even
-  told to bump to a specific *real, once-current* version, it should push
-  past that to whatever is actually latest today.
+  purpose description by hand, every prompt quotes the target library or
+  action's own **real, verbatim upstream description** (its GitHub repo's
+  "About" text, or its Marketplace listing when the repo has none set) —
+  e.g. `"Simple Logging Facade for Java"` for SLF4J, straight from
+  [github.com/qos-ch/slf4j](https://github.com/qos-ch/slf4j). Crucially,
+  none of these prompts name a version. An earlier draft of this file used
+  the verbatim titles of real `dependabot[bot]`/`renovate[bot]` PRs instead
+  (e.g. `"Bump actions/upload-artifact from 3 to 4"`), which was real but
+  wrong for a different reason: it told the model exactly which version to
+  land on, so forcing it further to today's actual latest would mean
+  overriding an explicit, precise user instruction — not catching a
+  training-cutoff default, which is what yul is actually for. Quoting the
+  project's own tagline instead keeps the case real without dictating an
+  answer: whatever version Claude ends up pinning is its own default,
+  unprompted, exactly like the Maven/Actions cases in `cases.json`.
+  The dependency/action *choice* is still grounded in real frequency data:
+  Maven picks (`slf4j-api`, `jackson-databind`, `spring-core`, ...) come
+  from occurrence counts in [BUMP](https://github.com/chains-project/bump)
+  (Reyes, Gamage, Skoglund, Baudry & Monperrus, SANER 2024,
+  arXiv:2401.09906) — 571 reproducible real breaking dependency updates
+  mined from 153 real Java projects; GitHub Actions picks (`checkout`,
+  `setup-python`, `cache`, ...) come from Decan & Mens, "On the
+  outdatedness of workflows in the GitHub Actions ecosystem" (Journal of
+  Systems and Software, 2023, ~1M real workflows mined) plus Codecov's
+  marketplace usage writeup.
 - **Python**: unlike Maven/Actions, GitChameleon's `problem` field *is*
-  natural-language task text (not a commit/PR title), so those prompts are
-  reworded from that field rather than quoted verbatim — see below.
+  natural-language task text (not a commit/PR title or a tagline), so
+  those prompts are reworded from that field rather than quoted verbatim —
+  see below. It likewise never names a version.
 
 Each entry in `cases-real.json` carries a `source` field documenting the
 paper/dataset, URL, and specific record it's grounded in (`example_id` for
-GitChameleon; `dependency` plus the real `pr_url`/`pr_title`/`pr_author` for
-Maven and GitHub Actions). `run_case.sh` ignores unknown fields, so `source`
-is metadata only and doesn't affect execution.
+GitChameleon; `dependency` plus `description_source` — the real upstream
+URL and verbatim quote — for Maven and GitHub Actions). `run_case.sh`
+ignores unknown fields, so `source` is metadata only and doesn't affect
+execution.
 
 Each case runs the scaffolding prompt non-interactively:
 
