@@ -84,8 +84,8 @@ type pomPropertiesDoc struct {
 // element name. It deliberately doesn't resolve parent POMs, profiles, or
 // built-in properties like ${project.version}: only what's declared
 // directly in this file, matching the rest of this checker's source-level,
-// no-network-beyond-the-resolver approach. Malformed XML yields an empty
-// map; manifests.Parse above is the one that surfaces parse errors.
+// no-network-beyond-the-resolver approach. Malformed XML yields a nil map;
+// manifests.Parse above is the one that surfaces parse errors.
 func parsePOMProperties(content string) map[string]string {
 	var doc pomPropertiesDoc
 	if err := xml.Unmarshal([]byte(content), &doc); err != nil {
