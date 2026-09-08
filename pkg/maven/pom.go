@@ -5,6 +5,7 @@ package maven
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"strings"
 
@@ -33,6 +34,9 @@ func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
 // parsePOMPins returns concrete source-level Maven version declarations keyed
 // by their stable location in the POM. Maven commonly uses a bare version as a
 // fixed declaration, which is the behavior the hook has historically checked.
+// A version written as a single "${name}" property reference is resolved
+// against the POM's own top-level <properties> block, so a pin like
+// "${mockito.version}" is checked just like a literal one.
 func parsePOMPins(content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -43,9 +47,10 @@ func parsePOMPins(content string) (map[string]pins.Pin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing pom.xml: %w", err)
 	}
+	props := parsePOMProperties(content)
 
 	for _, declaration := range parsed.Declarations {
-		version, ok := mavenPinnedVersion(declaration.Version)
+		version, ok := mavenPinnedVersion(declaration.Version, props)
 		if !ok {
 			continue
 		}
@@ -63,9 +68,50 @@ func parsePOMPins(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
-func mavenPinnedVersion(requirement string) (string, bool) {
+// pomPropertiesDoc extracts a POM's top-level <properties> block regardless
+// of the default xmlns Maven POMs declare on <project> (Go's xml decoder
+// matches unqualified struct tags by local name alone).
+type pomPropertiesDoc struct {
+	Properties struct {
+		Entries []struct {
+			XMLName xml.Name
+			Value   string `xml:",chardata"`
+		} `xml:",any"`
+	} `xml:"properties"`
+}
+
+// parsePOMProperties returns the POM's own <properties> values, keyed by
+// element name. It deliberately doesn't resolve parent POMs, profiles, or
+// built-in properties like ${project.version}: only what's declared
+// directly in this file, matching the rest of this checker's source-level,
+// no-network-beyond-the-resolver approach. Malformed XML yields a nil map;
+// manifests.Parse above is the one that surfaces parse errors.
+func parsePOMProperties(content string) map[string]string {
+	var doc pomPropertiesDoc
+	if err := xml.Unmarshal([]byte(content), &doc); err != nil {
+		return nil
+	}
+	props := make(map[string]string, len(doc.Properties.Entries))
+	for _, entry := range doc.Properties.Entries {
+		props[entry.XMLName.Local] = strings.TrimSpace(entry.Value)
+	}
+	return props
+}
+
+func mavenPinnedVersion(requirement string, props map[string]string) (string, bool) {
 	requirement = strings.TrimSpace(requirement)
-	if requirement == "" || strings.Contains(requirement, "${") {
+	if requirement == "" {
+		return "", false
+	}
+	if strings.HasPrefix(requirement, "${") && strings.HasSuffix(requirement, "}") &&
+		strings.Count(requirement, "${") == 1 {
+		name := requirement[2 : len(requirement)-1]
+		resolved, ok := props[name]
+		if !ok || resolved == "" || strings.Contains(resolved, "${") {
+			return "", false
+		}
+		requirement = resolved
+	} else if strings.Contains(requirement, "${") {
 		return "", false
 	}
 	if strings.HasPrefix(requirement, "[") || strings.HasPrefix(requirement, "(") {
