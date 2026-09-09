@@ -1,5 +1,12 @@
 # benchmark
 
+`top_packages.sh [COUNT] [METRIC]` fetches the top `COUNT` (default 10)
+packages per ecosystem, for every ecosystem yul supports that ecosyste.ms
+also tracks (maven, pypi, npm, GitHub Actions, go, cargo), sorted by a
+given ecosyste.ms popularity metric (default `dependent_repos_count`).
+Useful for sourcing new `cases.json` candidates. See the script header for
+details.
+
 Each case runs the scaffolding prompt non-interactively:
 
 ```
