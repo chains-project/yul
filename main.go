@@ -33,7 +33,7 @@ import (
 func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 	var mavenExistence maven.ExistenceChecker
 	if res != nil {
-		mavenExistence = maven.NewMavenCentralExistenceChecker()
+		mavenExistence = maven.NewRegistryExistenceChecker()
 	}
 	return []manifestchecker.ManifestChecker{
 		maven.Checker{Resolver: res, Existence: mavenExistence},
