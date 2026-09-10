@@ -19,7 +19,11 @@ if [ -z "$C" ]; then
   exit 1
 fi
 
-MANIFEST=$(echo "$C" | jq -r '.manifest')
+# .manifest is usually a single path, but a case may instead give an array
+# of candidate paths (e.g. a pypi case that lets Claude pick between
+# requirements.txt and pyproject.toml) - only meaningful for "fresh" cases,
+# since an "existing" case needs one fixed path to seed.
+MANIFEST=$(echo "$C" | jq -r 'if (.manifest|type)=="array" then .manifest[0] else .manifest end')
 TYPE=$(echo "$C" | jq -r '.type')
 PROMPT=$(echo "$C" | jq -r '.prompt')
 SEED=$(echo "$C" | jq -r '.seed // empty')
@@ -75,8 +79,29 @@ claude -p "$PROMPT" \
   --no-session-persistence \
   > transcript.jsonl 2> stderr.log || true
 
-if [ -f "$MANIFEST" ]; then
-  cp "$MANIFEST" "final_manifest"
+# When .manifest listed several candidate paths, use whichever one Claude
+# actually wrote (the case leaves the choice of manifest file - or, for a
+# glob candidate like ".github/workflows/*.yml", the choice of filename too
+# - up to it).
+FOUND_MANIFEST=""
+shopt -s nullglob
+while IFS= read -r candidate; do
+  if [[ "$candidate" == *"*"* ]]; then
+    matches=( $candidate )
+    if [ ${#matches[@]} -gt 0 ]; then
+      FOUND_MANIFEST="${matches[0]}"
+      break
+    fi
+  elif [ -f "$candidate" ]; then
+    FOUND_MANIFEST="$candidate"
+    break
+  fi
+done < <(echo "$C" | jq -r 'if (.manifest|type)=="array" then .manifest[] else .manifest end')
+shopt -u nullglob
+
+if [ -n "$FOUND_MANIFEST" ]; then
+  cp "$FOUND_MANIFEST" "final_manifest"
+  echo "$FOUND_MANIFEST" > "final_manifest_path"
 else
   echo "MANIFEST_NOT_WRITTEN" > final_manifest
 fi
