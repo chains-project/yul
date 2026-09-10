@@ -43,6 +43,12 @@ declare -A ECOSYSTEMS=(
 )
 
 ## Helpers
+# urlencode STRING: percent-encode a single URL path segment (registry
+# names like "github actions" contain spaces).
+urlencode() {
+	jq -rn --arg s "$1" '$s|@uri'
+}
+
 # fetch URL <max_tries>: curl the URL, retrying on non-JSON / error
 # responses. Prints the raw response body on success, nothing on failure.
 fetch() {
@@ -86,7 +92,7 @@ for eco in "${!REGISTRY[@]}"; do
 	echo ''
 	echo "-- ${eco} (registry: ${registry}) --"
 
-	url="https://packages.ecosyste.ms/api/v1/registries/${registry}/package_names?page=1&per_page=${COUNT}&sort=${METRIC}"
+	url="https://packages.ecosyste.ms/api/v1/registries/$(urlencode "${registry}")/package_names?page=1&per_page=${COUNT}&sort=${METRIC}"
 	body=$(fetch "${url}") || {
 		echo "  ! giving up on ${eco}" 1>&2
 		continue
