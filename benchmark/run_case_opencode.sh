@@ -86,10 +86,29 @@ if [ "$CONDITION" = "hook" ]; then
   # throw on exit 2 so OpenCode surfaces the stderr reason back to the
   # model - the same self-correction loop Claude Code's exit-2/stderr gives.
   cat > "$WORKDIR/.opencode/plugins/yul.js" <<'EOF'
+// Manifest basenames yul knows how to check, mirroring pkg/*'s Filename()
+// values (githubactions workflows use MatchesPath instead of a fixed name,
+// so they're matched separately below).
+const MANIFEST_RE = /(^|[/\\ '"])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github\/workflows\/[^\s'"]+\.ya?ml)(?=[/\\ '"]|$)/
+// Shell constructs that mutate a file's *content* on disk - not an
+// exhaustive parse of bash, just enough to catch the bypass a live model
+// actually used (`printf ... > requirements.txt`) plus its common cousins.
+const WRITE_RE = />>?(?!&)|\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\s+of=|\bcp\s|\bmv\s/
+
 export const YulPlugin = async () => {
   const YUL_BIN = process.env.YUL_BIN || "yul"
   return {
     "tool.execute.before": async (input, output) => {
+      if (input.tool === "bash") {
+        const cmd = output.args.command || ""
+        if (MANIFEST_RE.test(cmd) && WRITE_RE.test(cmd)) {
+          throw new Error(
+            "yul: use the write or edit tool to modify dependency manifests, not bash " +
+            "(bash writes bypass the outdated-dependency check)"
+          )
+        }
+        return
+      }
       if (input.tool !== "write" && input.tool !== "edit") return
       const a = output.args
       const payload = input.tool === "write"
