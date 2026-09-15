@@ -25,14 +25,14 @@ Two files come out of each run:
 | Maven | 10 | 10 | 3 | 10 | 0 | 10 | 100% |
 | GitHub Actions | 10 | 1 | 1 | 10 | 0 | 10 | 100% |
 | PyPI | 10 | 9 | 8 | 9 | 0 | 8 | 89% |
-| npm | 10 | 4 | 3 | 7 | 4 | 3 | 100% |
+| npm | 10 | 4 | 3 | 6 | 3 | 3 | 100% |
 | Go modules | 10 | 1 | 1 | 1 | 0 | 1 | 100% |
-| Cargo | 10 | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | **60** | **25** | **16** | **37** | **4** | **32** | **97%** |
+| Cargo | 10 | 1 | 1 | 3 | 3 | 0 | — |
+| **Total** | **60** | **26** | **17** | **39** | **6** | **32** | **97%** |
 
-Without the hook, 25 of the 60 tasks are versioned and 16 of those already name the latest release. With the hook installed, 37 of the 60 tasks are versioned and 4 of those already name the latest release, leaving 33 stale candidates — `yul`'s hook blocks 32 of those 33 (97%).
+Without the hook, 26 of the 60 tasks are versioned and 17 of those already name the latest release. With the hook installed, 39 of the 60 tasks are versioned and 6 of those already name the latest release, leaving 33 stale candidates — `yul`'s hook blocks 32 of those 33 (97%).
 
-Twenty-three of the 60 tasks are never blocked because the hook never fires: Claude shells out to `go get`, `cargo add`, or `npm install`, which resolve to the current registry version and write the manifest directly, bypassing `Write`/`Edit` entirely — all nine remaining Go tasks, all ten Cargo tasks, and three of the seven unblocked npm tasks follow this pattern. The other four unblocked npm tasks do go through `Write`, but the pin Claude writes already matches the latest release, so there's nothing to block.
+Twenty-one of the 60 tasks are never blocked because the hook never fires: Claude shells out to `go get`, `cargo add`, or `npm install`, which resolve to the current registry version and write the manifest directly, bypassing `Write`/`Edit` entirely. That covers all nine remaining Go tasks, six of the ten Cargo tasks (`cargo-01`, `-02`, `-04`, `-05`, `-07`, `-08`), and four of the seven unblocked npm tasks (`npm-03`, `npm-04`'s `--save-exact` install, `npm-07`, `npm-09`). The other tasks that write through `Write`/`Edit` but still aren't blocked — `npm-01`, `npm-02`, `npm-08`, and four of the ten Cargo tasks (`cargo-03`, `-06`, `-09`, `-10`) — aren't hook bypasses at all: the pin Claude writes already matches the latest release (or, for `cargo-06`, isn't an exact pin at all), so there's nothing to block.
 
 <details>
 <summary>Full 60-task, case-by-case breakdown</summary>
