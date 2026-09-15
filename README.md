@@ -191,7 +191,7 @@ This was observed empirically across the `benchmark/` scaffolding runs (see [`be
 | PyPI (`pyproject.toml`) | No | Same gap as pip — no command resolves a version straight into `[project.dependencies]`, so Claude hand-typed the pin (or a `>=` range). |
 | Maven (`pom.xml`) | No | There's no Maven equivalent of `npm install`/`go get` that adds a resolved `<dependency>` block; Claude always hand-typed the `<version>`. |
 | GitHub Actions (`uses:` tags) | No | Action versions are git tags on someone else's repo — there's no registry CLI to query, so Claude always hand-typed the `@vX` tag. |
-| Cargo (`Cargo.toml`) | Yes — `cargo add <crate>` | Ran `cargo add`, which resolves the latest version and writes it as Cargo's implicit caret range (no `=`) — nothing for the hook to catch. |
+| Cargo (`Cargo.toml`) | Yes — `cargo add <crate>` | Ran `cargo add` in 9 of 10 cases, which resolves the latest version and writes it as Cargo's implicit caret range (no `=`) — nothing for the hook to catch. The exception, `cargo-top-10-winapi-i686-pc-windows-gnu`, hand-edits `Cargo.toml` directly with `Write`/`Edit` in both the `hook` and `nohook` runs; the hook still finds nothing to mitigate there because the exact pin Claude writes from memory already matches the latest release. |
 
 `go.mod`, `package.json`, and `Cargo.toml` are the manifests where the
 ecosystem's own tooling already avoids the stale-pin problem.
