@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 # Runs one benchmark case under one condition (hook|nohook), same as
 # run_case.sh, but drives OpenCode instead of Claude Code, pointed at a
-# self-hosted, OpenAI-compatible model endpoint (e.g. the vLLM server from
-# ~/llm-local/scripts/vllm_qwen3.6_35b_a3b.sbatch) via a custom provider.
+# self-hosted, OpenAI-compatible model endpoint via a custom provider.
 #
 # Usage:
 #   run_case_opencode.sh <cases.json> <case_id> <hook|nohook> <output_dir> <base_url> [model_id]
 #
 #   base_url  OpenAI-compatible endpoint of the running server, e.g.
 #             http://<node>:8001/v1 (find <node> with `squeue -u $USER`
-#             once the vLLM sbatch job is running).
+#             once the serving job is running).
 #   model_id  opencode model spec provider/model (default:
-#             local/qwen3.6-35b-a3b, matching --served-model-name in the
-#             sbatch script).
+#             local/qwen3.6-35b-a3b, matching the served model name).
 #
 # Env vars:
 #   YUL_BIN       path to the yul binary the hook condition execs
