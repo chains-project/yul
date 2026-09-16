@@ -60,7 +60,7 @@ func TestParsePackageJSONPins(t *testing.T) {
 		t.Fatalf("parsePackageJSONPins() error = %v", err)
 	}
 
-	want := map[string]pins.Spec{
+	want := map[string]pins.Pin{
 		"dependencies/runtime":          {Version: "1.2.3"},
 		"dependencies/alias":            {Version: "8.0.0"},
 		"dependencies/prerelease":       {Version: "2.0.0-rc.1"},

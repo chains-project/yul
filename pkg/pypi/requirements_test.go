@@ -24,7 +24,7 @@ httpx[http2] == 0.28.1 ; python_version >= "3.10"
 	if err != nil {
 		t.Fatalf("parsePypiPins() error = %v", err)
 	}
-	want := map[string]pins.Spec{
+	want := map[string]pins.Pin{
 		"requirements/requests": {Operator: "==", Version: requestsLatestVersion},
 		"requirements/flask":    {Operator: ">=", Version: "3.0.0"},
 		"requirements/httpx":    {Operator: "==", Version: httpxLatestVersion},

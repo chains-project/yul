@@ -28,7 +28,7 @@ docs = [
 	if err != nil {
 		t.Fatalf("parsePypiPins() error = %v", err)
 	}
-	want := map[string]pins.Spec{
+	want := map[string]pins.Pin{
 		"project/dependencies/requests":             {Operator: "==", Version: requestsLatestVersion},
 		"project/dependencies/flask":                {Operator: ">=", Version: "3.0.0"},
 		"project/optional-dependencies/test/pytest": {Operator: "==", Version: "8.3.5"},
@@ -60,7 +60,7 @@ table = { version = "^3.0", optional = true }
 	if err != nil {
 		t.Fatalf("parsePypiPins() error = %v", err)
 	}
-	want := map[string]pins.Spec{
+	want := map[string]pins.Pin{
 		"tool/poetry/dependencies/bare":  {Version: "2.32.4"},
 		"tool/poetry/dependencies/caret": {Operator: "^", Version: "1.2"},
 		"tool/poetry/dependencies/tilde": {Operator: "~", Version: "1.2.3"},

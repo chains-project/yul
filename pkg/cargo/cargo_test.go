@@ -53,7 +53,7 @@ exact = "=9.9.9"
 		t.Fatalf("parseCargoPins() error = %v", err)
 	}
 
-	want := map[string]pins.Spec{
+	want := map[string]pins.Pin{
 		"runtime/exact":          {Operator: "=", Version: "1.2.3"},
 		"runtime/caret":          {Version: "1.2.3"},
 		"runtime/explicit-caret": {Operator: "^", Version: "1.2.3"},

@@ -17,23 +17,15 @@ import (
 
 // Pin is a dependency requirement extracted from a manifest whose base
 // version yul can keep current, along with the PURL to resolve its latest
-// version through. Operator is the requirement's operator prefix (e.g. "^",
-// ">=", "==", or "" for a bare version) and is preserved verbatim when
-// suggesting the latest version, so "^0.1.0" is reported as "^0.5.1" rather
-// than being collapsed to an exact pin.
+// version through. Operator is the requirement's prefix (e.g. "^", ">=", or
+// "" for a bare version), kept verbatim so "^0.1.0" is reported as "^0.5.1"
+// instead of being collapsed to an exact pin.
 type Pin struct {
 	Namespace string // e.g. Maven groupId; empty for npm/pypi
 	Name      string
 	Operator  string
 	Version   string
 	PURL      string
-}
-
-// Spec is the parsed form of a version requirement: a single operator
-// applied to a single base version.
-type Spec struct {
-	Operator string
-	Version  string
 }
 
 // operators are the requirement operators whose base version can be bumped
@@ -45,48 +37,42 @@ type Spec struct {
 // wildcards, dist-tags — has no single base version to update.
 var operators = []string{"==", "~=", ">=", "=", "^", "~"}
 
-// ParseSpec reports whether spec is a requirement yul can keep current
-// under the given vers scheme (e.g. "npm", "pypi", "cargo"): a single
-// supported operator (or none) followed by one valid version. It returns the
-// operator and the base version separately, so callers can compare the
-// version against the latest release and suggest the same operator with the
-// new version.
+// ParseSpec splits spec into a supported operator (possibly empty) and the
+// base version it applies to, under the given vers scheme (e.g. "npm",
+// "pypi", "cargo"). It reports false for anything else.
 //
-// bareIsRange says how a bare version literal with no operator is
-// interpreted. Cargo and Poetry treat "1.2.3" as the caret range "^1.2.3",
-// so any valid version is accepted as the base to bump. npm treats a bare
-// version as an exact pin, but a partial one like "1.2" is an x-range
-// (">=1.2.0 <1.3.0"); bareIsRange=false only accepts a bare version that is
-// exact, so such x-ranges are left alone rather than narrowed to a pin.
-func ParseSpec(spec, scheme string, bareIsRange bool) (Spec, bool) {
+// bareIsRange says how a bare version literal is interpreted. Cargo and
+// Poetry treat "1.2.3" as the caret range "^1.2.3", so any valid version is
+// accepted. npm treats a bare version as an exact pin, but a partial one
+// like "1.2" is an x-range; bareIsRange=false rejects those.
+func ParseSpec(spec, scheme string, bareIsRange bool) (operator, version string, ok bool) {
 	spec, _, _ = strings.Cut(spec, ";") // drop a trailing PEP 508 environment marker
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return Spec{}, false
+		return "", "", false
 	}
 
-	var operator string
 	for _, op := range operators {
 		if strings.HasPrefix(spec, op) {
 			operator = op
 			break
 		}
 	}
-	version := strings.TrimSpace(strings.TrimPrefix(spec, operator))
+	version = strings.TrimSpace(strings.TrimPrefix(spec, operator))
 	if version == "" || !vers.ValidWithScheme(version, scheme) {
-		return Spec{}, false
+		return "", "", false
 	}
 
 	if operator == "" && !bareIsRange {
 		r, err := vers.ParseNative(version, scheme)
 		if err != nil {
-			return Spec{}, false
+			return "", "", false
 		}
 		if _, exact := r.ExactVersion(); !exact {
-			return Spec{}, false
+			return "", "", false
 		}
 	}
-	return Spec{Operator: operator, Version: version}, true
+	return operator, version, true
 }
 
 // ExactVersion reports whether spec pins a package to exactly one version

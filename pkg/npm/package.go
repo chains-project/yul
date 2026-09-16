@@ -48,14 +48,14 @@ func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, declaration := range parsed.Declarations {
-		spec, ok := pins.ParseSpec(declaration.Version, scheme, false)
+		operator, version, ok := pins.ParseSpec(declaration.Version, scheme, false)
 		if !ok {
 			continue
 		}
 		result[declaration.Location] = pins.Pin{
 			Name:     declaration.Name,
-			Operator: spec.Operator,
-			Version:  spec.Version,
+			Operator: operator,
+			Version:  version,
 			PURL:     declaration.PURL,
 		}
 	}

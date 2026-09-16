@@ -36,7 +36,7 @@ func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, declaration := range parsed.Declarations {
-		spec, ok := pins.ParseSpec(declaration.Version, scheme, true)
+		operator, version, ok := pins.ParseSpec(declaration.Version, scheme, true)
 		if !ok {
 			continue
 		}
@@ -46,8 +46,8 @@ func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 		}
 		result[declaration.Location] = pins.Pin{
 			Name:     canonical.Name,
-			Operator: spec.Operator,
-			Version:  spec.Version,
+			Operator: operator,
+			Version:  version,
 			PURL:     declaration.PURL,
 		}
 	}

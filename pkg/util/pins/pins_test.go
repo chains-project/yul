@@ -11,16 +11,17 @@ func TestParseSpec(t *testing.T) {
 		spec        string
 		scheme      string
 		bareIsRange bool
-		want        Spec
+		wantOp      string
+		wantVersion string
 		wantOK      bool
 	}{
-		{name: "npm bare version is exact", spec: "1.2.3", scheme: "npm", want: Spec{Version: "1.2.3"}, wantOK: true},
-		{name: "npm prerelease is exact", spec: "2.0.0-rc.1", scheme: "npm", want: Spec{Version: "2.0.0-rc.1"}, wantOK: true},
-		{name: "npm build metadata is exact", spec: "3.0.0+metadata", scheme: "npm", want: Spec{Version: "3.0.0+metadata"}, wantOK: true},
-		{name: "npm caret range keeps operator", spec: "^4.0.0", scheme: "npm", want: Spec{Operator: "^", Version: "4.0.0"}, wantOK: true},
-		{name: "npm tilde range keeps operator", spec: "~4.0.0", scheme: "npm", want: Spec{Operator: "~", Version: "4.0.0"}, wantOK: true},
-		{name: "npm >= range keeps operator", spec: ">=4.0.0", scheme: "npm", want: Spec{Operator: ">=", Version: "4.0.0"}, wantOK: true},
-		{name: "npm operator with space", spec: ">= 4.0.0", scheme: "npm", want: Spec{Operator: ">=", Version: "4.0.0"}, wantOK: true},
+		{name: "npm bare version is exact", spec: "1.2.3", scheme: "npm", wantVersion: "1.2.3", wantOK: true},
+		{name: "npm prerelease is exact", spec: "2.0.0-rc.1", scheme: "npm", wantVersion: "2.0.0-rc.1", wantOK: true},
+		{name: "npm build metadata is exact", spec: "3.0.0+metadata", scheme: "npm", wantVersion: "3.0.0+metadata", wantOK: true},
+		{name: "npm caret range keeps operator", spec: "^4.0.0", scheme: "npm", wantOp: "^", wantVersion: "4.0.0", wantOK: true},
+		{name: "npm tilde range keeps operator", spec: "~4.0.0", scheme: "npm", wantOp: "~", wantVersion: "4.0.0", wantOK: true},
+		{name: "npm >= range keeps operator", spec: ">=4.0.0", scheme: "npm", wantOp: ">=", wantVersion: "4.0.0", wantOK: true},
+		{name: "npm operator with space", spec: ">= 4.0.0", scheme: "npm", wantOp: ">=", wantVersion: "4.0.0", wantOK: true},
 		{name: "npm bare partial version is an x-range, not exact", spec: "1.2", scheme: "npm"},
 		{name: "npm x-range is not supported", spec: "1.x", scheme: "npm"},
 		{name: "npm hyphen range is not supported", spec: "1.0.0 - 2.0.0", scheme: "npm"},
@@ -32,13 +33,13 @@ func TestParseSpec(t *testing.T) {
 		{name: "npm dist-tag is not supported", spec: "latest", scheme: "npm"},
 		{name: "npm workspace protocol is not supported", spec: "workspace:*", scheme: "npm"},
 
-		{name: "pypi == is exact", spec: "==2.32.4", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "==", Version: "2.32.4"}, wantOK: true},
-		{name: "pypi marker is stripped", spec: "== 0.28.1 ; python_version >= \"3.10\"", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "==", Version: "0.28.1"}, wantOK: true},
-		{name: "pypi >= keeps operator", spec: ">=3.0.0", scheme: "pypi", bareIsRange: true, want: Spec{Operator: ">=", Version: "3.0.0"}, wantOK: true},
-		{name: "pypi ~= keeps operator", spec: "~=1.4.2", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "~=", Version: "1.4.2"}, wantOK: true},
-		{name: "pypi poetry caret keeps operator", spec: "^1.2.3", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "^", Version: "1.2.3"}, wantOK: true},
-		{name: "pypi poetry tilde keeps operator", spec: "~1.2", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "~", Version: "1.2"}, wantOK: true},
-		{name: "pypi poetry bare version is a caret range", spec: "1.2.3", scheme: "pypi", bareIsRange: true, want: Spec{Version: "1.2.3"}, wantOK: true},
+		{name: "pypi == is exact", spec: "==2.32.4", scheme: "pypi", bareIsRange: true, wantOp: "==", wantVersion: "2.32.4", wantOK: true},
+		{name: "pypi marker is stripped", spec: "== 0.28.1 ; python_version >= \"3.10\"", scheme: "pypi", bareIsRange: true, wantOp: "==", wantVersion: "0.28.1", wantOK: true},
+		{name: "pypi >= keeps operator", spec: ">=3.0.0", scheme: "pypi", bareIsRange: true, wantOp: ">=", wantVersion: "3.0.0", wantOK: true},
+		{name: "pypi ~= keeps operator", spec: "~=1.4.2", scheme: "pypi", bareIsRange: true, wantOp: "~=", wantVersion: "1.4.2", wantOK: true},
+		{name: "pypi poetry caret keeps operator", spec: "^1.2.3", scheme: "pypi", bareIsRange: true, wantOp: "^", wantVersion: "1.2.3", wantOK: true},
+		{name: "pypi poetry tilde keeps operator", spec: "~1.2", scheme: "pypi", bareIsRange: true, wantOp: "~", wantVersion: "1.2", wantOK: true},
+		{name: "pypi poetry bare version is a caret range", spec: "1.2.3", scheme: "pypi", bareIsRange: true, wantVersion: "1.2.3", wantOK: true},
 		{name: "pypi != is not supported", spec: "!=2.0.0", scheme: "pypi", bareIsRange: true},
 		{name: "pypi < is not supported", spec: "<2.0.0", scheme: "pypi", bareIsRange: true},
 		{name: "pypi > is not supported", spec: ">2.0.0", scheme: "pypi", bareIsRange: true},
@@ -48,11 +49,11 @@ func TestParseSpec(t *testing.T) {
 		{name: "pypi wildcard pin is not supported", spec: "==1.2.*", scheme: "pypi", bareIsRange: true},
 		{name: "pypi empty spec is not supported", spec: "", scheme: "pypi", bareIsRange: true},
 
-		{name: "cargo bare version is a caret range", spec: "1.0.107", scheme: "cargo", bareIsRange: true, want: Spec{Version: "1.0.107"}, wantOK: true},
-		{name: "cargo bare partial version is a caret range", spec: "1.2", scheme: "cargo", bareIsRange: true, want: Spec{Version: "1.2"}, wantOK: true},
-		{name: "cargo = is exact", spec: "=1.2.3", scheme: "cargo", bareIsRange: true, want: Spec{Operator: "=", Version: "1.2.3"}, wantOK: true},
-		{name: "cargo caret keeps operator", spec: "^1.2.3", scheme: "cargo", bareIsRange: true, want: Spec{Operator: "^", Version: "1.2.3"}, wantOK: true},
-		{name: "cargo tilde keeps operator", spec: "~1.2.3", scheme: "cargo", bareIsRange: true, want: Spec{Operator: "~", Version: "1.2.3"}, wantOK: true},
+		{name: "cargo bare version is a caret range", spec: "1.0.107", scheme: "cargo", bareIsRange: true, wantVersion: "1.0.107", wantOK: true},
+		{name: "cargo bare partial version is a caret range", spec: "1.2", scheme: "cargo", bareIsRange: true, wantVersion: "1.2", wantOK: true},
+		{name: "cargo = is exact", spec: "=1.2.3", scheme: "cargo", bareIsRange: true, wantOp: "=", wantVersion: "1.2.3", wantOK: true},
+		{name: "cargo caret keeps operator", spec: "^1.2.3", scheme: "cargo", bareIsRange: true, wantOp: "^", wantVersion: "1.2.3", wantOK: true},
+		{name: "cargo tilde keeps operator", spec: "~1.2.3", scheme: "cargo", bareIsRange: true, wantOp: "~", wantVersion: "1.2.3", wantOK: true},
 		{name: "cargo wildcard is not supported", spec: "*", scheme: "cargo", bareIsRange: true},
 		{name: "cargo partial wildcard is not supported", spec: "1.*", scheme: "cargo", bareIsRange: true},
 		{name: "cargo multi-clause range is not supported", spec: ">=1.2, <1.5", scheme: "cargo", bareIsRange: true},
@@ -60,10 +61,10 @@ func TestParseSpec(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := ParseSpec(test.spec, test.scheme, test.bareIsRange)
-			if ok != test.wantOK || got != test.want {
-				t.Fatalf("ParseSpec(%q, %q, %v) = (%#v, %v), want (%#v, %v)",
-					test.spec, test.scheme, test.bareIsRange, got, ok, test.want, test.wantOK)
+			operator, version, ok := ParseSpec(test.spec, test.scheme, test.bareIsRange)
+			if ok != test.wantOK || operator != test.wantOp || version != test.wantVersion {
+				t.Fatalf("ParseSpec(%q, %q, %v) = (%q, %q, %v), want (%q, %q, %v)",
+					test.spec, test.scheme, test.bareIsRange, operator, version, ok, test.wantOp, test.wantVersion, test.wantOK)
 			}
 		})
 	}

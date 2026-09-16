@@ -3,23 +3,13 @@
 // using git-pkgs/manifests to parse the manifest and an injected
 // resolver.Resolver to look up latest releases.
 //
-// Design notes (see chains-project/yul#4 and #43):
-//
-// Cargo's default requirement operator is caret, so a bare version like
-// `serde = "1.2.3"` means `^1.2.3`, not an exact pin. That's still a
-// requirement with one base version, so it's bumped in place: a stale
-// `"1.2.3"` is reported as `"1.5.0"` (still a caret range), `=1.2.3` as
-// `=1.5.0`, and so on. bareIsRange=true in pins.ParseSpec accepts the bare
-// form, matching pyproject.toml's Poetry tables.
+// Cargo's default operator is caret, so a bare `serde = "1.2.3"` means
+// `^1.2.3`; it still has one base version, so it's bumped in place and stays
+// bare (hence bareIsRange=true in pins.ParseSpec, as for Poetry).
 //
 // git-pkgs/manifests' Cargo.toml parser doesn't populate
 // ParseResult.Declarations like npm/pypi/maven/github_actions do, so pins
 // are keyed by scope+name instead of a declaration location.
-//
-// Resolution coverage: whether git-pkgs/enrichment resolves pkg:cargo purls
-// wasn't verified against the live API in this environment (same gap noted
-// in pkg/golang and pkg/githubactions); an unresolvable purl simply fails
-// open per pins.Diff.
 package cargo
 
 import (
@@ -51,10 +41,9 @@ func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
 
 // parseCargoPins parses Cargo.toml content and returns every dependency
 // across [dependencies], [dev-dependencies], and [build-dependencies] whose
-// requirement has a single base version to keep current (bare/caret, "^",
-// "~", "=", ">="), keyed by "<scope>/<name>" since the parser doesn't expose
-// a stable per-declaration location the way npm/pypi's do. Wildcards ("*",
-// "1.*") and multi-clause ranges are left alone.
+// requirement has a single base version to keep current, keyed by
+// "<scope>/<name>" since the parser doesn't expose a stable per-declaration
+// location the way npm/pypi's do.
 func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -70,12 +59,12 @@ func parseCargoPins(content string) (map[string]pins.Pin, error) {
 		// Local path deps (`{ path = "../local" }`) are already dropped by
 		// the parser; workspace-inherited deps come through as "*", which
 		// ParseSpec rejects below.
-		spec, ok := pins.ParseSpec(dep.Version, scheme, true)
+		operator, version, ok := pins.ParseSpec(dep.Version, scheme, true)
 		if !ok {
 			continue
 		}
 		location := string(dep.Scope) + "/" + dep.Name
-		result[location] = pins.Pin{Name: dep.Name, Operator: spec.Operator, Version: spec.Version, PURL: dep.PURL}
+		result[location] = pins.Pin{Name: dep.Name, Operator: operator, Version: version, PURL: dep.PURL}
 	}
 	return result, nil
 }
