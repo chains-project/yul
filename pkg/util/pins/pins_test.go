@@ -217,6 +217,40 @@ func TestDiffKeepsOperatorInSuggestion(t *testing.T) {
 	}
 }
 
+// TestDiffRangeCrossesMajorBoundary: a caret range never admits a new
+// major (^0.1.0 excludes 1.0.0), but yul compares the base version alone,
+// so the suggestion is ^1.0.0. The manifest should name the latest
+// release even when the range itself would never have resolved to it.
+func TestDiffRangeCrossesMajorBoundary(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/caret": "1.0.0",
+		"pkg:npm/tilde": "2.3.0",
+	}}
+
+	after := map[string]Pin{
+		"caret": {Name: "caret", Operator: "^", Version: "0.1.0", PURL: "pkg:npm/caret"},
+		"tilde": {Name: "tilde", Operator: "~", Version: "1.4.2", PURL: "pkg:npm/tilde"},
+	}
+
+	got, err := Diff(context.Background(), map[string]Pin{}, after, "npm", res)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	want := map[string][2]string{
+		"caret": {"^0.1.0", "^1.0.0"},
+		"tilde": {"~1.4.2", "~2.3.0"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Diff() returned %d mismatches, want %d: %#v", len(got), len(want), got)
+	}
+	for _, m := range got {
+		w := want[m.Name]
+		if m.Current != w[0] || m.Latest != w[1] {
+			t.Errorf("Diff() mismatch for %s = %q -> %q, want %q -> %q", m.Name, m.Current, m.Latest, w[0], w[1])
+		}
+	}
+}
+
 func TestDiffChangedOperatorCountsAsChange(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:npm/dep": "2.0.0"}}
 
