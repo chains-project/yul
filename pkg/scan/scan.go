@@ -1,7 +1,8 @@
-// Package scan walks a project directory and reports every exactly-pinned
-// dependency across all known manifest kinds that is pinned older than the
-// latest release, not just ones a Write/Edit just touched. It reuses each
-// ecosystem's manifestchecker.Check by diffing against an empty "before",
+// Package scan walks a project directory and reports every dependency with a
+// single base version (exact pin or simple range) across all known manifest
+// kinds that is older than the latest release, not just ones a Write/Edit
+// just touched. It reuses each ecosystem's manifestchecker.Check by diffing
+// against an empty "before",
 // which makes every pin in the file count as new.
 package scan
 
@@ -114,9 +115,9 @@ func walk(root string, checkers []manifestchecker.ManifestChecker) ([]manifest, 
 	return found, nil
 }
 
-// Dir walks root and reports a Finding for every exactly-pinned dependency,
-// across every manifest kind checkers know about, that's pinned older than
-// the latest release. Files a checker can't parse or that a resolver can't
+// Dir walks root and reports a Finding for every dependency, across every
+// manifest kind checkers know about, whose base version is older than the
+// latest release. Files a checker can't parse or that a resolver can't
 // look up are skipped rather than failing the whole scan, since one bad
 // manifest shouldn't hide findings from the rest of the project.
 func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, error) {

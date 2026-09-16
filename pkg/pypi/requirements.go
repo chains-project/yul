@@ -23,10 +23,11 @@ func (c RequirementsChecker) Check(before, after string) ([]mismatch.Mismatch, e
 }
 
 // CheckRequirements compares requirements.txt content before and after a
-// Write and reports any exactly-pinned ("==") package that is newly added
-// or whose pinned version was just changed, and doesn't match the latest
-// release res knows about. Packages the write didn't touch, or that aren't
-// pinned exactly, are left alone.
+// Write and reports any package that is newly added or whose requirement was
+// just changed, and whose base version is older than the latest release res
+// knows about. The suggested replacement keeps the requirement's operator
+// (">=1.0" -> ">=2.0"). Packages the write didn't touch, or whose
+// requirement has no single base version, are left alone.
 func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePypiPins("requirements.txt", before)
 	if err != nil {

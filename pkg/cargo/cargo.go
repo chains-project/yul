@@ -1,15 +1,16 @@
-// Package cargo checks Cargo.toml for dependencies pinned older than what's
-// actually released, using git-pkgs/manifests to parse the manifest and an
-// injected resolver.Resolver to look up latest releases.
+// Package cargo checks Cargo.toml for dependencies whose version
+// requirement is based on an older version than what's actually released,
+// using git-pkgs/manifests to parse the manifest and an injected
+// resolver.Resolver to look up latest releases.
 //
-// Design notes (see chains-project/yul#4):
+// Design notes (see chains-project/yul#4 and #43):
 //
 // Cargo's default requirement operator is caret, so a bare version like
-// `serde = "1.2.3"` means `^1.2.3`, not an exact pin - only `=1.2.3` counts.
-// requireOperator=true enforces this in pins.ExactVersion, matching
-// pyproject.toml's Poetry tables (git-pkgs/vers already treats a bare
-// version as a caret range under the "cargo" scheme, so this is mostly
-// documentation of intent).
+// `serde = "1.2.3"` means `^1.2.3`, not an exact pin. That's still a
+// requirement with one base version, so it's bumped in place: a stale
+// `"1.2.3"` is reported as `"1.5.0"` (still a caret range), `=1.2.3` as
+// `=1.5.0`, and so on. bareIsRange=true in pins.ParseSpec accepts the bare
+// form, matching pyproject.toml's Poetry tables.
 //
 // git-pkgs/manifests' Cargo.toml parser doesn't populate
 // ParseResult.Declarations like npm/pypi/maven/github_actions do, so pins
@@ -48,10 +49,12 @@ func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
 	return CheckCargoToml(before, after, c.Resolver)
 }
 
-// parseCargoPins parses Cargo.toml content and returns its exactly-pinned
-// ("=") dependencies across [dependencies], [dev-dependencies], and
-// [build-dependencies], keyed by "<scope>/<name>" since the parser doesn't
-// expose a stable per-declaration location the way npm/pypi's do.
+// parseCargoPins parses Cargo.toml content and returns every dependency
+// across [dependencies], [dev-dependencies], and [build-dependencies] whose
+// requirement has a single base version to keep current (bare/caret, "^",
+// "~", "=", ">="), keyed by "<scope>/<name>" since the parser doesn't expose
+// a stable per-declaration location the way npm/pypi's do. Wildcards ("*",
+// "1.*") and multi-clause ranges are left alone.
 func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -66,22 +69,23 @@ func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	for _, dep := range parsed.Dependencies {
 		// Local path deps (`{ path = "../local" }`) are already dropped by
 		// the parser; workspace-inherited deps come through as "*", which
-		// ExactVersion rejects below.
-		version, ok := pins.ExactVersion(dep.Version, scheme, true)
+		// ParseSpec rejects below.
+		spec, ok := pins.ParseSpec(dep.Version, scheme, true)
 		if !ok {
 			continue
 		}
 		location := string(dep.Scope) + "/" + dep.Name
-		result[location] = pins.Pin{Name: dep.Name, Version: version, PURL: dep.PURL}
+		result[location] = pins.Pin{Name: dep.Name, Operator: spec.Operator, Version: spec.Version, PURL: dep.PURL}
 	}
 	return result, nil
 }
 
 // CheckCargoToml compares Cargo.toml content before and after a Write and
-// reports any exactly-pinned ("=") crate that is newly added or whose
-// pinned version was just changed, and is older than the latest release res
-// knows about. Crates the write didn't touch, or that aren't pinned
-// exactly, are left alone.
+// reports any crate that is newly added or whose requirement was just
+// changed, and whose base version is older than the latest release res
+// knows about. The suggested replacement keeps the requirement's operator.
+// Crates the write didn't touch, or whose requirement has no single base
+// version, are left alone.
 func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseCargoPins(before)
 	if err != nil {

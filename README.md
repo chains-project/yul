@@ -1,15 +1,17 @@
 # yul
 
-A Claude Code `PreToolUse` hook that keeps dependencies current. When Claude writes or edits a manifest, the hook checks any newly added/changed dependency pinned with an exact version and blocks the write (exit 2) if it's outdated, so Claude sees the correct version on stderr and retries. Other files and untouched dependencies pass through untouched; resolver/network errors fail open.
+A Claude Code `PreToolUse` hook that keeps dependencies current. When Claude writes or edits a manifest, the hook checks any newly added/changed dependency whose version requirement names a specific base version — an exact pin, or a simple range like `^1.2.3`, `~1.2.3`, or `>=1.2.3` — and blocks the write (exit 2) if that version is older than the latest release, so Claude sees the correct version on stderr and retries. A range keeps its operator: `^0.1.0` is reported as `^0.5.1`, not collapsed to an exact pin, so the manifest itself always names the latest version instead of relying on the build tool to resolve it later. Other files and untouched dependencies pass through untouched; resolver/network errors fail open.
 
 Supported manifests:
 - `pom.xml` — Maven Central
-- `requirements.txt` — PyPI, `==` pins only
-- `pyproject.toml` — PyPI, `[project.dependencies]` / `[project.optional-dependencies]`, `==` pins only
-- `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
+- `requirements.txt` — PyPI, `==`, `>=`, and `~=` specifiers
+- `pyproject.toml` — PyPI, `[project.dependencies]` / `[project.optional-dependencies]` (`==`, `>=`, `~=`) and Poetry's `[tool.poetry.*]` tables (`^`, `~`, and bare caret versions)
+- `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact pins and `^` / `~` / `>=` ranges
 - `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
 - `go.mod` — Go modules, `require` entries (single-line and block form, direct and indirect)
-- `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins only (a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin)
+- `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins and bare / `^` / `~` / `>=` requirements (a bare version like `"1.2.3"` is Cargo's implicit caret range; it's bumped in place and stays bare)
+
+Requirements with no single base version to update are left alone in every ecosystem: upper bounds (`<2.0`), exclusions (`!=1.2`), multi-clause ranges (`>=1.0,<2.0`), wildcards (`*`, `1.x`, `==1.2.*`), dist-tags, and `workspace:`/`file:`/git specs.
 
 ## Install as a Claude Code plugin (recommended)
 

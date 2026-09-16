@@ -24,10 +24,11 @@ func (c PyprojectChecker) Check(before, after string) ([]mismatch.Mismatch, erro
 }
 
 // CheckPyproject compares pyproject.toml content before and after a Write
-// and reports any exactly-pinned ("==") dependency that is newly added or
-// whose pinned version was just changed, and doesn't match the latest
-// release res knows about. Packages the write didn't touch, or that aren't
-// pinned exactly, are left alone.
+// and reports any dependency that is newly added or whose requirement was
+// just changed, and whose base version is older than the latest release res
+// knows about. The suggested replacement keeps the requirement's operator
+// ("^1.0" -> "^2.0"). Packages the write didn't touch, or whose requirement
+// has no single base version, are left alone.
 func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePypiPins("pyproject.toml", before)
 	if err != nil {

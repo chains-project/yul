@@ -5,42 +5,91 @@ import (
 	"testing"
 )
 
-func TestExactVersion(t *testing.T) {
+func TestParseSpec(t *testing.T) {
 	tests := []struct {
-		name            string
-		spec            string
-		scheme          string
-		requireOperator bool
-		want            string
-		wantOK          bool
+		name        string
+		spec        string
+		scheme      string
+		bareIsRange bool
+		want        Spec
+		wantOK      bool
 	}{
-		{name: "npm bare version is exact", spec: "1.2.3", scheme: "npm", want: "1.2.3", wantOK: true},
-		{name: "npm prerelease is exact", spec: "2.0.0-rc.1", scheme: "npm", want: "2.0.0-rc.1", wantOK: true},
-		{name: "npm build metadata is exact", spec: "3.0.0+metadata", scheme: "npm", want: "3.0.0+metadata", wantOK: true},
-		{name: "npm caret range is not exact", spec: "^4.0.0", scheme: "npm"},
-		{name: "npm tilde range is not exact", spec: "~4.0.0", scheme: "npm"},
-		{name: "npm dist-tag is not exact", spec: "latest", scheme: "npm"},
-		{name: "npm workspace protocol is not exact", spec: "workspace:*", scheme: "npm"},
+		{name: "npm bare version is exact", spec: "1.2.3", scheme: "npm", want: Spec{Version: "1.2.3"}, wantOK: true},
+		{name: "npm prerelease is exact", spec: "2.0.0-rc.1", scheme: "npm", want: Spec{Version: "2.0.0-rc.1"}, wantOK: true},
+		{name: "npm build metadata is exact", spec: "3.0.0+metadata", scheme: "npm", want: Spec{Version: "3.0.0+metadata"}, wantOK: true},
+		{name: "npm caret range keeps operator", spec: "^4.0.0", scheme: "npm", want: Spec{Operator: "^", Version: "4.0.0"}, wantOK: true},
+		{name: "npm tilde range keeps operator", spec: "~4.0.0", scheme: "npm", want: Spec{Operator: "~", Version: "4.0.0"}, wantOK: true},
+		{name: "npm >= range keeps operator", spec: ">=4.0.0", scheme: "npm", want: Spec{Operator: ">=", Version: "4.0.0"}, wantOK: true},
+		{name: "npm operator with space", spec: ">= 4.0.0", scheme: "npm", want: Spec{Operator: ">=", Version: "4.0.0"}, wantOK: true},
+		{name: "npm bare partial version is an x-range, not exact", spec: "1.2", scheme: "npm"},
+		{name: "npm x-range is not supported", spec: "1.x", scheme: "npm"},
+		{name: "npm hyphen range is not supported", spec: "1.0.0 - 2.0.0", scheme: "npm"},
+		{name: "npm bounded range is not supported", spec: ">=1.0.0 <2.0.0", scheme: "npm"},
+		{name: "npm or range is not supported", spec: "^1.0.0 || ^2.0.0", scheme: "npm"},
+		{name: "npm strict lower bound is not supported", spec: ">1.0.0", scheme: "npm"},
+		{name: "npm upper bound is not supported", spec: "<2.0.0", scheme: "npm"},
+		{name: "npm wildcard is not supported", spec: "*", scheme: "npm"},
+		{name: "npm dist-tag is not supported", spec: "latest", scheme: "npm"},
+		{name: "npm workspace protocol is not supported", spec: "workspace:*", scheme: "npm"},
 
-		{name: "pypi == is exact", spec: "==2.32.4", scheme: "pypi", requireOperator: true, want: "2.32.4", wantOK: true},
-		{name: "pypi marker is stripped", spec: "== 0.28.1 ; python_version >= \"3.10\"", scheme: "pypi", requireOperator: true, want: "0.28.1", wantOK: true},
-		{name: "pypi >= is not exact", spec: ">=3.0.0", scheme: "pypi", requireOperator: true},
-		{name: "pypi ~= is not exact", spec: "~=1.4.2", scheme: "pypi", requireOperator: true},
-		{name: "pypi != is not exact", spec: "!=2.0.0", scheme: "pypi", requireOperator: true},
-		{name: "pypi bounded range is not exact", spec: ">=1.0.0,<2.0.0", scheme: "pypi", requireOperator: true},
-		{name: "pypi redundant exact bound collapses to exact", spec: "==2.0.0,<3.0.0", scheme: "pypi", requireOperator: true, want: "2.0.0", wantOK: true},
-		{name: "pypi unrelated exclusion remains exact", spec: "==2.0.0,!=3.0.0", scheme: "pypi", requireOperator: true, want: "2.0.0", wantOK: true},
-		{name: "pypi bare version is not exact when operator required", spec: "1.2.3", scheme: "pypi", requireOperator: true},
-		{name: "pypi caret is not exact", spec: "^1.2.3", scheme: "pypi", requireOperator: true},
-		{name: "pypi empty spec is not exact", spec: "", scheme: "pypi", requireOperator: true},
+		{name: "pypi == is exact", spec: "==2.32.4", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "==", Version: "2.32.4"}, wantOK: true},
+		{name: "pypi marker is stripped", spec: "== 0.28.1 ; python_version >= \"3.10\"", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "==", Version: "0.28.1"}, wantOK: true},
+		{name: "pypi >= keeps operator", spec: ">=3.0.0", scheme: "pypi", bareIsRange: true, want: Spec{Operator: ">=", Version: "3.0.0"}, wantOK: true},
+		{name: "pypi ~= keeps operator", spec: "~=1.4.2", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "~=", Version: "1.4.2"}, wantOK: true},
+		{name: "pypi poetry caret keeps operator", spec: "^1.2.3", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "^", Version: "1.2.3"}, wantOK: true},
+		{name: "pypi poetry tilde keeps operator", spec: "~1.2", scheme: "pypi", bareIsRange: true, want: Spec{Operator: "~", Version: "1.2"}, wantOK: true},
+		{name: "pypi poetry bare version is a caret range", spec: "1.2.3", scheme: "pypi", bareIsRange: true, want: Spec{Version: "1.2.3"}, wantOK: true},
+		{name: "pypi != is not supported", spec: "!=2.0.0", scheme: "pypi", bareIsRange: true},
+		{name: "pypi < is not supported", spec: "<2.0.0", scheme: "pypi", bareIsRange: true},
+		{name: "pypi > is not supported", spec: ">2.0.0", scheme: "pypi", bareIsRange: true},
+		{name: "pypi === is not supported", spec: "===2.0.0", scheme: "pypi", bareIsRange: true},
+		{name: "pypi bounded range is not supported", spec: ">=1.0.0,<2.0.0", scheme: "pypi", bareIsRange: true},
+		{name: "pypi exact with extra bound is not supported", spec: "==2.0.0,<3.0.0", scheme: "pypi", bareIsRange: true},
+		{name: "pypi wildcard pin is not supported", spec: "==1.2.*", scheme: "pypi", bareIsRange: true},
+		{name: "pypi empty spec is not supported", spec: "", scheme: "pypi", bareIsRange: true},
+
+		{name: "cargo bare version is a caret range", spec: "1.0.107", scheme: "cargo", bareIsRange: true, want: Spec{Version: "1.0.107"}, wantOK: true},
+		{name: "cargo bare partial version is a caret range", spec: "1.2", scheme: "cargo", bareIsRange: true, want: Spec{Version: "1.2"}, wantOK: true},
+		{name: "cargo = is exact", spec: "=1.2.3", scheme: "cargo", bareIsRange: true, want: Spec{Operator: "=", Version: "1.2.3"}, wantOK: true},
+		{name: "cargo caret keeps operator", spec: "^1.2.3", scheme: "cargo", bareIsRange: true, want: Spec{Operator: "^", Version: "1.2.3"}, wantOK: true},
+		{name: "cargo tilde keeps operator", spec: "~1.2.3", scheme: "cargo", bareIsRange: true, want: Spec{Operator: "~", Version: "1.2.3"}, wantOK: true},
+		{name: "cargo wildcard is not supported", spec: "*", scheme: "cargo", bareIsRange: true},
+		{name: "cargo partial wildcard is not supported", spec: "1.*", scheme: "cargo", bareIsRange: true},
+		{name: "cargo multi-clause range is not supported", spec: ">=1.2, <1.5", scheme: "cargo", bareIsRange: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, ok := ExactVersion(test.spec, test.scheme, test.requireOperator)
+			got, ok := ParseSpec(test.spec, test.scheme, test.bareIsRange)
 			if ok != test.wantOK || got != test.want {
-				t.Fatalf("ExactVersion(%q, %q, %v) = (%q, %v), want (%q, %v)",
-					test.spec, test.scheme, test.requireOperator, got, ok, test.want, test.wantOK)
+				t.Fatalf("ParseSpec(%q, %q, %v) = (%#v, %v), want (%#v, %v)",
+					test.spec, test.scheme, test.bareIsRange, got, ok, test.want, test.wantOK)
+			}
+		})
+	}
+}
+
+func TestExactVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		spec   string
+		scheme string
+		want   string
+		wantOK bool
+	}{
+		{name: "golang version is exact", spec: "v1.2.3", scheme: "golang", want: "v1.2.3", wantOK: true},
+		{name: "maven hard requirement is exact", spec: "[1.2.3]", scheme: "maven", want: "1.2.3", wantOK: true},
+		{name: "maven range is not exact", spec: "[1.0,2.0)", scheme: "maven"},
+		{name: "npm caret range is not exact", spec: "^4.0.0", scheme: "npm"},
+		{name: "empty spec is not exact", spec: "", scheme: "npm"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := ExactVersion(test.spec, test.scheme)
+			if ok != test.wantOK || got != test.want {
+				t.Fatalf("ExactVersion(%q, %q) = (%q, %v), want (%q, %v)",
+					test.spec, test.scheme, got, ok, test.want, test.wantOK)
 			}
 		})
 	}
@@ -132,6 +181,58 @@ func TestDiffChecksReplacementAtSameLocation(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Name != "replacement" || got[0].Latest != "2.0.0" {
 		t.Fatalf("Diff() = %#v, want replacement mismatch", got)
+	}
+}
+
+func TestDiffKeepsOperatorInSuggestion(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/caret":   "0.5.1",
+		"pkg:npm/minimum": "2.0.0",
+		"pkg:npm/current": "1.0.0",
+	}}
+
+	before := map[string]Pin{}
+	after := map[string]Pin{
+		"caret":   {Name: "caret", Operator: "^", Version: "0.1.0", PURL: "pkg:npm/caret"},
+		"minimum": {Name: "minimum", Operator: ">=", Version: "1.0.0", PURL: "pkg:npm/minimum"},
+		"current": {Name: "current", Operator: "^", Version: "1.0.0", PURL: "pkg:npm/current"},
+	}
+
+	got, err := Diff(context.Background(), before, after, "npm", res)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Diff() returned %d mismatches, want 2: %#v", len(got), got)
+	}
+	want := map[string][2]string{
+		"caret":   {"^0.1.0", "^0.5.1"},
+		"minimum": {">=1.0.0", ">=2.0.0"},
+	}
+	for _, m := range got {
+		w, ok := want[m.Name]
+		if !ok || m.Current != w[0] || m.Latest != w[1] {
+			t.Errorf("Diff() mismatch for %s = %q -> %q, want %q -> %q", m.Name, m.Current, m.Latest, w[0], w[1])
+		}
+	}
+}
+
+func TestDiffChangedOperatorCountsAsChange(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/dep": "2.0.0"}}
+
+	before := map[string]Pin{
+		"dep": {Name: "dep", Operator: "", Version: "1.0.0", PURL: "pkg:npm/dep"},
+	}
+	after := map[string]Pin{
+		"dep": {Name: "dep", Operator: "^", Version: "1.0.0", PURL: "pkg:npm/dep"},
+	}
+
+	got, err := Diff(context.Background(), before, after, "npm", res)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Current != "^1.0.0" || got[0].Latest != "^2.0.0" {
+		t.Fatalf("Diff() = %#v, want one mismatch ^1.0.0 -> ^2.0.0", got)
 	}
 }
 

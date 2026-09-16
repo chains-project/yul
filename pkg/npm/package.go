@@ -1,5 +1,5 @@
-// Package npm checks package.json for dependencies pinned older than
-// what's actually released, using git-pkgs/manifests to parse the manifest
+// Package npm checks package.json for dependencies whose version
+// requirement is based on an older version than what's actually released, using git-pkgs/manifests to parse the manifest
 // and an injected resolver.Resolver to look up latest releases.
 package npm
 
@@ -30,10 +30,12 @@ func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
 	return CheckPackageJSON(before, after, c.Resolver)
 }
 
-// parsePackageJSONPins parses package.json content and returns its
-// exactly-pinned dependencies (no "^", "~", range, wildcard, tag, or
-// protocol prefix) across dependencies, devDependencies,
-// optionalDependencies, and peerDependencies.
+// parsePackageJSONPins parses package.json content and returns every
+// dependency across dependencies, devDependencies, optionalDependencies,
+// and peerDependencies whose requirement has a single base version to keep
+// current: an exact pin, or a "^", "~", or ">=" range. Compound ranges,
+// x-ranges ("1.x"), wildcards, dist-tags, and protocol specs (workspace:,
+// file:, git) are left alone.
 func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -46,24 +48,26 @@ func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, declaration := range parsed.Declarations {
-		version, ok := pins.ExactVersion(declaration.Version, scheme, false)
+		spec, ok := pins.ParseSpec(declaration.Version, scheme, false)
 		if !ok {
 			continue
 		}
 		result[declaration.Location] = pins.Pin{
-			Name:    declaration.Name,
-			Version: version,
-			PURL:    declaration.PURL,
+			Name:     declaration.Name,
+			Operator: spec.Operator,
+			Version:  spec.Version,
+			PURL:     declaration.PURL,
 		}
 	}
 	return result, nil
 }
 
 // CheckPackageJSON compares package.json content before and after a Write
-// and reports any exactly-pinned package that is newly added or whose
-// pinned version was just changed, and is older than the latest release res
-// knows about. Packages the write didn't touch, or that aren't pinned
-// exactly, are left alone.
+// and reports any package that is newly added or whose requirement was just
+// changed, and whose base version is older than the latest release res
+// knows about. The suggested replacement keeps the requirement's operator
+// ("^1.0.0" -> "^2.0.0"). Packages the write didn't touch, or whose
+// requirement has no single base version, are left alone.
 func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePackageJSONPins(before)
 	if err != nil {

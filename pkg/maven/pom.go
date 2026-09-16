@@ -115,7 +115,7 @@ func mavenPinnedVersion(requirement string, props map[string]string) (string, bo
 		return "", false
 	}
 	if strings.HasPrefix(requirement, "[") || strings.HasPrefix(requirement, "(") {
-		return pins.ExactVersion(requirement, scheme, false)
+		return pins.ExactVersion(requirement, scheme)
 	}
 	return requirement, true
 }

@@ -1,5 +1,6 @@
 // Package pypi checks requirements.txt and pyproject.toml for dependencies
-// pinned older than what's actually released, using git-pkgs/manifests to
+// whose version requirement is based on an older version than what's
+// actually released, using git-pkgs/manifests to
 // parse manifests and an injected resolver.Resolver to look up latest
 // releases.
 package pypi
@@ -17,9 +18,12 @@ import (
 const scheme = "pypi"
 
 // parsePypiPins parses filename's content (requirements.txt or
-// pyproject.toml) and returns its exactly-pinned ("==") dependencies, keyed
-// by their source declaration location and named by their canonical PURL
-// package name.
+// pyproject.toml) and returns every dependency whose requirement has a
+// single base version to keep current — "==", ">=", "~=", or Poetry's "^",
+// "~", and bare caret versions — keyed by their source declaration location
+// and named by their canonical PURL package name. Exclusions, upper bounds,
+// multi-clause ranges like ">=1.0,<2.0", and wildcard pins ("==1.2.*") are
+// left alone.
 func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -32,7 +36,7 @@ func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, declaration := range parsed.Declarations {
-		version, ok := pins.ExactVersion(declaration.Version, scheme, true)
+		spec, ok := pins.ParseSpec(declaration.Version, scheme, true)
 		if !ok {
 			continue
 		}
@@ -41,9 +45,10 @@ func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 			return nil, fmt.Errorf("parsing declaration purl %q: %w", declaration.PURL, err)
 		}
 		result[declaration.Location] = pins.Pin{
-			Name:    canonical.Name,
-			Version: version,
-			PURL:    declaration.PURL,
+			Name:     canonical.Name,
+			Operator: spec.Operator,
+			Version:  spec.Version,
+			PURL:     declaration.PURL,
 		}
 	}
 	return result, nil

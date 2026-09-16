@@ -92,7 +92,7 @@ func parseGoModPins(content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, dep := range parsed.Dependencies {
-		version, ok := pins.ExactVersion(dep.Version, scheme, false)
+		version, ok := pins.ExactVersion(dep.Version, scheme)
 		if !ok {
 			continue
 		}

@@ -164,7 +164,7 @@ type sessionStartInput struct {
 }
 
 // runScan is a SessionStart hook for the "scan" subcommand. It walks the
-// project for every exactly-pinned dependency across all known manifest
+// project for every dependency with a single base version across all manifest
 // kinds (not just ones a Write/Edit just touched), reusing a cached result
 // up to scanCacheTTL old, and emits any findings as additionalContext so
 // Claude can ask the user whether to update them. It never blocks session
@@ -264,7 +264,7 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
+	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d dependencies whose version requirement is older than the latest release:\n",
 		scannedAt.Format("2006-01-02"), len(findings))
 	for _, f := range findings {
 		name := f.Name
