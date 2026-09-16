@@ -31,13 +31,15 @@ Same case set run twice: once on `opencode-integration` (pre-fix) and once on `o
 | Changed to a different (non-outdated) version | 31 | 52% |
 | Kept the outdated version (yul couldn't get it fixed) | 7 | 12% |
 
-## Known gaps
+## Fixed gaps
 
-- `go-top-02-go-difflib/hook` has no `transcript.jsonl`/`stderr.log`: the harness redirects OpenCode's
-  own stdout/stderr into files living inside the same working directory the model operates in, so the
-  model can see (and, here, apparently deleted) its own run's log files mid-session while treating them
-  as build artifacts. Not a `yul` bug, but a benchmark-harness design gap worth fixing (write logs
-  outside the model's working directory) before the next run.
+- `go-top-02-go-difflib/hook` originally had no `transcript.jsonl`/`stderr.log`: the harness redirected
+  OpenCode's own stdout/stderr into files living inside the same working directory the model operates
+  in, so the model could see (and, here, apparently deleted) its own run's log files mid-session while
+  treating them as build artifacts. Fixed in `run_case_opencode.sh` by capturing to a tempfile outside
+  `WORKDIR` and moving it into place only after the run finishes; re-ran this case with the fix, no
+  block triggered (`go-difflib v1.0.0` is already current), so this doesn't change any of the
+  aggregate numbers above.
 - `pypi-top-02-six/hook/transcript.jsonl` exists but was excluded by a `.gitignore` the *model itself*
   generated for its project, which happened to match `transcript.jsonl`. Force-added for this commit.
 

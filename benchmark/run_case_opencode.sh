@@ -141,11 +141,19 @@ git init -q
 git config user.email "benchmark@example.com"
 git config user.name "benchmark"
 
+# Captured to a tempfile outside WORKDIR, not directly to transcript.jsonl/
+# stderr.log - the model's cwd is WORKDIR itself, so writing the live log
+# there means the model can see (and, observed in practice, delete) its own
+# run's log mid-session. Moved into place only after the run finishes.
+TRANSCRIPT_TMP=$(mktemp)
+STDERR_TMP=$(mktemp)
 YUL_BIN="$YUL_BIN" "$OPENCODE_BIN" run "$PROMPT" \
   --model "$MODEL_ID" \
   --auto \
   --format json \
-  > transcript.jsonl 2> stderr.log || true
+  > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
+mv "$TRANSCRIPT_TMP" transcript.jsonl
+mv "$STDERR_TMP" stderr.log
 
 # When .manifest listed several candidate paths, use whichever one the
 # model actually wrote.

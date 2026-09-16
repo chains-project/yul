@@ -5,58 +5,64 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
 
 func main() {
-	fileA := flag.String("a", "", "path to first file (required)")
-	fileB := flag.String("b", "", "path to second file (required)")
-	aName := flag.String("a-name", "a", "name for first file in diff header")
-	bName := flag.String("b-name", "b", "name for second file in diff header")
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: diff-tool <file1> <file2>")
+		fmt.Fprintln(os.Stderr, "  Computes and displays a unified diff between two files.")
+		fmt.Fprintln(os.Stderr, "  Use '-' for either argument to read from stdin.")
+		flag.CommandLine.PrintDefaults()
+	}
+
 	flag.Parse()
 
-	if *fileA == "" || *fileB == "" {
-		fmt.Fprintf(os.Stderr, "Usage: %s -a <file1> -b <file2>\n", os.Args[0])
-		flag.PrintDefaults()
+	args := flag.Args()
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "Error: two arguments required")
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	a, err := readFile(*fileA)
+	text1, err := readFile(args[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading %s: %v\n", *fileA, err)
+		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", args[0], err)
 		os.Exit(1)
 	}
 
-	b, err := readFile(*fileB)
+	text2, err := readFile(args[1])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading %s: %v\n", *fileB, err)
+		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", args[1], err)
 		os.Exit(1)
 	}
 
 	diff := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(a),
-		B:        difflib.SplitLines(b),
-		FromFile: *aName,
-		ToFile:   *bName,
+		A:        difflib.SplitLines(text1),
+		B:        difflib.SplitLines(text2),
+		FromFile: args[0],
+		ToFile:   args[1],
 		Context:  3,
 	}
 
-	output, err := difflib.GetUnifiedDiffString(diff)
+	result, err := diff.GetUnifiedDiffString()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error computing diff: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error computing diff: %v\n", err)
 		os.Exit(1)
 	}
-
-	fmt.Println(output)
+	fmt.Print(result)
 }
 
 func readFile(path string) (string, error) {
-	f, err := os.Open(path)
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	b, err := io.ReadAll(f)
-	return string(b), err
+	// Remove trailing newline to avoid extra empty line in diff
+	return strings.TrimRight(string(data), "\n"), nil
 }
