@@ -87,7 +87,7 @@ if [ "$CONDITION" = "hook" ]; then
 // Manifest basenames yul knows how to check, mirroring pkg/*'s Filename()
 // values (githubactions workflows use MatchesPath instead of a fixed name,
 // so they're matched separately below).
-const MANIFEST_RE = /(^|[/\\ '"])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github\/workflows\/[^\s'"]+\.ya?ml)(?=[/\\ '"]|$)/
+const MANIFEST_RE = /(^|[/\\ '"=])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github\/workflows\/[^\s'"]+\.ya?ml)(?=[/\\ '"]|$)/
 // Shell constructs that mutate a file's *content* on disk - not an
 // exhaustive parse of bash, just enough to catch the bypass a live model
 // actually used (`printf ... > requirements.txt`) plus its common cousins.
