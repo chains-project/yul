@@ -1,1 +1,0 @@
-"""CLI tool package."""
