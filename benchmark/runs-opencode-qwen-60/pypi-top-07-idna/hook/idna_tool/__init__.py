@@ -1,0 +1,1 @@
+"""IDNA encoding and decoding utilities."""

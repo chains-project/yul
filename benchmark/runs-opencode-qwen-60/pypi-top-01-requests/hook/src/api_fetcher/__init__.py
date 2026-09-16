@@ -1,0 +1,1 @@
+"""Module for fetching data from a REST API over HTTP."""
