@@ -59,11 +59,39 @@ func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
+// parsePackageJSONRanges parses package.json content and returns its
+// range-pinned dependencies across all four dependency fields.
+func parsePackageJSONRanges(content string) (map[string]pins.RangePin, error) {
+	result := make(map[string]pins.RangePin)
+	if strings.TrimSpace(content) == "" {
+		return result, nil
+	}
+
+	parsed, err := manifests.Parse("package.json", []byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("parsing package.json: %w", err)
+	}
+
+	for _, declaration := range parsed.Declarations {
+		if !pins.IsRange(declaration.Version, scheme, false) {
+			continue
+		}
+		result[declaration.Location] = pins.RangePin{
+			Name: declaration.Name,
+			Spec: strings.TrimSpace(declaration.Version),
+			PURL: declaration.PURL,
+		}
+	}
+	return result, nil
+}
+
+// formatExactPin renders a latest version as npm's exact-pin syntax.
+func formatExactPin(latest string) string { return latest }
+
 // CheckPackageJSON compares package.json content before and after a Write
-// and reports any exactly-pinned package that is newly added or whose
-// pinned version was just changed, and is older than the latest release res
-// knows about. Packages the write didn't touch, or that aren't pinned
-// exactly, are left alone.
+// and reports outdated exact pins plus ranges that exclude the latest
+// release, recommending a hard pin for each. Packages the write didn't
+// touch are left alone.
 func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePackageJSONPins(before)
 	if err != nil {
@@ -73,5 +101,23 @@ func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.M
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	if err != nil {
+		return nil, err
+	}
+
+	beforeRanges, err := parsePackageJSONRanges(before)
+	if err != nil {
+		return nil, err
+	}
+	afterRanges, err := parsePackageJSONRanges(after)
+	if err != nil {
+		return nil, err
+	}
+	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(mismatches, rangeMismatches...), nil
 }

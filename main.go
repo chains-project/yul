@@ -18,6 +18,7 @@ import (
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -61,6 +62,22 @@ func checkerFor(checkers []manifestchecker.ManifestChecker, path string) manifes
 // version is set at build time via -ldflags "-X main.version=..." (see
 // .goreleaser.yml); it stays "dev" for `go build`/`go run`.
 var version = "dev"
+
+// mismatchName renders a Mismatch's package name with its namespace prefix.
+func mismatchName(m mismatch.Mismatch) string {
+	if m.Namespace != "" {
+		return m.Namespace + ":" + m.Name
+	}
+	return m.Name
+}
+
+// pinnedVersion renders the version a Mismatch recommends pinning to.
+func pinnedVersion(m mismatch.Mismatch) string {
+	if m.Suggested != "" {
+		return m.Suggested
+	}
+	return m.Latest
+}
 
 // hookInput is the subset of Claude Code's PreToolUse hook payload we need.
 type hookInput struct {
@@ -136,17 +153,26 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+	var outdated, ranges []mismatch.Mismatch
 	for _, m := range mismatches {
-		name := m.Name
-		if m.Namespace != "" {
-			name = m.Namespace + ":" + m.Name
+		if m.Range {
+			ranges = append(ranges, m)
+		} else {
+			outdated = append(outdated, m)
 		}
-		latest := m.Latest
-		if m.Suggested != "" {
-			latest = m.Suggested
+	}
+
+	if len(outdated) > 0 {
+		fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+		for _, m := range outdated {
+			fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", mismatchName(m), m.Current, pinnedVersion(m))
 		}
-		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintln(os.Stderr, "the latest release falls outside these pinned ranges, pin exactly instead:")
+		for _, m := range ranges {
+			fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> %s\n", mismatchName(m), m.Current, m.Latest, pinnedVersion(m))
+		}
 	}
 	os.Exit(2)
 }
@@ -263,19 +289,30 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		os.Exit(0)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
-		scannedAt.Format("2006-01-02"), len(findings))
+	var outdated, ranges []scan.Finding
 	for _, f := range findings {
-		name := f.Name
-		if f.Namespace != "" {
-			name = f.Namespace + ":" + f.Name
+		if f.Range {
+			ranges = append(ranges, f)
+		} else {
+			outdated = append(outdated, f)
 		}
-		latest := f.Latest
-		if f.Suggested != "" {
-			latest = f.Suggested
+	}
+
+	var b strings.Builder
+	b.WriteString("yul scanned this project's manifests")
+	fmt.Fprintf(&b, " (as of %s)", scannedAt.Format("2006-01-02"))
+	b.WriteString(" and found:\n")
+	if len(outdated) > 0 {
+		fmt.Fprintf(&b, "%d pinned dependencies older than the latest release:\n", len(outdated))
+		for _, f := range outdated {
+			fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, mismatchName(f.Mismatch), f.Current, pinnedVersion(f.Mismatch))
 		}
-		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintf(&b, "%d dependencies pinned to a version range that excludes the latest release:\n", len(ranges))
+		for _, f := range ranges {
+			fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> %s\n", f.File, mismatchName(f.Mismatch), f.Current, f.Latest, pinnedVersion(f.Mismatch))
+		}
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
 

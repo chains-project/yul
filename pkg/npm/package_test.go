@@ -3,6 +3,8 @@ package npm
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/mismatch"
 )
 
 // fakeResolver resolves latest versions from a fixed PURL->version map, so
@@ -72,6 +74,40 @@ func TestParsePackageJSONPins(t *testing.T) {
 	}
 }
 
+func TestParsePackageJSONRanges(t *testing.T) {
+	content := `{
+		"dependencies": {
+			"exact": "1.2.3",
+			"caret": "^4.0.0",
+			"tilde": "~4.0.0",
+			"xrange": "1.2.x",
+			"wildcard": "*",
+			"tag": "latest",
+			"workspace": "workspace:*"
+		}
+	}`
+
+	got, err := parsePackageJSONRanges(content)
+	if err != nil {
+		t.Fatalf("parsePackageJSONRanges() error = %v", err)
+	}
+
+	want := map[string]string{
+		"dependencies/caret":    "^4.0.0",
+		"dependencies/tilde":    "~4.0.0",
+		"dependencies/xrange":   "1.2.x",
+		"dependencies/wildcard": "*",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parsePackageJSONRanges() returned %d ranges, want %d: %#v", len(got), len(want), got)
+	}
+	for location, spec := range want {
+		if got[location].Spec != spec {
+			t.Errorf("parsePackageJSONRanges()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+		}
+	}
+}
+
 func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
 	got, err := parsePackageJSONPins(" \n")
 	if err != nil {
@@ -86,8 +122,11 @@ func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
 	}
 }
 
-func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:npm/added": "2.0.0"}}
+func TestCheckPackageJSONOnlyChecksChangedExactPinsAndRanges(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/added": "2.0.0",
+		"pkg:npm/range": "3.0.0",
+	}}
 
 	before := `{"dependencies":{"existing":"1.0.0"}}`
 	after := `{"dependencies":{"existing":"1.0.0","added":"1.0.0","range":"^1.0.0"}}`
@@ -96,14 +135,19 @@ func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckPackageJSON() error = %v", err)
 	}
-	if res.lookups != 1 {
-		t.Fatalf("CheckPackageJSON() made %d resolver lookups, want 1", res.lookups)
+	if len(got) != 2 {
+		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 2: %#v", len(got), got)
 	}
-	if len(got) != 1 {
-		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 1: %#v", len(got), got)
+
+	byName := make(map[string]mismatch.Mismatch, len(got))
+	for _, m := range got {
+		byName[m.Name] = m
 	}
-	if got[0].Name != "added" || got[0].Current != "1.0.0" || got[0].Latest != "2.0.0" {
-		t.Fatalf("CheckPackageJSON() mismatch = %#v", got[0])
+	if m := byName["added"]; m.Current != "1.0.0" || m.Latest != "2.0.0" || m.Range {
+		t.Fatalf("CheckPackageJSON() added mismatch = %#v", m)
+	}
+	if m := byName["range"]; m.Current != "^1.0.0" || m.Latest != "3.0.0" || m.Suggested != "3.0.0" || !m.Range {
+		t.Fatalf("CheckPackageJSON() range mismatch = %#v", m)
 	}
 }
 

@@ -71,6 +71,39 @@ exact = "=9.9.9"
 	}
 }
 
+// TestParseCargoRangesExcludesWildcard checks a bare "*" is never flagged
+// since it can also mean a workspace-inherited dependency.
+func TestParseCargoRangesExcludesWildcard(t *testing.T) {
+	content := `
+[dependencies]
+caret = "1.2.3"
+explicit-caret = "^1.2.3"
+tilde = "~1.2.3"
+wildcard = "*"
+exact = "=1.2.3"
+workspace-dep = { workspace = true }
+`
+
+	got, err := parseCargoRanges(content)
+	if err != nil {
+		t.Fatalf("parseCargoRanges() error = %v", err)
+	}
+
+	want := map[string]string{
+		"runtime/caret":          "1.2.3",
+		"runtime/explicit-caret": "^1.2.3",
+		"runtime/tilde":          "~1.2.3",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseCargoRanges() returned %d ranges, want %d: %#v", len(got), len(want), got)
+	}
+	for location, spec := range want {
+		if got[location].Spec != spec {
+			t.Errorf("parseCargoRanges()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+		}
+	}
+}
+
 func TestParseCargoPinsEmptyAndInvalid(t *testing.T) {
 	got, err := parseCargoPins(" \n")
 	if err != nil {
@@ -133,10 +166,8 @@ added = "=1.0.0"
 	}
 }
 
-// TestCheckCargoTomlBareVersionIsCaretRangeNotExact covers the
-// Cargo-specific gotcha noted in the package doc comment: a bare version
-// like "1.2.3" means "^1.2.3" by default, not an exact pin, so it must never
-// be flagged even when it's older than the latest release.
+// TestCheckCargoTomlBareVersionIsCaretRangeNotExact checks a bare version
+// is flagged as a range recommendation, never as an outdated exact pin.
 func TestCheckCargoTomlBareVersionIsCaretRangeNotExact(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:cargo/added": "9.0.0"}}
 
@@ -150,11 +181,8 @@ added = "1.0.0"
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
-	if res.lookups != 0 {
-		t.Fatalf("CheckCargoToml() made %d resolver lookups, want 0 (bare version isn't an exact pin)", res.lookups)
-	}
-	if len(got) != 0 {
-		t.Fatalf("CheckCargoToml() = %#v, want no mismatches for a bare (caret) version", got)
+	if len(got) != 1 || !got[0].Range || got[0].Current != "1.0.0" || got[0].Suggested != "=9.0.0" {
+		t.Fatalf("CheckCargoToml() = %#v, want a single range recommendation for the bare (caret) version", got)
 	}
 }
 

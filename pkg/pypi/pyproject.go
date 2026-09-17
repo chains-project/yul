@@ -24,10 +24,9 @@ func (c PyprojectChecker) Check(before, after string) ([]mismatch.Mismatch, erro
 }
 
 // CheckPyproject compares pyproject.toml content before and after a Write
-// and reports any exactly-pinned ("==") dependency that is newly added or
-// whose pinned version was just changed, and doesn't match the latest
-// release res knows about. Packages the write didn't touch, or that aren't
-// pinned exactly, are left alone.
+// and reports outdated exact pins plus ranges that exclude the latest
+// release, recommending a hard "==" pin for each. Dependencies the write
+// didn't touch are left alone.
 func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePypiPins("pyproject.toml", before)
 	if err != nil {
@@ -37,5 +36,23 @@ func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mis
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	if err != nil {
+		return nil, err
+	}
+
+	beforeRanges, err := parsePypiRanges("pyproject.toml", before)
+	if err != nil {
+		return nil, err
+	}
+	afterRanges, err := parsePypiRanges("pyproject.toml", after)
+	if err != nil {
+		return nil, err
+	}
+	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(mismatches, rangeMismatches...), nil
 }

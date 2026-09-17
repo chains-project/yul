@@ -82,3 +82,62 @@ func TestCheckPyprojectOnlyChecksChangedPins(t *testing.T) {
 		t.Fatalf("CheckPyproject() = %#v, want one mismatch for httpx", got)
 	}
 }
+
+func TestParsePyprojectRangesCoversPoetryCaretAndPEP621Bounds(t *testing.T) {
+	content := `
+[project]
+name = "demo"
+dependencies = [
+    "flask>=3.0.0",
+]
+
+[tool.poetry.dependencies]
+requests = "^2.32.4"
+`
+	got, err := parsePypiRanges("pyproject.toml", content)
+	if err != nil {
+		t.Fatalf("parsePypiRanges() error = %v", err)
+	}
+	want := map[string]string{
+		"project/dependencies/flask":        ">=3.0.0",
+		"tool/poetry/dependencies/requests": "^2.32.4",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parsePypiRanges() returned %d ranges, want %d: %#v", len(got), len(want), got)
+	}
+	for location, spec := range want {
+		if got[location].Spec != spec {
+			t.Errorf("parsePypiRanges()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+		}
+	}
+}
+
+func TestCheckPyprojectFlagsPoetryCaretAsRange(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": requestsLatestVersion}}
+
+	before := "[tool.poetry.dependencies]\n"
+	after := "[tool.poetry.dependencies]\nrequests = \"^1.0.0\"\n"
+
+	got, err := CheckPyproject(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckPyproject() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || got[0].Current != "^1.0.0" || got[0].Suggested != "=="+requestsLatestVersion {
+		t.Fatalf("CheckPyproject() = %#v, want one range recommendation for requests", got)
+	}
+}
+
+func TestCheckPyprojectSkipsPoetryCaretThatAlreadyAllowsLatest(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": requestsLatestVersion}}
+
+	before := "[tool.poetry.dependencies]\n"
+	after := "[tool.poetry.dependencies]\nrequests = \"^2.0.0\"\n"
+
+	got, err := CheckPyproject(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckPyproject() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckPyproject() = %#v, want no mismatches when the caret range already allows latest", got)
+	}
+}

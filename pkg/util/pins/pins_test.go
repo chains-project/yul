@@ -3,6 +3,8 @@ package pins
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/mismatch"
 )
 
 func TestExactVersion(t *testing.T) {
@@ -41,6 +43,45 @@ func TestExactVersion(t *testing.T) {
 			if ok != test.wantOK || got != test.want {
 				t.Fatalf("ExactVersion(%q, %q, %v) = (%q, %v), want (%q, %v)",
 					test.spec, test.scheme, test.requireOperator, got, ok, test.want, test.wantOK)
+			}
+		})
+	}
+}
+
+func TestIsRange(t *testing.T) {
+	tests := []struct {
+		name            string
+		spec            string
+		scheme          string
+		requireOperator bool
+		want            bool
+	}{
+		{name: "npm caret is a range", spec: "^4.0.0", scheme: "npm", want: true},
+		{name: "npm tilde is a range", spec: "~4.0.0", scheme: "npm", want: true},
+		{name: "npm x-range is a range", spec: "1.2.x", scheme: "npm", want: true},
+		{name: "npm wildcard is a range", spec: "*", scheme: "npm", want: true},
+		{name: "npm exact version is not a range", spec: "1.2.3", scheme: "npm"},
+		{name: "npm dist-tag is not a range", spec: "latest", scheme: "npm"},
+		{name: "npm workspace protocol is not a range", spec: "workspace:*", scheme: "npm"},
+
+		{name: "pypi bounded range is a range", spec: ">=1.0.0,<2.0.0", scheme: "pypi", requireOperator: true, want: true},
+		{name: "pypi tilde-equal is a range", spec: "~=1.4.2", scheme: "pypi", requireOperator: true, want: true},
+		{name: "poetry caret is a range", spec: "^2.32.4", scheme: "pypi", requireOperator: true, want: true},
+		{name: "poetry tilde is a range", spec: "~2.32.4", scheme: "pypi", requireOperator: true, want: true},
+		{name: "poetry bare version is a range", spec: "2.32.4", scheme: "pypi", requireOperator: true, want: true},
+		{name: "pypi exact pin is not a range", spec: "==2.32.4", scheme: "pypi", requireOperator: true},
+		{name: "pypi redundant exact bound is not a range", spec: "==2.0.0,<3.0.0", scheme: "pypi", requireOperator: true},
+		{name: "pypi empty spec is not a range", spec: "", scheme: "pypi", requireOperator: true},
+
+		{name: "cargo caret is a range", spec: "^1.2.3", scheme: "cargo", requireOperator: true, want: true},
+		{name: "cargo bare version is a range", spec: "1.2.3", scheme: "cargo", requireOperator: true, want: true},
+		{name: "cargo exact pin is not a range", spec: "=1.2.3", scheme: "cargo", requireOperator: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := IsRange(test.spec, test.scheme, test.requireOperator); got != test.want {
+				t.Fatalf("IsRange(%q, %q, %v) = %v, want %v", test.spec, test.scheme, test.requireOperator, got, test.want)
 			}
 		})
 	}
@@ -145,5 +186,103 @@ func TestDiffFailsOpenOnUnresolvedPurl(t *testing.T) {
 
 	if _, err := Diff(context.Background(), before, after, "npm", res); err == nil {
 		t.Fatal("Diff() returned nil error, want an error for an unresolved purl")
+	}
+}
+
+func TestDiffRanges(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/added":   "2.0.0",
+		"pkg:npm/changed": "3.0.0",
+		"pkg:npm/current": "1.0.0",
+	}}
+	format := func(v string) string { return "^" + v }
+
+	before := map[string]RangePin{
+		"unchanged": {Name: "unchanged", Spec: "^1.0.0", PURL: "pkg:npm/current"},
+		"changed":   {Name: "changed", Spec: "^1.0.0", PURL: "pkg:npm/changed"},
+	}
+	after := map[string]RangePin{
+		"unchanged": {Name: "unchanged", Spec: "^1.0.0", PURL: "pkg:npm/current"},
+		"changed":   {Name: "changed", Spec: "^2.0.0", PURL: "pkg:npm/changed"},
+		"added":     {Name: "added", Spec: "^1.0.0", PURL: "pkg:npm/added"},
+	}
+
+	got, err := DiffRanges(context.Background(), before, after, "npm", res, format)
+	if err != nil {
+		t.Fatalf("DiffRanges() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("DiffRanges() returned %d mismatches, want 2: %#v", len(got), got)
+	}
+
+	byName := make(map[string]mismatch.Mismatch)
+	for _, m := range got {
+		byName[m.Name] = m
+	}
+	if m := byName["added"]; !m.Range || m.Latest != "2.0.0" || m.Suggested != "^2.0.0" {
+		t.Fatalf("DiffRanges() added mismatch = %#v", m)
+	}
+	if m := byName["changed"]; !m.Range || m.Latest != "3.0.0" || m.Suggested != "^3.0.0" {
+		t.Fatalf("DiffRanges() changed mismatch = %#v", m)
+	}
+}
+
+func TestDiffRangesSkipsUntouchedRanges(t *testing.T) {
+	// latest "2.0.0" falls outside "^1.0.0" (>=1.0.0,<2.0.0), so a newly
+	// added range at that location is expected to be flagged.
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "2.0.0"}}
+	format := func(v string) string { return v }
+
+	before := map[string]RangePin{}
+	after := map[string]RangePin{
+		"current": {Name: "current", Spec: "^1.0.0", PURL: "pkg:npm/current"},
+	}
+
+	got, err := DiffRanges(context.Background(), before, before, "npm", res, format)
+	if err != nil {
+		t.Fatalf("DiffRanges() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("DiffRanges() = %#v, want no mismatches when before == after", got)
+	}
+
+	got, err = DiffRanges(context.Background(), before, after, "npm", res, format)
+	if err != nil {
+		t.Fatalf("DiffRanges() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("DiffRanges() = %#v, want one mismatch for a newly added range", got)
+	}
+}
+
+func TestDiffRangesSkipsRangeThatAlreadyAllowsLatest(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "1.5.0"}}
+	format := func(v string) string { return v }
+
+	before := map[string]RangePin{}
+	after := map[string]RangePin{
+		"current": {Name: "current", Spec: "^1.0.0", PURL: "pkg:npm/current"},
+	}
+
+	got, err := DiffRanges(context.Background(), before, after, "npm", res, format)
+	if err != nil {
+		t.Fatalf("DiffRanges() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("DiffRanges() = %#v, want no mismatches when the range already allows latest", got)
+	}
+}
+
+func TestDiffRangesFailsOpenOnUnresolvedPurl(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{}}
+	format := func(v string) string { return v }
+
+	before := map[string]RangePin{}
+	after := map[string]RangePin{
+		"unknown": {Name: "unknown", Spec: "^1.0.0", PURL: "pkg:npm/unknown"},
+	}
+
+	if _, err := DiffRanges(context.Background(), before, after, "npm", res, format); err == nil {
+		t.Fatal("DiffRanges() returned nil error, want an error for an unresolved purl")
 	}
 }

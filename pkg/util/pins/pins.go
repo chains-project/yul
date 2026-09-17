@@ -61,6 +61,120 @@ func ExactVersion(spec, scheme string, requireOperator bool) (string, bool) {
 	return version, true
 }
 
+// RangePin is a dependency pinned to a version range rather than a single
+// exact version.
+type RangePin struct {
+	Namespace string // e.g. Maven groupId; empty for npm/pypi/cargo
+	Name      string
+	Spec      string // the range exactly as written, e.g. "^4.0.0"
+	PURL      string
+}
+
+// IsRange reports whether spec is a version range under scheme rather than
+// a single exact version or a non-version reference like a dist-tag.
+//
+// requireOperator matches ExactVersion's flag. A bare version under Poetry
+// or Cargo is itself a range (their implicit-caret default), not an exact
+// pin.
+func IsRange(spec, scheme string, requireOperator bool) bool {
+	spec, _, _ = strings.Cut(spec, ";") // drop a trailing PEP 508 environment marker
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return false
+	}
+
+	hasOperator := strings.ContainsRune("=<>!~^", rune(spec[0]))
+	if requireOperator && !hasOperator && vers.ValidWithScheme(spec, scheme) {
+		return true // bare version literal under an implicit-caret default
+	}
+
+	r, err := vers.ParseNative(spec, scheme)
+	if err != nil {
+		return false // not a version constraint at all
+	}
+	version, ok := r.ExactVersion()
+	if !ok {
+		return true // genuine range
+	}
+
+	// An unrecognized operator (e.g. Poetry's caret under the pypi scheme)
+	// parses as a fake "exact version" instead of erroring out. Treat it
+	// as a range only if it actually had an operator prefix.
+	return hasOperator && !vers.ValidWithScheme(version, scheme)
+}
+
+// satisfiesRange reports whether latest satisfies spec under scheme.
+//
+// Poetry's caret and tilde operators aren't understood by vers's pypi
+// scheme, so those specs are rewritten to equivalent npm syntax first,
+// since Poetry's caret/tilde semantics match npm's. A "~=" spec is left
+// alone since that's PEP 440's own operator, already handled correctly.
+func satisfiesRange(latest, spec, scheme string) bool {
+	checkScheme, checkSpec := scheme, spec
+	if scheme == "pypi" {
+		switch {
+		case spec == "":
+			return false
+		case spec[0] == '^':
+			checkScheme = "npm"
+		case spec[0] == '~' && !strings.HasPrefix(spec, "~="):
+			checkScheme = "npm"
+		case !strings.ContainsRune("=<>!~^", rune(spec[0])):
+			checkScheme, checkSpec = "npm", "^"+spec // Poetry's implicit-caret default
+		}
+	}
+	ok, err := vers.Satisfies(latest, checkSpec, checkScheme)
+	return err == nil && ok
+}
+
+// DiffRanges reports range pins in after that are new or changed and whose
+// range excludes the latest release res knows about, recommending each be
+// replaced by an exact pin at that release. A range already allowing the
+// latest release is left alone. format renders a latest version into the
+// ecosystem's exact-pin syntax for Mismatch.Suggested.
+func DiffRanges(ctx context.Context, before, after map[string]RangePin, scheme string, res resolver.Resolver, format func(string) string) ([]mismatch.Mismatch, error) {
+	var changed []RangePin
+	for location, pin := range after {
+		if prior, ok := before[location]; ok && prior == pin {
+			continue // untouched by this write
+		}
+		changed = append(changed, pin)
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+
+	purls := make([]string, len(changed))
+	for i, pin := range changed {
+		purls[i] = pin.PURL
+	}
+
+	latest, err := res.LatestVersions(ctx, purls)
+	if err != nil {
+		return nil, fmt.Errorf("resolving latest versions: %w", err)
+	}
+
+	var mismatches []mismatch.Mismatch
+	for _, pin := range changed {
+		latestVersion, ok := latest[pin.PURL]
+		if !ok {
+			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
+		}
+		if satisfiesRange(latestVersion, pin.Spec, scheme) {
+			continue
+		}
+		mismatches = append(mismatches, mismatch.Mismatch{
+			Namespace: pin.Namespace,
+			Name:      pin.Name,
+			Current:   pin.Spec,
+			Latest:    latestVersion,
+			Suggested: format(latestVersion),
+			Range:     true,
+		})
+	}
+	return mismatches, nil
+}
+
 // Diff reports pins in after that are new or whose version changed from
 // before, and whose pinned version is older than the latest release res
 // knows about (compared under scheme's ordering rules). Pins left

@@ -9,7 +9,13 @@ type Mismatch struct {
 	Current   string
 	Latest    string
 
-	// Suggested is a commit SHA to pin to instead of Latest, or "" if none
-	// applies (e.g. GitHub Actions' `@<sha> # <tag>` pin convention).
+	// Suggested is a fully-formatted replacement to pin to instead of
+	// Latest, or "" if none applies. For GitHub Actions this is a commit
+	// SHA. For a Range finding it's Latest in the ecosystem's exact-pin
+	// syntax.
 	Suggested string
+
+	// Range is true when Current is a version range excluding Latest,
+	// rather than a single pinned version behind it.
+	Range bool
 }

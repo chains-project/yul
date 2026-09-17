@@ -77,11 +77,40 @@ func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
+// parseCargoRanges parses Cargo.toml content and returns its range-pinned
+// crates, keyed the same way as parseCargoPins.
+//
+// A bare "*" is excluded since it can also mean a workspace-inherited
+// dependency, which has no version here to recommend pinning.
+func parseCargoRanges(content string) (map[string]pins.RangePin, error) {
+	result := make(map[string]pins.RangePin)
+	if strings.TrimSpace(content) == "" {
+		return result, nil
+	}
+
+	parsed, err := manifests.Parse("Cargo.toml", []byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("parsing Cargo.toml: %w", err)
+	}
+
+	for _, dep := range parsed.Dependencies {
+		spec := strings.TrimSpace(dep.Version)
+		if spec == "*" || !pins.IsRange(spec, scheme, true) {
+			continue
+		}
+		location := string(dep.Scope) + "/" + dep.Name
+		result[location] = pins.RangePin{Name: dep.Name, Spec: spec, PURL: dep.PURL}
+	}
+	return result, nil
+}
+
+// formatExactPin renders a latest version as Cargo's exact-pin syntax.
+func formatExactPin(latest string) string { return "=" + latest }
+
 // CheckCargoToml compares Cargo.toml content before and after a Write and
-// reports any exactly-pinned ("=") crate that is newly added or whose
-// pinned version was just changed, and is older than the latest release res
-// knows about. Crates the write didn't touch, or that aren't pinned
-// exactly, are left alone.
+// reports outdated exact pins plus ranges that exclude the latest release,
+// recommending a hard "=" pin for each. Crates the write didn't touch are
+// left alone.
 func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseCargoPins(before)
 	if err != nil {
@@ -91,5 +120,23 @@ func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mis
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	if err != nil {
+		return nil, err
+	}
+
+	beforeRanges, err := parseCargoRanges(before)
+	if err != nil {
+		return nil, err
+	}
+	afterRanges, err := parseCargoRanges(after)
+	if err != nil {
+		return nil, err
+	}
+	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(mismatches, rangeMismatches...), nil
 }

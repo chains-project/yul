@@ -23,10 +23,9 @@ func (c RequirementsChecker) Check(before, after string) ([]mismatch.Mismatch, e
 }
 
 // CheckRequirements compares requirements.txt content before and after a
-// Write and reports any exactly-pinned ("==") package that is newly added
-// or whose pinned version was just changed, and doesn't match the latest
-// release res knows about. Packages the write didn't touch, or that aren't
-// pinned exactly, are left alone.
+// Write and reports outdated exact pins plus ranges that exclude the
+// latest release, recommending a hard "==" pin for each. Packages the
+// write didn't touch are left alone.
 func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePypiPins("requirements.txt", before)
 	if err != nil {
@@ -36,5 +35,23 @@ func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	if err != nil {
+		return nil, err
+	}
+
+	beforeRanges, err := parsePypiRanges("requirements.txt", before)
+	if err != nil {
+		return nil, err
+	}
+	afterRanges, err := parsePypiRanges("requirements.txt", after)
+	if err != nil {
+		return nil, err
+	}
+	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(mismatches, rangeMismatches...), nil
 }

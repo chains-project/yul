@@ -1,6 +1,10 @@
 package pypi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/chains-project/yul/pkg/util/mismatch"
+)
 
 const (
 	requestsLatestVersion = "2.32.4"
@@ -71,23 +75,31 @@ ranged>=2.0.0,<3.0.0
 	}
 }
 
-func TestCheckRequirementsOnlyChecksChangedPins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": requestsLatestVersion}}
+func TestCheckRequirementsOnlyChecksChangedPinsAndRanges(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:pypi/requests": requestsLatestVersion,
+		"pkg:pypi/flask":    "3.1.0",
+	}}
 
 	before := "existing==1.0.0\n"
-	after := "existing==1.0.0\nrequests==2.31.0\nflask>=3.0.0\n"
+	after := "existing==1.0.0\nrequests==2.31.0\nflask<3.0.0\n"
 
 	got, err := CheckRequirements(before, after, res)
 	if err != nil {
 		t.Fatalf("CheckRequirements() error = %v", err)
 	}
-	if res.lookups != 1 {
-		t.Fatalf("CheckRequirements() made %d resolver lookups, want 1", res.lookups)
+	if len(got) != 2 {
+		t.Fatalf("CheckRequirements() returned %d mismatches, want 2: %#v", len(got), got)
 	}
-	if len(got) != 1 {
-		t.Fatalf("CheckRequirements() returned %d mismatches, want 1: %#v", len(got), got)
+
+	byName := make(map[string]mismatch.Mismatch, len(got))
+	for _, m := range got {
+		byName[m.Name] = m
 	}
-	if got[0].Name != "requests" || got[0].Current != "2.31.0" || got[0].Latest != requestsLatestVersion {
-		t.Fatalf("CheckRequirements() mismatch = %#v", got[0])
+	if m := byName["requests"]; m.Current != "2.31.0" || m.Latest != requestsLatestVersion || m.Range {
+		t.Fatalf("CheckRequirements() requests mismatch = %#v", m)
+	}
+	if m := byName["flask"]; m.Current != "<3.0.0" || m.Latest != "3.1.0" || m.Suggested != "==3.1.0" || !m.Range {
+		t.Fatalf("CheckRequirements() flask mismatch = %#v", m)
 	}
 }
