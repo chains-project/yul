@@ -30,59 +30,38 @@ func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
 	return CheckPackageJSON(before, after, c.Resolver)
 }
 
-// parsePackageJSONPins parses package.json content and returns its
-// exactly-pinned dependencies (no "^", "~", range, wildcard, tag, or
-// protocol prefix) across dependencies, devDependencies,
+// parsePackageJSON parses package.json content and returns its exactly-pinned
+// dependencies (no "^", "~", range, wildcard, tag, or protocol prefix) and
+// its range-pinned dependencies, across dependencies, devDependencies,
 // optionalDependencies, and peerDependencies.
-func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
-	result := make(map[string]pins.Pin)
+func parsePackageJSON(content string) (map[string]pins.Pin, map[string]pins.RangePin, error) {
+	exact := make(map[string]pins.Pin)
+	ranges := make(map[string]pins.RangePin)
 	if strings.TrimSpace(content) == "" {
-		return result, nil
+		return exact, ranges, nil
 	}
 
 	parsed, err := manifests.Parse("package.json", []byte(content))
 	if err != nil {
-		return nil, fmt.Errorf("parsing package.json: %w", err)
+		return nil, nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
 	for _, declaration := range parsed.Declarations {
-		version, ok := pins.ExactVersion(declaration.Version, scheme, false)
-		if !ok {
-			continue
-		}
-		result[declaration.Location] = pins.Pin{
-			Name:    declaration.Name,
-			Version: version,
-			PURL:    declaration.PURL,
-		}
-	}
-	return result, nil
-}
-
-// parsePackageJSONRanges parses package.json content and returns its
-// range-pinned dependencies across all four dependency fields.
-func parsePackageJSONRanges(content string) (map[string]pins.RangePin, error) {
-	result := make(map[string]pins.RangePin)
-	if strings.TrimSpace(content) == "" {
-		return result, nil
-	}
-
-	parsed, err := manifests.Parse("package.json", []byte(content))
-	if err != nil {
-		return nil, fmt.Errorf("parsing package.json: %w", err)
-	}
-
-	for _, declaration := range parsed.Declarations {
-		if !pins.IsRange(declaration.Version, scheme, false) {
-			continue
-		}
-		result[declaration.Location] = pins.RangePin{
-			Name: declaration.Name,
-			Spec: strings.TrimSpace(declaration.Version),
-			PURL: declaration.PURL,
+		if version, ok := pins.ExactVersion(declaration.Version, scheme, false); ok {
+			exact[declaration.Location] = pins.Pin{
+				Name:    declaration.Name,
+				Version: version,
+				PURL:    declaration.PURL,
+			}
+		} else if pins.IsRange(declaration.Version, scheme, false) {
+			ranges[declaration.Location] = pins.RangePin{
+				Name: declaration.Name,
+				Spec: strings.TrimSpace(declaration.Version),
+				PURL: declaration.PURL,
+			}
 		}
 	}
-	return result, nil
+	return exact, ranges, nil
 }
 
 // formatExactPin renders a latest version as npm's exact-pin syntax.
@@ -93,11 +72,11 @@ func formatExactPin(latest string) string { return latest }
 // release, recommending a hard pin for each. Packages the write didn't
 // touch are left alone.
 func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
-	beforePins, err := parsePackageJSONPins(before)
+	beforePins, beforeRanges, err := parsePackageJSON(before)
 	if err != nil {
 		return nil, err
 	}
-	afterPins, err := parsePackageJSONPins(after)
+	afterPins, afterRanges, err := parsePackageJSON(after)
 	if err != nil {
 		return nil, err
 	}
@@ -106,14 +85,6 @@ func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.M
 		return nil, err
 	}
 
-	beforeRanges, err := parsePackageJSONRanges(before)
-	if err != nil {
-		return nil, err
-	}
-	afterRanges, err := parsePackageJSONRanges(after)
-	if err != nil {
-		return nil, err
-	}
 	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
 	if err != nil {
 		return nil, err

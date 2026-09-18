@@ -28,11 +28,11 @@ func (c PyprojectChecker) Check(before, after string) ([]mismatch.Mismatch, erro
 // release, recommending a hard "==" pin for each. Dependencies the write
 // didn't touch are left alone.
 func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
-	beforePins, err := parsePypiPins("pyproject.toml", before)
+	beforePins, beforeRanges, err := parsePypi("pyproject.toml", before)
 	if err != nil {
 		return nil, err
 	}
-	afterPins, err := parsePypiPins("pyproject.toml", after)
+	afterPins, afterRanges, err := parsePypi("pyproject.toml", after)
 	if err != nil {
 		return nil, err
 	}
@@ -41,14 +41,6 @@ func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mis
 		return nil, err
 	}
 
-	beforeRanges, err := parsePypiRanges("pyproject.toml", before)
-	if err != nil {
-		return nil, err
-	}
-	afterRanges, err := parsePypiRanges("pyproject.toml", after)
-	if err != nil {
-		return nil, err
-	}
 	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
 	if err != nil {
 		return nil, err

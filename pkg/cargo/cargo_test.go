@@ -43,9 +43,9 @@ workspace-dep = { workspace = true }
 exact = "=9.9.9"
 `
 
-	got, err := parseCargoPins(content)
+	got, _, err := parseCargo(content)
 	if err != nil {
-		t.Fatalf("parseCargoPins() error = %v", err)
+		t.Fatalf("parseCargo() error = %v", err)
 	}
 
 	want := map[string]string{
@@ -54,19 +54,19 @@ exact = "=9.9.9"
 		"development/exact":   "9.9.9",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parseCargoPins() returned %d pins, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("parseCargo() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
 	for location, version := range want {
 		pin, ok := got[location]
 		if !ok {
-			t.Errorf("parseCargoPins() missing %q", location)
+			t.Errorf("parseCargo() missing %q", location)
 			continue
 		}
 		if pin.Version != version {
-			t.Errorf("parseCargoPins()[%q].Version = %q, want %q", location, pin.Version, version)
+			t.Errorf("parseCargo()[%q].Version = %q, want %q", location, pin.Version, version)
 		}
 		if pin.PURL == "" {
-			t.Errorf("parseCargoPins()[%q].PURL is empty", location)
+			t.Errorf("parseCargo()[%q].PURL is empty", location)
 		}
 	}
 }
@@ -84,9 +84,9 @@ exact = "=1.2.3"
 workspace-dep = { workspace = true }
 `
 
-	got, err := parseCargoRanges(content)
+	_, got, err := parseCargo(content)
 	if err != nil {
-		t.Fatalf("parseCargoRanges() error = %v", err)
+		t.Fatalf("parseCargo() error = %v", err)
 	}
 
 	want := map[string]string{
@@ -95,30 +95,30 @@ workspace-dep = { workspace = true }
 		"runtime/tilde":          "~1.2.3",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parseCargoRanges() returned %d ranges, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("parseCargo() returned %d ranges, want %d: %#v", len(got), len(want), got)
 	}
 	for location, spec := range want {
 		if got[location].Spec != spec {
-			t.Errorf("parseCargoRanges()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+			t.Errorf("parseCargo()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
 		}
 	}
 }
 
 func TestParseCargoPinsEmptyAndInvalid(t *testing.T) {
-	got, err := parseCargoPins(" \n")
+	got, ranges, err := parseCargo(" \n")
 	if err != nil {
-		t.Fatalf("parseCargoPins(empty) error = %v", err)
+		t.Fatalf("parseCargo(empty) error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("parseCargoPins(empty) = %#v, want no pins", got)
+	if len(got) != 0 || len(ranges) != 0 {
+		t.Fatalf("parseCargo(empty) = %#v, %#v, want no pins or ranges", got, ranges)
 	}
 
-	got, err = parseCargoPins("[package]\nname = \"demo\"\nversion = \"0.1.0\"\n")
+	got, _, err = parseCargo("[package]\nname = \"demo\"\nversion = \"0.1.0\"\n")
 	if err != nil {
-		t.Fatalf("parseCargoPins(no deps) error = %v", err)
+		t.Fatalf("parseCargo(no deps) error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("parseCargoPins(no deps) = %#v, want no pins", got)
+		t.Fatalf("parseCargo(no deps) = %#v, want no pins", got)
 	}
 }
 

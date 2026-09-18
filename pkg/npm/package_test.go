@@ -47,9 +47,9 @@ func TestParsePackageJSONPins(t *testing.T) {
 		}
 	}`
 
-	got, err := parsePackageJSONPins(content)
+	got, _, err := parsePackageJSON(content)
 	if err != nil {
-		t.Fatalf("parsePackageJSONPins() error = %v", err)
+		t.Fatalf("parsePackageJSON() error = %v", err)
 	}
 
 	want := map[string]string{
@@ -62,11 +62,11 @@ func TestParsePackageJSONPins(t *testing.T) {
 		"peerDependencies/peer":         "7.0.0",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parsePackageJSONPins() returned %d pins, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("parsePackageJSON() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
 	for location, version := range want {
 		if got[location].Version != version {
-			t.Errorf("parsePackageJSONPins()[%q].Version = %q, want %q", location, got[location].Version, version)
+			t.Errorf("parsePackageJSON()[%q].Version = %q, want %q", location, got[location].Version, version)
 		}
 	}
 	if pin := got["dependencies/alias"]; pin.Name != "@scope/actual" || pin.PURL != "pkg:npm/%40scope/actual" {
@@ -87,9 +87,9 @@ func TestParsePackageJSONRanges(t *testing.T) {
 		}
 	}`
 
-	got, err := parsePackageJSONRanges(content)
+	_, got, err := parsePackageJSON(content)
 	if err != nil {
-		t.Fatalf("parsePackageJSONRanges() error = %v", err)
+		t.Fatalf("parsePackageJSON() error = %v", err)
 	}
 
 	want := map[string]string{
@@ -99,26 +99,26 @@ func TestParsePackageJSONRanges(t *testing.T) {
 		"dependencies/wildcard": "*",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parsePackageJSONRanges() returned %d ranges, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("parsePackageJSON() returned %d ranges, want %d: %#v", len(got), len(want), got)
 	}
 	for location, spec := range want {
 		if got[location].Spec != spec {
-			t.Errorf("parsePackageJSONRanges()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+			t.Errorf("parsePackageJSON()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
 		}
 	}
 }
 
 func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
-	got, err := parsePackageJSONPins(" \n")
+	got, ranges, err := parsePackageJSON(" \n")
 	if err != nil {
-		t.Fatalf("parsePackageJSONPins(empty) error = %v", err)
+		t.Fatalf("parsePackageJSON(empty) error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("parsePackageJSONPins(empty) = %#v, want no pins", got)
+	if len(got) != 0 || len(ranges) != 0 {
+		t.Fatalf("parsePackageJSON(empty) = %#v, %#v, want no pins or ranges", got, ranges)
 	}
 
-	if _, err := parsePackageJSONPins("{"); err == nil {
-		t.Fatal("parsePackageJSONPins(invalid) returned nil error")
+	if _, _, err := parsePackageJSON("{"); err == nil {
+		t.Fatal("parsePackageJSON(invalid) returned nil error")
 	}
 }
 

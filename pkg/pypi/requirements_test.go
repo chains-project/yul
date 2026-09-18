@@ -20,28 +20,28 @@ flask>=3.0.0
 httpx[http2] == 0.28.1 ; python_version >= "3.10"
 `
 
-	got, err := parsePypiPins("requirements.txt", content)
+	got, _, err := parsePypi("requirements.txt", content)
 	if err != nil {
-		t.Fatalf("parsePypiPins() error = %v", err)
+		t.Fatalf("parsePypi() error = %v", err)
 	}
 	want := map[string]string{
 		"requirements/requests": requestsLatestVersion,
 		"requirements/httpx":    httpxLatestVersion,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parsePypiPins() returned %d pins, want %d: %#v", len(got), len(want), got)
+		t.Fatalf("parsePypi() returned %d pins, want %d: %#v", len(got), len(want), got)
 	}
 	for location, version := range want {
 		if got[location].Version != version {
-			t.Errorf("parsePypiPins()[%q].Version = %q, want %q", location, got[location].Version, version)
+			t.Errorf("parsePypi()[%q].Version = %q, want %q", location, got[location].Version, version)
 		}
 	}
 }
 
 func TestParseRequirementsPinsUsesCanonicalPURL(t *testing.T) {
-	got, err := parsePypiPins("requirements.txt", "Django_Rest.Framework==1.0\n")
+	got, _, err := parsePypi("requirements.txt", "Django_Rest.Framework==1.0\n")
 	if err != nil {
-		t.Fatalf("parsePypiPins() error = %v", err)
+		t.Fatalf("parsePypi() error = %v", err)
 	}
 	pin := got["requirements/django-rest-framework"]
 	if pin.Name != "django-rest.framework" || pin.PURL != "pkg:pypi/django-rest.framework" {
@@ -50,12 +50,12 @@ func TestParseRequirementsPinsUsesCanonicalPURL(t *testing.T) {
 }
 
 func TestParseRequirementsPinsEmptyAndInvalid(t *testing.T) {
-	got, err := parsePypiPins("requirements.txt", " \n")
+	got, _, err := parsePypi("requirements.txt", " \n")
 	if err != nil {
-		t.Fatalf("parsePypiPins(empty) error = %v", err)
+		t.Fatalf("parsePypi(empty) error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("parsePypiPins(empty) = %#v, want no pins", got)
+		t.Fatalf("parsePypi(empty) = %#v, want no pins", got)
 	}
 }
 
@@ -66,12 +66,12 @@ compatible~=2.0.0
 exclusion!=2.0.0
 ranged>=2.0.0,<3.0.0
 `
-	got, err := parsePypiPins("requirements.txt", content)
+	got, _, err := parsePypi("requirements.txt", content)
 	if err != nil {
-		t.Fatalf("parsePypiPins() error = %v", err)
+		t.Fatalf("parsePypi() error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("parsePypiPins() = %#v, want no exact pins", got)
+		t.Fatalf("parsePypi() = %#v, want no exact pins", got)
 	}
 }
 
