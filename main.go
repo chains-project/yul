@@ -163,13 +163,18 @@ func runHook() {
 		}
 	}
 	if len(ranges) > 0 {
-		fmt.Fprintln(os.Stderr, "these ranges have no lockfile alongside the manifest, so the actually-installed version isn't pinned anywhere - run your package manager's install to generate one:")
+		fmt.Fprintln(os.Stderr, "these pinned ranges need attention:")
 		for _, m := range ranges {
 			name := m.Name
 			if m.Namespace != "" {
 				name = m.Namespace + ":" + m.Name
 			}
-			fmt.Fprintf(os.Stderr, "  %s  %s\n", name, m.Current)
+			if m.Suggested != "" {
+				fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> widen to %s\n", name, m.Current, m.Latest, m.Suggested)
+			}
+			if m.NoLockfile {
+				fmt.Fprintf(os.Stderr, "  %s: no lockfile found next to this manifest -> run your package manager's install to generate one\n", name)
+			}
 		}
 	}
 	os.Exit(2)
@@ -315,13 +320,18 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		}
 	}
 	if len(ranges) > 0 {
-		fmt.Fprintf(&b, "%d version ranges with no lockfile alongside their manifest:\n", len(ranges))
+		fmt.Fprintf(&b, "%d pinned ranges that need attention:\n", len(ranges))
 		for _, f := range ranges {
 			name := f.Name
 			if f.Namespace != "" {
 				name = f.Namespace + ":" + f.Name
 			}
-			fmt.Fprintf(&b, "  %s: %s  %s\n", f.File, name, f.Current)
+			if f.Suggested != "" {
+				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> widen to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
+			}
+			if f.NoLockfile {
+				fmt.Fprintf(&b, "  %s: %s: no lockfile found next to this manifest\n", f.File, name)
+			}
 		}
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")

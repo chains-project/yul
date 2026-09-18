@@ -106,3 +106,15 @@ func TestCheckRequirementsNeverFlagsMissingLockfile(t *testing.T) {
 		t.Fatalf("CheckRequirements() = %#v, want no mismatches: the range allows latest and requirements.txt has no lockfile to check for", got)
 	}
 }
+
+func TestCheckRequirementsFlagsRangeExcludingLatestWithBoundedSuggestion(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/flask": "3.1.0"}}
+
+	got, err := CheckRequirements("", "flask<3.0.0\n", res)
+	if err != nil {
+		t.Fatalf("CheckRequirements() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || got[0].Suggested != ">=3.1.0,<4.0.0" {
+		t.Fatalf("CheckRequirements() = %#v, want a PEP 440 bounded-range suggestion", got)
+	}
+}

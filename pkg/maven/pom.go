@@ -138,5 +138,5 @@ func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch,
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport, nil)
 }

@@ -40,5 +40,5 @@ func CheckPyproject(before, after string, res resolver.Resolver, hasLockfile boo
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile, formatRangeFix)
 }

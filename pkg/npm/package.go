@@ -69,9 +69,15 @@ func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
+// formatRangeFix renders a caret range anchored at latest, replacing a
+// range that excludes it.
+func formatRangeFix(_, latest string) string { return "^" + latest }
+
 // CheckPackageJSON compares package.json content before and after a Write
-// and reports outdated exact pins plus ranges with no lockfile alongside
-// package.json. Packages the write didn't touch are left alone.
+// and reports outdated exact pins, ranges that exclude the latest release
+// (recommending a caret range anchored at it instead), and ranges with no
+// lockfile alongside package.json. Packages the write didn't touch are
+// left alone.
 func CheckPackageJSON(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePackageJSONPins(before)
 	if err != nil {
@@ -81,5 +87,5 @@ func CheckPackageJSON(before, after string, res resolver.Resolver, hasLockfile b
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile, formatRangeFix)
 }

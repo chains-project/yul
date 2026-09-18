@@ -88,9 +88,15 @@ func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
+// formatRangeFix renders a caret range anchored at latest, replacing a
+// range that excludes it.
+func formatRangeFix(_, latest string) string { return "^" + latest }
+
 // CheckCargoToml compares Cargo.toml content before and after a Write and
-// reports outdated exact pins plus ranges with no Cargo.lock alongside
-// Cargo.toml. Crates the write didn't touch are left alone.
+// reports outdated exact pins, ranges that exclude the latest release
+// (recommending a caret range anchored at it instead), and ranges with no
+// Cargo.lock alongside Cargo.toml. Crates the write didn't touch are left
+// alone.
 func CheckCargoToml(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseCargoPins(before)
 	if err != nil {
@@ -100,5 +106,5 @@ func CheckCargoToml(before, after string, res resolver.Resolver, hasLockfile boo
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile, formatRangeFix)
 }

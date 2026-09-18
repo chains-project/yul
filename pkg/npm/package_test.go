@@ -3,6 +3,8 @@ package npm
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/mismatch"
 )
 
 // fakeResolver resolves latest versions from a fixed PURL->version map, so
@@ -90,10 +92,10 @@ func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
 	}
 }
 
-func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
+func TestCheckPackageJSONOnlyChecksChangedExactPinsAndRanges(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{
 		"pkg:npm/added": "2.0.0",
-		"pkg:npm/range": "3.0.0", // excludes latest under "^1.0.0"; ignored by this PR
+		"pkg:npm/range": "3.0.0",
 	}}
 
 	before := `{"dependencies":{"existing":"1.0.0"}}`
@@ -106,11 +108,19 @@ func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
 	if res.lookups != 1 {
 		t.Fatalf("CheckPackageJSON() made %d resolver lookups, want 1", res.lookups)
 	}
-	if len(got) != 1 {
-		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 1: %#v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 2: %#v", len(got), got)
 	}
-	if got[0].Name != "added" || got[0].Current != "1.0.0" || got[0].Latest != "2.0.0" {
-		t.Fatalf("CheckPackageJSON() mismatch = %#v", got[0])
+
+	byName := make(map[string]mismatch.Mismatch, len(got))
+	for _, m := range got {
+		byName[m.Name] = m
+	}
+	if m := byName["added"]; m.Current != "1.0.0" || m.Latest != "2.0.0" || m.Range {
+		t.Fatalf("CheckPackageJSON() added mismatch = %#v", m)
+	}
+	if m := byName["range"]; m.Current != "^1.0.0" || m.Latest != "3.0.0" || m.Suggested != "^3.0.0" || !m.Range {
+		t.Fatalf("CheckPackageJSON() range mismatch = %#v", m)
 	}
 }
 

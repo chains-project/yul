@@ -97,3 +97,33 @@ func TestCheckPyprojectFlagsRangeWithNoLockfile(t *testing.T) {
 		t.Fatalf("CheckPyproject() = %#v, want a lockfile-only mismatch since the caret range already allows latest", got)
 	}
 }
+
+func TestCheckPyprojectFlagsPoetryCaretExcludingLatestWithCaretSuggestion(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": requestsLatestVersion}}
+
+	before := "[tool.poetry.dependencies]\n"
+	after := "[tool.poetry.dependencies]\nrequests = \"^1.0.0\"\n"
+
+	got, err := CheckPyproject(before, after, res, true)
+	if err != nil {
+		t.Fatalf("CheckPyproject() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || got[0].Suggested != "^"+requestsLatestVersion {
+		t.Fatalf("CheckPyproject() = %#v, want a caret suggestion anchored at latest", got)
+	}
+}
+
+func TestCheckPyprojectFlagsPEP621RangeExcludingLatestWithBoundedSuggestion(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/flask": "3.1.0"}}
+
+	before := "[project]\nname = \"demo\"\ndependencies = []\n"
+	after := "[project]\nname = \"demo\"\ndependencies = [\"flask<3.0.0\"]\n"
+
+	got, err := CheckPyproject(before, after, res, true)
+	if err != nil {
+		t.Fatalf("CheckPyproject() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || got[0].Suggested != ">=3.1.0,<4.0.0" {
+		t.Fatalf("CheckPyproject() = %#v, want a PEP 440 bounded-range suggestion", got)
+	}
+}

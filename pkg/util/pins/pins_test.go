@@ -108,7 +108,7 @@ func TestDiff(t *testing.T) {
 		"added":     {Name: "added", Version: "1.0.0", PURL: "pkg:npm/added"},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res, true)
+	got, err := Diff(context.Background(), before, after, "npm", res, true, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -137,7 +137,7 @@ func TestDiffSkipsUntouchedAndUpToDatePins(t *testing.T) {
 		"newer":   {Name: "newer", Version: "2.0.0", PURL: "pkg:npm/newer"},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res, true)
+	got, err := Diff(context.Background(), before, after, "npm", res, true, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -158,7 +158,7 @@ func TestDiffChecksReplacementAtSameLocation(t *testing.T) {
 		"dependencies/package": {Name: "replacement", Version: "1.0.0", PURL: "pkg:npm/replacement"},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res, true)
+	got, err := Diff(context.Background(), before, after, "npm", res, true, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -175,39 +175,39 @@ func TestDiffFailsOpenOnUnresolvedPurl(t *testing.T) {
 		"unknown": {Name: "unknown", Version: "1.0.0", PURL: "pkg:npm/unknown"},
 	}
 
-	if _, err := Diff(context.Background(), before, after, "npm", res, true); err == nil {
+	if _, err := Diff(context.Background(), before, after, "npm", res, true, nil); err == nil {
 		t.Fatal("Diff() returned nil error, want an error for an unresolved purl")
 	}
 }
 
-func TestDiffRangeExcludingLatestIsIgnored(t *testing.T) {
-	// This PR only handles a range that already allows latest; a range
-	// that excludes it is deliberately left alone here (a follow-up).
+func TestDiffFlagsRangeExcludingLatest(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "2.0.0"}}
+	format := func(_, v string) string { return "^" + v }
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
 		"current": {Name: "current", Version: "^1.0.0", PURL: "pkg:npm/current", Range: true},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res, false)
+	got, err := Diff(context.Background(), before, after, "npm", res, true, format)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("Diff() = %#v, want no mismatches for a range excluding latest", got)
+	if len(got) != 1 || !got[0].Range || got[0].Suggested != "^2.0.0" || got[0].NoLockfile {
+		t.Fatalf("Diff() = %#v, want a widened-range suggestion", got)
 	}
 }
 
 func TestDiffRangeAllowingLatestWithLockfileIsSkipped(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "1.5.0"}}
+	format := func(_, v string) string { return "^" + v }
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
 		"current": {Name: "current", Version: "^1.0.0", PURL: "pkg:npm/current", Range: true},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res, true)
+	got, err := Diff(context.Background(), before, after, "npm", res, true, format)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -218,13 +218,14 @@ func TestDiffRangeAllowingLatestWithLockfileIsSkipped(t *testing.T) {
 
 func TestDiffFlagsRangeAllowingLatestWithNoLockfile(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "1.5.0"}}
+	format := func(_, v string) string { return "^" + v }
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
 		"current": {Name: "current", Version: "^1.0.0", PURL: "pkg:npm/current", Range: true},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res, false)
+	got, err := Diff(context.Background(), before, after, "npm", res, false, format)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
