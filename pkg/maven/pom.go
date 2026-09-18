@@ -138,9 +138,5 @@ func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch,
 	if err != nil {
 		return nil, err
 	}
-	// hasLockfile=true regardless of whether one actually exists:
-	// parsePOMPins never produces a range Pin, so pins.Diff's lockfile
-	// check - which only ever applies to a range - never fires here.
-	// Passing false would change nothing except mislead a future reader.
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, true)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport)
 }

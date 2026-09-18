@@ -15,6 +15,22 @@ import (
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
+// NoRangeSupport is passed as Diff's hasLockfile argument by a checker that
+// never produces a range Pin at all (Maven, go.mod), so Diff's lockfile
+// check - which only ever looks at range pins - can never fire regardless
+// of what's passed. Named instead of a bare literal so a reader of the
+// call site doesn't mistake it for "a lockfile was verified present" - it
+// says nothing about whether one actually exists, which for some of these
+// ecosystems (e.g. go.sum) it may well.
+const NoRangeSupport = true
+
+// NoLockfileConvention is passed as Diff's hasLockfile argument by a
+// checker whose ecosystem does produce range pins but has no lockfile
+// convention of its own to check for (requirements.txt is typically the
+// compiled/pinned output already), so its ranges are deliberately never
+// flagged for a missing lockfile.
+const NoLockfileConvention = true
+
 // Pin is a dependency extracted from a manifest, pinned to either a single
 // exact version or a version range, along with the PURL to resolve its
 // latest version through.

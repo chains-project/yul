@@ -40,5 +40,5 @@ func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, true)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoLockfileConvention)
 }
