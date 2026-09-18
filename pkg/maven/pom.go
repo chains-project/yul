@@ -27,6 +27,8 @@ type Checker struct {
 
 func (Checker) Filename() string { return "pom.xml" }
 
+// hasLockfile is unused: this checker doesn't parse version ranges, so
+// there's never a range to check a lockfile against.
 func (c Checker) Check(before, after string, _ bool) ([]mismatch.Mismatch, error) {
 	return CheckPOM(before, after, c.Resolver)
 }
@@ -136,5 +138,9 @@ func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch,
 	if err != nil {
 		return nil, err
 	}
+	// hasLockfile=true regardless of whether one actually exists:
+	// parsePOMPins never produces a range Pin, so pins.Diff's lockfile
+	// check - which only ever applies to a range - never fires here.
+	// Passing false would change nothing except mislead a future reader.
 	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, true)
 }

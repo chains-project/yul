@@ -152,6 +152,10 @@ func TestCheckCargoTomlAtLatestNoMismatch(t *testing.T) {
 added = "=1.0.0"
 `
 
+	// hasLockfile is irrelevant here: "added" is an exact pin, not a
+	// range, so it's never consulted. true is passed everywhere in this
+	// file that isn't specifically testing the lockfile check itself, to
+	// keep those tests from also having to reason about it.
 	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
@@ -164,8 +168,7 @@ added = "=1.0.0"
 // TestCheckCargoTomlBareVersionIsCaretRangeNotExact covers the
 // Cargo-specific gotcha noted in the package doc comment: a bare version
 // like "1.2.3" means "^1.2.3" by default, not an exact pin, so it's
-// checked as a range (here excluding latest "9.0.0", which this PR
-// deliberately leaves alone), never flagged as an outdated exact pin.
+// checked as a range, never flagged as an outdated exact pin.
 func TestCheckCargoTomlBareVersionIsCaretRangeNotExact(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:cargo/added": "9.0.0"}}
 

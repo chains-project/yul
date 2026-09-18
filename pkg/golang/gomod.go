@@ -72,6 +72,9 @@ type Checker struct {
 
 func (Checker) Filename() string { return "go.mod" }
 
+// hasLockfile is unused: go.mod has no version-range syntax (see the
+// design notes above), so there's never a range to check a lockfile
+// against.
 func (c Checker) Check(before, after string, _ bool) ([]mismatch.Mismatch, error) {
 	return CheckGoMod(before, after, c.Resolver)
 }
