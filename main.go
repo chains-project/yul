@@ -171,7 +171,7 @@ func runHook() {
 	if len(ranges) > 0 {
 		fmt.Fprintln(os.Stderr, "the latest release falls outside these pinned ranges, pin exactly instead:")
 		for _, m := range ranges {
-			fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> %s\n", mismatchName(m), m.Current, m.Latest, pinnedVersion(m))
+			fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> pin to %s\n", mismatchName(m), m.Current, m.Latest, pinnedVersion(m))
 		}
 	}
 	os.Exit(2)
@@ -311,7 +311,7 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 	if len(ranges) > 0 {
 		fmt.Fprintf(&b, "%d dependencies pinned to a version range that excludes the latest release:\n", len(ranges))
 		for _, f := range ranges {
-			fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> %s\n", f.File, mismatchName(f.Mismatch), f.Current, f.Latest, pinnedVersion(f.Mismatch))
+			fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> pin to %s\n", f.File, mismatchName(f.Mismatch), f.Current, f.Latest, pinnedVersion(f.Mismatch))
 		}
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
