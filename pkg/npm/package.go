@@ -26,14 +26,19 @@ type Checker struct {
 
 func (Checker) Filename() string { return "package.json" }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckPackageJSON(before, after, c.Resolver)
+// LockfileNames lists the lockfiles the major npm-compatible package
+// managers produce alongside package.json.
+func (Checker) LockfileNames() []string {
+	return []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"}
+}
+
+func (c Checker) Check(before, after string, hasLockfile bool) ([]mismatch.Mismatch, error) {
+	return CheckPackageJSON(before, after, c.Resolver, hasLockfile)
 }
 
 // parsePackageJSONPins parses package.json content and returns its
-// exactly-pinned dependencies (no "^", "~", range, wildcard, tag, or
-// protocol prefix) across dependencies, devDependencies,
-// optionalDependencies, and peerDependencies.
+// exactly-pinned and range-pinned dependencies across dependencies,
+// devDependencies, optionalDependencies, and peerDependencies.
 func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -46,25 +51,28 @@ func parsePackageJSONPins(content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, declaration := range parsed.Declarations {
-		version, ok := pins.ExactVersion(declaration.Version, scheme, false)
-		if !ok {
-			continue
-		}
-		result[declaration.Location] = pins.Pin{
-			Name:    declaration.Name,
-			Version: version,
-			PURL:    declaration.PURL,
+		if version, ok := pins.ExactVersion(declaration.Version, scheme, false); ok {
+			result[declaration.Location] = pins.Pin{
+				Name:    declaration.Name,
+				Version: version,
+				PURL:    declaration.PURL,
+			}
+		} else if pins.IsRange(declaration.Version, scheme, false) {
+			result[declaration.Location] = pins.Pin{
+				Name:    declaration.Name,
+				Version: strings.TrimSpace(declaration.Version),
+				PURL:    declaration.PURL,
+				Range:   true,
+			}
 		}
 	}
 	return result, nil
 }
 
 // CheckPackageJSON compares package.json content before and after a Write
-// and reports any exactly-pinned package that is newly added or whose
-// pinned version was just changed, and is older than the latest release res
-// knows about. Packages the write didn't touch, or that aren't pinned
-// exactly, are left alone.
-func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// and reports outdated exact pins plus ranges with no lockfile alongside
+// package.json. Packages the write didn't touch are left alone.
+func CheckPackageJSON(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePackageJSONPins(before)
 	if err != nil {
 		return nil, err
@@ -73,5 +81,5 @@ func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.M
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile)
 }

@@ -19,16 +19,19 @@ type PyprojectChecker struct {
 
 func (PyprojectChecker) Filename() string { return "pyproject.toml" }
 
-func (c PyprojectChecker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckPyproject(before, after, c.Resolver)
+// LockfileNames lists the lockfiles the pyproject.toml-based tools produce.
+func (PyprojectChecker) LockfileNames() []string {
+	return []string{"poetry.lock", "uv.lock", "pdm.lock"}
+}
+
+func (c PyprojectChecker) Check(before, after string, hasLockfile bool) ([]mismatch.Mismatch, error) {
+	return CheckPyproject(before, after, c.Resolver, hasLockfile)
 }
 
 // CheckPyproject compares pyproject.toml content before and after a Write
-// and reports any exactly-pinned ("==") dependency that is newly added or
-// whose pinned version was just changed, and doesn't match the latest
-// release res knows about. Packages the write didn't touch, or that aren't
-// pinned exactly, are left alone.
-func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// and reports outdated exact pins plus ranges with no lockfile alongside
+// pyproject.toml. Dependencies the write didn't touch are left alone.
+func CheckPyproject(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePypiPins("pyproject.toml", before)
 	if err != nil {
 		return nil, err
@@ -37,5 +40,5 @@ func CheckPyproject(before, after string, res resolver.Resolver) ([]mismatch.Mis
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile)
 }

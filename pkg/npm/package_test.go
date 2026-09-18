@@ -55,6 +55,7 @@ func TestParsePackageJSONPins(t *testing.T) {
 		"dependencies/alias":            "8.0.0",
 		"dependencies/prerelease":       "2.0.0-rc.1",
 		"dependencies/build":            "3.0.0+metadata",
+		"dependencies/range":            "^4.0.0",
 		"devDependencies/development":   "5.0.0",
 		"optionalDependencies/optional": "6.0.0",
 		"peerDependencies/peer":         "7.0.0",
@@ -69,6 +70,9 @@ func TestParsePackageJSONPins(t *testing.T) {
 	}
 	if pin := got["dependencies/alias"]; pin.Name != "@scope/actual" || pin.PURL != "pkg:npm/%40scope/actual" {
 		t.Errorf("alias pin = %#v, want canonical target package", pin)
+	}
+	if pin := got["dependencies/range"]; !pin.Range {
+		t.Errorf("range pin = %#v, want Range == true", pin)
 	}
 }
 
@@ -87,12 +91,15 @@ func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
 }
 
 func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:npm/added": "2.0.0"}}
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/added": "2.0.0",
+		"pkg:npm/range": "3.0.0", // excludes latest under "^1.0.0"; ignored by this PR
+	}}
 
 	before := `{"dependencies":{"existing":"1.0.0"}}`
 	after := `{"dependencies":{"existing":"1.0.0","added":"1.0.0","range":"^1.0.0"}}`
 
-	got, err := CheckPackageJSON(before, after, res)
+	got, err := CheckPackageJSON(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckPackageJSON() error = %v", err)
 	}
@@ -113,11 +120,26 @@ func TestCheckPackageJSONScopedPackage(t *testing.T) {
 	before := `{}`
 	after := `{"dependencies":{"@scope/pkg":"1.0.0"}}`
 
-	got, err := CheckPackageJSON(before, after, res)
+	got, err := CheckPackageJSON(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckPackageJSON() error = %v", err)
 	}
 	if len(got) != 1 || got[0].Name != "@scope/pkg" {
 		t.Fatalf("CheckPackageJSON() = %#v, want one mismatch for @scope/pkg", got)
+	}
+}
+
+func TestCheckPackageJSONFlagsRangeWithNoLockfile(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/range": "1.5.0"}}
+
+	before := `{}`
+	after := `{"dependencies":{"range":"^1.0.0"}}`
+
+	got, err := CheckPackageJSON(before, after, res, false)
+	if err != nil {
+		t.Fatalf("CheckPackageJSON() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || !got[0].NoLockfile {
+		t.Fatalf("CheckPackageJSON() = %#v, want a lockfile-only mismatch since the range already allows latest", got)
 	}
 }

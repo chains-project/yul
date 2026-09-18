@@ -132,7 +132,7 @@ func (Checker) MatchesPath(path string) bool {
 	return ok && eco == "github-actions" && kind == manifests.Manifest
 }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
+func (c Checker) Check(before, after string, _ bool) ([]mismatch.Mismatch, error) {
 	return CheckWorkflow(before, after, c.Resolver, c.Sha)
 }
 
