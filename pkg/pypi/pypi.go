@@ -17,9 +17,9 @@ import (
 const scheme = "pypi"
 
 // parsePypiPins parses filename's content (requirements.txt or
-// pyproject.toml) and returns its exactly-pinned ("==") dependencies, keyed
-// by their source declaration location and named by their canonical PURL
-// package name.
+// pyproject.toml) and returns its exactly-pinned ("==") and range-pinned
+// dependencies, keyed by their source declaration location and named by
+// their canonical PURL package name.
 func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -32,18 +32,28 @@ func parsePypiPins(filename, content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, declaration := range parsed.Declarations {
-		version, ok := pins.ExactVersion(declaration.Version, scheme, true)
-		if !ok {
+		version, isExact := pins.ExactVersion(declaration.Version, scheme, true)
+		if !isExact && !pins.IsRange(declaration.Version, scheme, true) {
 			continue
 		}
 		canonical, err := purl.Parse(declaration.PURL)
 		if err != nil {
 			return nil, fmt.Errorf("parsing declaration purl %q: %w", declaration.PURL, err)
 		}
+		if isExact {
+			result[declaration.Location] = pins.Pin{
+				Name:    canonical.Name,
+				Version: version,
+				PURL:    declaration.PURL,
+			}
+			continue
+		}
+		spec, _, _ := strings.Cut(declaration.Version, ";")
 		result[declaration.Location] = pins.Pin{
 			Name:    canonical.Name,
-			Version: version,
+			Version: strings.TrimSpace(spec),
 			PURL:    declaration.PURL,
+			Range:   true,
 		}
 	}
 	return result, nil

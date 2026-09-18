@@ -28,19 +28,19 @@ docs = [
 		"project/dependencies/requests":             requestsLatestVersion,
 		"project/optional-dependencies/test/pytest": "8.3.5",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parsePypiPins() returned %d pins, want %d: %#v", len(got), len(want), got)
-	}
 	for location, version := range want {
-		if got[location].Version != version {
-			t.Errorf("parsePypiPins()[%q].Version = %q, want %q", location, got[location].Version, version)
+		if got[location].Version != version || got[location].Range {
+			t.Errorf("parsePypiPins()[%q] = %#v, want exact %q", location, got[location], version)
 		}
+	}
+	if pin := got["project/dependencies/flask"]; !pin.Range {
+		t.Errorf("flask pin = %#v, want a range", pin)
 	}
 }
 
 func TestParsePyprojectPinsPoetryCaretIsNotExact(t *testing.T) {
 	// Poetry treats a bare version as a caret range, not an exact pin, so
-	// it must not be reported even though it looks like a plain version.
+	// it must be reported as a range, not an exact pin.
 	content := `
 [tool.poetry.dependencies]
 requests = "2.32.4"
@@ -49,8 +49,8 @@ requests = "2.32.4"
 	if err != nil {
 		t.Fatalf("parsePypiPins() error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("parsePypiPins() = %#v, want no exact pins for a bare Poetry version", got)
+	if pin, ok := got["tool/poetry/dependencies/requests"]; !ok || !pin.Range {
+		t.Fatalf("parsePypiPins() = %#v, want a range pin (not exact) for a bare Poetry version", got)
 	}
 }
 
@@ -74,11 +74,26 @@ func TestCheckPyprojectOnlyChecksChangedPins(t *testing.T) {
 	before := "[project]\nname = \"demo\"\ndependencies = [\"click==8.1.3\"]\n"
 	after := "[project]\nname = \"demo\"\ndependencies = [\"click==8.1.3\", \"httpx==0.27.0\"]\n"
 
-	got, err := CheckPyproject(before, after, res)
+	got, err := CheckPyproject(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckPyproject() error = %v", err)
 	}
 	if len(got) != 1 || got[0].Name != "httpx" || got[0].Current != "0.27.0" || got[0].Latest != httpxLatestVersion {
 		t.Fatalf("CheckPyproject() = %#v, want one mismatch for httpx", got)
+	}
+}
+
+func TestCheckPyprojectFlagsRangeWithNoLockfile(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/requests": requestsLatestVersion}}
+
+	before := "[tool.poetry.dependencies]\n"
+	after := "[tool.poetry.dependencies]\nrequests = \"^2.0.0\"\n"
+
+	got, err := CheckPyproject(before, after, res, false)
+	if err != nil {
+		t.Fatalf("CheckPyproject() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || !got[0].NoLockfile {
+		t.Fatalf("CheckPyproject() = %#v, want a lockfile-only mismatch since the caret range already allows latest", got)
 	}
 }

@@ -44,14 +44,21 @@ type Checker struct {
 
 func (Checker) Filename() string { return "Cargo.toml" }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckCargoToml(before, after, c.Resolver)
+// LockfileNames lists Cargo's lockfile.
+func (Checker) LockfileNames() []string { return []string{"Cargo.lock"} }
+
+func (c Checker) Check(before, after string, hasLockfile bool) ([]mismatch.Mismatch, error) {
+	return CheckCargoToml(before, after, c.Resolver, hasLockfile)
 }
 
 // parseCargoPins parses Cargo.toml content and returns its exactly-pinned
-// ("=") dependencies across [dependencies], [dev-dependencies], and
-// [build-dependencies], keyed by "<scope>/<name>" since the parser doesn't
-// expose a stable per-declaration location the way npm/pypi's do.
+// ("=") and range-pinned dependencies across [dependencies],
+// [dev-dependencies], and [build-dependencies], keyed by "<scope>/<name>"
+// since the parser doesn't expose a stable per-declaration location the
+// way npm/pypi's do.
+//
+// A bare "*" range is excluded since it can also mean a workspace-inherited
+// dependency, which has no version here to recommend pinning.
 func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
@@ -64,25 +71,27 @@ func parseCargoPins(content string) (map[string]pins.Pin, error) {
 	}
 
 	for _, dep := range parsed.Dependencies {
+		location := string(dep.Scope) + "/" + dep.Name
 		// Local path deps (`{ path = "../local" }`) are already dropped by
 		// the parser; workspace-inherited deps come through as "*", which
 		// ExactVersion rejects below.
-		version, ok := pins.ExactVersion(dep.Version, scheme, true)
-		if !ok {
+		if version, ok := pins.ExactVersion(dep.Version, scheme, true); ok {
+			result[location] = pins.Pin{Name: dep.Name, Version: version, PURL: dep.PURL}
 			continue
 		}
-		location := string(dep.Scope) + "/" + dep.Name
-		result[location] = pins.Pin{Name: dep.Name, Version: version, PURL: dep.PURL}
+		spec := strings.TrimSpace(dep.Version)
+		if spec == "*" || !pins.IsRange(spec, scheme, true) {
+			continue
+		}
+		result[location] = pins.Pin{Name: dep.Name, Version: spec, PURL: dep.PURL, Range: true}
 	}
 	return result, nil
 }
 
 // CheckCargoToml compares Cargo.toml content before and after a Write and
-// reports any exactly-pinned ("=") crate that is newly added or whose
-// pinned version was just changed, and is older than the latest release res
-// knows about. Crates the write didn't touch, or that aren't pinned
-// exactly, are left alone.
-func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// reports outdated exact pins plus ranges with no Cargo.lock alongside
+// Cargo.toml. Crates the write didn't touch are left alone.
+func CheckCargoToml(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseCargoPins(before)
 	if err != nil {
 		return nil, err
@@ -91,5 +100,5 @@ func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mis
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile)
 }

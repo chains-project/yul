@@ -136,7 +136,8 @@ func Dir(root string, checkers []manifestchecker.ManifestChecker) ([]Finding, er
 		wg.Add(1)
 		go func(m manifest) {
 			defer wg.Done()
-			mismatches, err := m.checker.Check("", string(m.content))
+			hasLockfile := manifestchecker.HasLockfile(filepath.Join(root, filepath.Dir(m.rel)), m.checker)
+			mismatches, err := m.checker.Check("", string(m.content), hasLockfile)
 			if err != nil {
 				return // resolver/parse error on this file: fail open, keep scanning
 			}

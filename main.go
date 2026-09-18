@@ -18,6 +18,7 @@ import (
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -126,7 +127,9 @@ func runHook() {
 		after = strings.Replace(before, in.ToolInput.OldString, in.ToolInput.NewString, count)
 	}
 
-	mismatches, err := checker.Check(before, after)
+	hasLockfile := manifestchecker.HasLockfile(filepath.Dir(in.ToolInput.FilePath), checker)
+
+	mismatches, err := checker.Check(before, after, hasLockfile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook: %v\n", err)
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
@@ -136,17 +139,38 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+	var outdated, ranges []mismatch.Mismatch
 	for _, m := range mismatches {
-		name := m.Name
-		if m.Namespace != "" {
-			name = m.Namespace + ":" + m.Name
+		if m.Range {
+			ranges = append(ranges, m)
+		} else {
+			outdated = append(outdated, m)
 		}
-		latest := m.Latest
-		if m.Suggested != "" {
-			latest = m.Suggested
+	}
+
+	if len(outdated) > 0 {
+		fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+		for _, m := range outdated {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			latest := m.Latest
+			if m.Suggested != "" {
+				latest = m.Suggested
+			}
+			fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
 		}
-		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintln(os.Stderr, "these ranges have no lockfile alongside the manifest, so the actually-installed version isn't pinned anywhere - run your package manager's install to generate one:")
+		for _, m := range ranges {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			fmt.Fprintf(os.Stderr, "  %s  %s\n", name, m.Current)
+		}
 	}
 	os.Exit(2)
 }
@@ -263,19 +287,42 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		os.Exit(0)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
-		scannedAt.Format("2006-01-02"), len(findings))
+	var outdated, ranges []scan.Finding
 	for _, f := range findings {
-		name := f.Name
-		if f.Namespace != "" {
-			name = f.Namespace + ":" + f.Name
+		if f.Range {
+			ranges = append(ranges, f)
+		} else {
+			outdated = append(outdated, f)
 		}
-		latest := f.Latest
-		if f.Suggested != "" {
-			latest = f.Suggested
+	}
+
+	var b strings.Builder
+	b.WriteString("yul scanned this project's manifests")
+	fmt.Fprintf(&b, " (as of %s)", scannedAt.Format("2006-01-02"))
+	b.WriteString(" and found:\n")
+	if len(outdated) > 0 {
+		fmt.Fprintf(&b, "%d pinned dependencies older than the latest release:\n", len(outdated))
+		for _, f := range outdated {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			latest := f.Latest
+			if f.Suggested != "" {
+				latest = f.Suggested
+			}
+			fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
 		}
-		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintf(&b, "%d version ranges with no lockfile alongside their manifest:\n", len(ranges))
+		for _, f := range ranges {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			fmt.Fprintf(&b, "  %s: %s  %s\n", f.File, name, f.Current)
+		}
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
 
