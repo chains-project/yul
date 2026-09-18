@@ -44,8 +44,11 @@ type Checker struct {
 
 func (Checker) Filename() string { return "Cargo.toml" }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckCargoToml(before, after, c.Resolver)
+// LockfileNames lists Cargo's lockfile.
+func (Checker) LockfileNames() []string { return []string{"Cargo.lock"} }
+
+func (c Checker) Check(before, after string, hasLockfile bool) ([]mismatch.Mismatch, error) {
+	return CheckCargoToml(before, after, c.Resolver, hasLockfile)
 }
 
 // parseCargo parses Cargo.toml content and returns its exactly-pinned ("=")
@@ -84,14 +87,16 @@ func parseCargo(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
-// formatExactPin renders a latest version as Cargo's exact-pin syntax.
-func formatExactPin(latest string) string { return "=" + latest }
+// formatRangeFix renders a caret range anchored at latest, replacing a
+// range that excludes it.
+func formatRangeFix(_, latest string) string { return "^" + latest }
 
 // CheckCargoToml compares Cargo.toml content before and after a Write and
-// reports outdated exact pins plus ranges that exclude the latest release,
-// recommending a hard "=" pin for each. Crates the write didn't touch are
-// left alone.
-func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// reports outdated exact pins, ranges that exclude the latest release
+// (recommending a caret range anchored at it instead), and ranges with no
+// Cargo.lock alongside Cargo.toml. Crates the write didn't touch are left
+// alone.
+func CheckCargoToml(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseCargo(before)
 	if err != nil {
 		return nil, err
@@ -100,5 +105,5 @@ func CheckCargoToml(before, after string, res resolver.Resolver) ([]mismatch.Mis
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, formatExactPin)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile, formatRangeFix)
 }

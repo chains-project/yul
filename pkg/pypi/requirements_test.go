@@ -98,7 +98,25 @@ func TestCheckRequirementsOnlyChecksChangedPinsAndRanges(t *testing.T) {
 	if m := byName["requests"]; m.Current != "2.31.0" || m.Latest != requestsLatestVersion || m.Range {
 		t.Fatalf("CheckRequirements() requests mismatch = %#v", m)
 	}
-	if m := byName["flask"]; m.Current != "<3.0.0" || m.Latest != "3.1.0" || m.Suggested != "==3.1.0" || !m.Range {
+	if m := byName["flask"]; m.Current != "<3.0.0" || m.Latest != "3.1.0" || m.Suggested != ">=3.1.0,<4.0.0" || !m.Range {
 		t.Fatalf("CheckRequirements() flask mismatch = %#v", m)
+	}
+}
+
+// TestCheckRequirementsNeverFlagsMissingLockfile checks requirements.txt
+// never reports a NoLockfile mismatch, since it has no lockfile convention
+// of its own to check for - even when the hook is told none is present.
+func TestCheckRequirementsNeverFlagsMissingLockfile(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:pypi/flask": "3.1.0"}}
+
+	before := ""
+	after := "flask>=3.0.0\n"
+
+	got, err := CheckRequirements(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckRequirements() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CheckRequirements() = %#v, want no mismatches: the range allows latest and requirements.txt has no lockfile to check for", got)
 	}
 }

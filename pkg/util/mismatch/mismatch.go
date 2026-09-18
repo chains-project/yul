@@ -15,7 +15,16 @@ type Mismatch struct {
 	// syntax.
 	Suggested string
 
-	// Range is true when Current is a version range excluding Latest,
-	// rather than a single pinned version behind it.
+	// Range is true when Current is a version range rather than a single
+	// pinned version. Suggested is only set (a replacement range) when the
+	// range actually excludes Latest; a Range mismatch with Suggested ==
+	// "" means the range already allows Latest and NoLockfile is what's
+	// being reported instead.
 	Range bool
+
+	// NoLockfile is true for a Range mismatch whose ecosystem has a
+	// lockfile convention (npm, Cargo, Poetry/uv/pdm) but none was found
+	// next to the manifest, so the range's actually-installed version
+	// isn't pinned anywhere.
+	NoLockfile bool
 }

@@ -72,7 +72,7 @@ type Checker struct {
 
 func (Checker) Filename() string { return "go.mod" }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
+func (c Checker) Check(before, after string, _ bool) ([]mismatch.Mismatch, error) {
 	return CheckGoMod(before, after, c.Resolver)
 }
 
@@ -114,5 +114,5 @@ func CheckGoMod(before, after string, res resolver.Resolver) ([]mismatch.Mismatc
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, nil)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, true, nil)
 }

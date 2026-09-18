@@ -18,14 +18,20 @@ type RequirementsChecker struct {
 
 func (RequirementsChecker) Filename() string { return "requirements.txt" }
 
-func (c RequirementsChecker) Check(before, after string) ([]mismatch.Mismatch, error) {
+func (c RequirementsChecker) Check(before, after string, _ bool) ([]mismatch.Mismatch, error) {
 	return CheckRequirements(before, after, c.Resolver)
 }
 
 // CheckRequirements compares requirements.txt content before and after a
 // Write and reports outdated exact pins plus ranges that exclude the
-// latest release, recommending a hard "==" pin for each. Packages the
-// write didn't touch are left alone.
+// latest release, recommending a replacement PEP 440 range that includes
+// it. Packages the write didn't touch are left alone.
+//
+// requirements.txt has no lockfile convention of its own (it's typically
+// the compiled/pinned output already), so RequirementsChecker never
+// implements manifestchecker.LockfileAware and pins.Diff is always told a
+// lockfile is present here - regardless of what Check's own hasLockfile
+// argument says - so a range is never flagged for a missing lockfile.
 func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePypi("requirements.txt", before)
 	if err != nil {
@@ -35,5 +41,5 @@ func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, formatExactPin)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, true, formatRangeFix)
 }

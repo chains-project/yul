@@ -96,6 +96,27 @@ func IsRange(spec, scheme string, requireOperator bool) bool {
 	return hasOperator && !vers.ValidWithScheme(version, scheme)
 }
 
+// IsPoetryStyle reports whether spec uses Poetry's range syntax - an
+// explicit "^"/"~" operator, or a bare version (Poetry's implicit-caret
+// default) - as opposed to PEP 440's explicit operators ("==", ">=", "<",
+// "!=", "~="), which requirements.txt and PEP 621 pyproject tables use.
+// Only meaningful for specs already known to be ranges under the pypi
+// scheme; callers check IsRange first.
+func IsPoetryStyle(spec string) bool {
+	if spec == "" {
+		return false
+	}
+	switch {
+	case spec[0] == '^':
+		return true
+	case spec[0] == '~' && !strings.HasPrefix(spec, "~="):
+		return true
+	case !strings.ContainsRune("=<>!~^", rune(spec[0])):
+		return true // bare version: Poetry's implicit-caret default
+	}
+	return false
+}
+
 // satisfiesRange reports whether latest satisfies spec under scheme.
 //
 // Poetry's caret and tilde operators aren't understood by vers's pypi
@@ -103,34 +124,33 @@ func IsRange(spec, scheme string, requireOperator bool) bool {
 // since Poetry's caret/tilde semantics match npm's. A "~=" spec is left
 // alone since that's PEP 440's own operator, already handled correctly.
 func satisfiesRange(latest, spec, scheme string) bool {
+	if scheme == "pypi" && spec == "" {
+		return false
+	}
 	checkScheme, checkSpec := scheme, spec
-	if scheme == "pypi" {
-		switch {
-		case spec == "":
-			return false
-		case spec[0] == '^':
-			checkScheme = "npm"
-		case spec[0] == '~' && !strings.HasPrefix(spec, "~="):
-			checkScheme = "npm"
-		case !strings.ContainsRune("=<>!~^", rune(spec[0])):
-			checkScheme, checkSpec = "npm", "^"+spec // Poetry's implicit-caret default
+	if scheme == "pypi" && IsPoetryStyle(spec) {
+		checkScheme = "npm"
+		if spec[0] != '^' && spec[0] != '~' {
+			checkSpec = "^" + spec // Poetry's implicit-caret default
 		}
 	}
 	ok, err := vers.Satisfies(latest, checkSpec, checkScheme)
 	return err == nil && ok
 }
 
-// Diff reports pins in after that are new or changed from before and are
-// outdated: an exact pin older than the latest release res knows about
-// (compared under scheme's ordering rules), or a range that excludes the
-// latest release, recommending it be replaced by an exact pin at that
-// release. Pins left untouched by the write are ignored even if outdated.
+// Diff reports pins in after that are new or changed from before and need
+// attention: an exact pin older than the latest release res knows about
+// (compared under scheme's ordering rules); a range that excludes the
+// latest release, recommending a replacement range that includes it; or a
+// range that already allows latest but has no lockfile alongside the
+// manifest (hasLockfile), so its actually-installed version isn't pinned
+// anywhere. Pins left untouched by the write are ignored even if outdated.
 // Moving a declaration to a different logical location counts as a change.
 //
-// format renders a latest version into the ecosystem's exact-pin syntax for
-// a range mismatch's Mismatch.Suggested; it may be nil for an ecosystem
-// that never produces range pins.
-func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver, format func(string) string) ([]mismatch.Mismatch, error) {
+// format renders a range's original spec and the latest version into a
+// replacement range for a range mismatch's Mismatch.Suggested; it may be
+// nil for an ecosystem that never produces range pins.
+func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver, hasLockfile bool, format func(spec, latest string) string) ([]mismatch.Mismatch, error) {
 	var changed []Pin
 	for location, pin := range after {
 		if prior, ok := before[location]; ok && prior == pin {
@@ -159,17 +179,20 @@ func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res 
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
 		}
 		if pin.Range {
-			if satisfiesRange(latestVersion, pin.Spec, scheme) {
-				continue
+			m := mismatch.Mismatch{
+				Namespace:  pin.Namespace,
+				Name:       pin.Name,
+				Current:    pin.Spec,
+				Latest:     latestVersion,
+				Range:      true,
+				NoLockfile: !hasLockfile,
 			}
-			mismatches = append(mismatches, mismatch.Mismatch{
-				Namespace: pin.Namespace,
-				Name:      pin.Name,
-				Current:   pin.Spec,
-				Latest:    latestVersion,
-				Suggested: format(latestVersion),
-				Range:     true,
-			})
+			if !satisfiesRange(latestVersion, pin.Spec, scheme) {
+				m.Suggested = format(pin.Spec, latestVersion)
+			}
+			if m.Suggested != "" || m.NoLockfile {
+				mismatches = append(mismatches, m)
+			}
 			continue
 		}
 		if vers.CompareWithScheme(pin.Spec, latestVersion, scheme) < 0 {

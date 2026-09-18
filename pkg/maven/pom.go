@@ -27,7 +27,7 @@ type Checker struct {
 
 func (Checker) Filename() string { return "pom.xml" }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
+func (c Checker) Check(before, after string, _ bool) ([]mismatch.Mismatch, error) {
 	return CheckPOM(before, after, c.Resolver)
 }
 
@@ -136,5 +136,5 @@ func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch,
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, nil)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, true, nil)
 }

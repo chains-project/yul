@@ -143,7 +143,9 @@ func runHook() {
 		after = strings.Replace(before, in.ToolInput.OldString, in.ToolInput.NewString, count)
 	}
 
-	mismatches, err := checker.Check(before, after)
+	hasLockfile := manifestchecker.HasLockfile(filepath.Dir(in.ToolInput.FilePath), checker)
+
+	mismatches, err := checker.Check(before, after, hasLockfile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook: %v\n", err)
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
@@ -169,9 +171,14 @@ func runHook() {
 		}
 	}
 	if len(ranges) > 0 {
-		fmt.Fprintln(os.Stderr, "the latest release falls outside these pinned ranges, pin exactly instead:")
+		fmt.Fprintln(os.Stderr, "these pinned ranges need attention:")
 		for _, m := range ranges {
-			fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> pin to %s\n", mismatchName(m), m.Current, m.Latest, pinnedVersion(m))
+			if m.Suggested != "" {
+				fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> pin to %s\n", mismatchName(m), m.Current, m.Latest, m.Suggested)
+			}
+			if m.NoLockfile {
+				fmt.Fprintf(os.Stderr, "  %s: no lockfile found next to this manifest -> run your package manager's install to generate one\n", mismatchName(m))
+			}
 		}
 	}
 	os.Exit(2)

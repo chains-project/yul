@@ -26,8 +26,14 @@ type Checker struct {
 
 func (Checker) Filename() string { return "package.json" }
 
-func (c Checker) Check(before, after string) ([]mismatch.Mismatch, error) {
-	return CheckPackageJSON(before, after, c.Resolver)
+// LockfileNames lists the lockfiles the major npm-compatible package
+// managers produce alongside package.json.
+func (Checker) LockfileNames() []string {
+	return []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"}
+}
+
+func (c Checker) Check(before, after string, hasLockfile bool) ([]mismatch.Mismatch, error) {
+	return CheckPackageJSON(before, after, c.Resolver, hasLockfile)
 }
 
 // parsePackageJSON parses package.json content and returns its exactly-pinned
@@ -64,14 +70,16 @@ func parsePackageJSON(content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
-// formatExactPin renders a latest version as npm's exact-pin syntax.
-func formatExactPin(latest string) string { return latest }
+// formatRangeFix renders a caret range anchored at latest, replacing a
+// range that excludes it.
+func formatRangeFix(_, latest string) string { return "^" + latest }
 
 // CheckPackageJSON compares package.json content before and after a Write
-// and reports outdated exact pins plus ranges that exclude the latest
-// release, recommending a hard pin for each. Packages the write didn't
-// touch are left alone.
-func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// and reports outdated exact pins, ranges that exclude the latest release
+// (recommending a caret range anchored at it instead), and ranges with no
+// lockfile alongside package.json. Packages the write didn't touch are
+// left alone.
+func CheckPackageJSON(before, after string, res resolver.Resolver, hasLockfile bool) ([]mismatch.Mismatch, error) {
 	beforePins, err := parsePackageJSON(before)
 	if err != nil {
 		return nil, err
@@ -80,5 +88,5 @@ func CheckPackageJSON(before, after string, res resolver.Resolver) ([]mismatch.M
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, formatExactPin)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, hasLockfile, formatRangeFix)
 }

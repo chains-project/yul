@@ -6,6 +6,7 @@ package pypi
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/git-pkgs/manifests"
@@ -59,5 +60,30 @@ func parsePypi(filename, content string) (map[string]pins.Pin, error) {
 	return result, nil
 }
 
-// formatExactPin renders a latest version as pypi's exact-pin syntax.
-func formatExactPin(latest string) string { return "==" + latest }
+// formatRangeFix renders a replacement range that includes latest,
+// matching spec's own syntax family: Poetry's caret/tilde/bare-version
+// convention (pins.IsPoetryStyle) gets a caret anchored at latest, the
+// same as npm/Cargo; PEP 440 (used by requirements.txt and PEP 621
+// pyproject tables) has no caret operator, so it gets an explicit
+// lower-bound/next-major pair instead, or just the lower bound if latest's
+// major version can't be parsed.
+func formatRangeFix(spec, latest string) string {
+	if pins.IsPoetryStyle(spec) {
+		return "^" + latest
+	}
+	if upperBound, ok := nextMajor(latest); ok {
+		return ">=" + latest + ",<" + upperBound
+	}
+	return ">=" + latest
+}
+
+// nextMajor returns "N+1.0.0" for a version's leading major component, or
+// ok=false if that component isn't a plain integer.
+func nextMajor(version string) (string, bool) {
+	major, _, _ := strings.Cut(version, ".")
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		return "", false
+	}
+	return strconv.Itoa(n+1) + ".0.0", true
+}

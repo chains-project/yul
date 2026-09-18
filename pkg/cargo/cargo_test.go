@@ -130,7 +130,7 @@ existing = "=1.0.0"
 added = "=1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
@@ -154,7 +154,7 @@ func TestCheckCargoTomlAtLatestNoMismatch(t *testing.T) {
 added = "=1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
@@ -174,11 +174,11 @@ func TestCheckCargoTomlBareVersionIsCaretRangeNotExact(t *testing.T) {
 added = "1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
-	if len(got) != 1 || !got[0].Range || got[0].Current != "1.0.0" || got[0].Suggested != "=9.0.0" {
+	if len(got) != 1 || !got[0].Range || got[0].Current != "1.0.0" || got[0].Suggested != "^9.0.0" {
 		t.Fatalf("CheckCargoToml() = %#v, want a single range recommendation for the bare (caret) version", got)
 	}
 }
@@ -195,7 +195,7 @@ added = "=1.0.0"
 `
 	res.latest["pkg:cargo/added"] = "1.0.0"
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
@@ -206,6 +206,24 @@ added = "=1.0.0"
 	}
 	if len(got) != 0 {
 		t.Fatalf("CheckCargoToml() = %#v, want no mismatches", got)
+	}
+}
+
+func TestCheckCargoTomlFlagsRangeWithNoLockfile(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:cargo/added": "1.5.0"}}
+
+	before := `[dependencies]
+`
+	after := `[dependencies]
+added = "^1.0.0"
+`
+
+	got, err := CheckCargoToml(before, after, res, false)
+	if err != nil {
+		t.Fatalf("CheckCargoToml() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || got[0].Suggested != "" || !got[0].NoLockfile {
+		t.Fatalf("CheckCargoToml() = %#v, want a lockfile-only mismatch since the range already allows latest", got)
 	}
 }
 
@@ -225,7 +243,7 @@ dual = "=1.0.0"
 dual = "=1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
