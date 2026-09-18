@@ -27,23 +27,13 @@ func (c RequirementsChecker) Check(before, after string) ([]mismatch.Mismatch, e
 // latest release, recommending a hard "==" pin for each. Packages the
 // write didn't touch are left alone.
 func CheckRequirements(before, after string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
-	beforePins, beforeRanges, err := parsePypi("requirements.txt", before)
+	beforePins, err := parsePypi("requirements.txt", before)
 	if err != nil {
 		return nil, err
 	}
-	afterPins, afterRanges, err := parsePypi("requirements.txt", after)
+	afterPins, err := parsePypi("requirements.txt", after)
 	if err != nil {
 		return nil, err
 	}
-	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
-	if err != nil {
-		return nil, err
-	}
-
-	rangeMismatches, err := pins.DiffRanges(context.Background(), beforeRanges, afterRanges, scheme, res, formatExactPin)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(mismatches, rangeMismatches...), nil
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, formatExactPin)
 }

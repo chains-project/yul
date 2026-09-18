@@ -59,8 +59,8 @@ replace github.com/pkg/errors => github.com/pkg/errors v0.8.0
 			t.Errorf("parseGoModPins() missing %q", name)
 			continue
 		}
-		if pin.Version != version {
-			t.Errorf("parseGoModPins()[%q].Version = %q, want %q", name, pin.Version, version)
+		if pin.Spec != version {
+			t.Errorf("parseGoModPins()[%q].Spec = %q, want %q", name, pin.Spec, version)
 		}
 		if pin.PURL == "" {
 			t.Errorf("parseGoModPins()[%q].PURL is empty", name)

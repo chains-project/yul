@@ -108,16 +108,16 @@ func TestDiff(t *testing.T) {
 	}}
 
 	before := map[string]Pin{
-		"unchanged": {Name: "unchanged", Version: "1.0.0", PURL: "pkg:npm/unchanged"},
-		"changed":   {Name: "changed", Version: "1.0.0", PURL: "pkg:npm/changed"},
+		"unchanged": {Name: "unchanged", Spec: "1.0.0", PURL: "pkg:npm/unchanged"},
+		"changed":   {Name: "changed", Spec: "1.0.0", PURL: "pkg:npm/changed"},
 	}
 	after := map[string]Pin{
-		"unchanged": {Name: "unchanged", Version: "1.0.0", PURL: "pkg:npm/unchanged"},
-		"changed":   {Name: "changed", Version: "2.0.0", PURL: "pkg:npm/changed"},
-		"added":     {Name: "added", Version: "1.0.0", PURL: "pkg:npm/added"},
+		"unchanged": {Name: "unchanged", Spec: "1.0.0", PURL: "pkg:npm/unchanged"},
+		"changed":   {Name: "changed", Spec: "2.0.0", PURL: "pkg:npm/changed"},
+		"added":     {Name: "added", Spec: "1.0.0", PURL: "pkg:npm/added"},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res)
+	got, err := Diff(context.Background(), before, after, "npm", res, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -142,11 +142,11 @@ func TestDiffSkipsUntouchedAndUpToDatePins(t *testing.T) {
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
-		"current": {Name: "current", Version: "1.0.0", PURL: "pkg:npm/current"},
-		"newer":   {Name: "newer", Version: "2.0.0", PURL: "pkg:npm/newer"},
+		"current": {Name: "current", Spec: "1.0.0", PURL: "pkg:npm/current"},
+		"newer":   {Name: "newer", Spec: "2.0.0", PURL: "pkg:npm/newer"},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res)
+	got, err := Diff(context.Background(), before, after, "npm", res, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -161,13 +161,13 @@ func TestDiffChecksReplacementAtSameLocation(t *testing.T) {
 	}}
 
 	before := map[string]Pin{
-		"dependencies/package": {Name: "original", Version: "1.0.0", PURL: "pkg:npm/original"},
+		"dependencies/package": {Name: "original", Spec: "1.0.0", PURL: "pkg:npm/original"},
 	}
 	after := map[string]Pin{
-		"dependencies/package": {Name: "replacement", Version: "1.0.0", PURL: "pkg:npm/replacement"},
+		"dependencies/package": {Name: "replacement", Spec: "1.0.0", PURL: "pkg:npm/replacement"},
 	}
 
-	got, err := Diff(context.Background(), before, after, "npm", res)
+	got, err := Diff(context.Background(), before, after, "npm", res, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
@@ -181,10 +181,10 @@ func TestDiffFailsOpenOnUnresolvedPurl(t *testing.T) {
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
-		"unknown": {Name: "unknown", Version: "1.0.0", PURL: "pkg:npm/unknown"},
+		"unknown": {Name: "unknown", Spec: "1.0.0", PURL: "pkg:npm/unknown"},
 	}
 
-	if _, err := Diff(context.Background(), before, after, "npm", res); err == nil {
+	if _, err := Diff(context.Background(), before, after, "npm", res, nil); err == nil {
 		t.Fatal("Diff() returned nil error, want an error for an unresolved purl")
 	}
 }
@@ -197,22 +197,22 @@ func TestDiffRanges(t *testing.T) {
 	}}
 	format := func(v string) string { return "^" + v }
 
-	before := map[string]RangePin{
-		"unchanged": {Name: "unchanged", Spec: "^1.0.0", PURL: "pkg:npm/current"},
-		"changed":   {Name: "changed", Spec: "^1.0.0", PURL: "pkg:npm/changed"},
+	before := map[string]Pin{
+		"unchanged": {Name: "unchanged", Spec: "^1.0.0", PURL: "pkg:npm/current", Range: true},
+		"changed":   {Name: "changed", Spec: "^1.0.0", PURL: "pkg:npm/changed", Range: true},
 	}
-	after := map[string]RangePin{
-		"unchanged": {Name: "unchanged", Spec: "^1.0.0", PURL: "pkg:npm/current"},
-		"changed":   {Name: "changed", Spec: "^2.0.0", PURL: "pkg:npm/changed"},
-		"added":     {Name: "added", Spec: "^1.0.0", PURL: "pkg:npm/added"},
+	after := map[string]Pin{
+		"unchanged": {Name: "unchanged", Spec: "^1.0.0", PURL: "pkg:npm/current", Range: true},
+		"changed":   {Name: "changed", Spec: "^2.0.0", PURL: "pkg:npm/changed", Range: true},
+		"added":     {Name: "added", Spec: "^1.0.0", PURL: "pkg:npm/added", Range: true},
 	}
 
-	got, err := DiffRanges(context.Background(), before, after, "npm", res, format)
+	got, err := Diff(context.Background(), before, after, "npm", res, format)
 	if err != nil {
-		t.Fatalf("DiffRanges() error = %v", err)
+		t.Fatalf("Diff() error = %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("DiffRanges() returned %d mismatches, want 2: %#v", len(got), got)
+		t.Fatalf("Diff() returned %d mismatches, want 2: %#v", len(got), got)
 	}
 
 	byName := make(map[string]mismatch.Mismatch)
@@ -220,10 +220,10 @@ func TestDiffRanges(t *testing.T) {
 		byName[m.Name] = m
 	}
 	if m := byName["added"]; !m.Range || m.Latest != "2.0.0" || m.Suggested != "^2.0.0" {
-		t.Fatalf("DiffRanges() added mismatch = %#v", m)
+		t.Fatalf("Diff() added mismatch = %#v", m)
 	}
 	if m := byName["changed"]; !m.Range || m.Latest != "3.0.0" || m.Suggested != "^3.0.0" {
-		t.Fatalf("DiffRanges() changed mismatch = %#v", m)
+		t.Fatalf("Diff() changed mismatch = %#v", m)
 	}
 }
 
@@ -233,25 +233,25 @@ func TestDiffRangesSkipsUntouchedRanges(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "2.0.0"}}
 	format := func(v string) string { return v }
 
-	before := map[string]RangePin{}
-	after := map[string]RangePin{
-		"current": {Name: "current", Spec: "^1.0.0", PURL: "pkg:npm/current"},
+	before := map[string]Pin{}
+	after := map[string]Pin{
+		"current": {Name: "current", Spec: "^1.0.0", PURL: "pkg:npm/current", Range: true},
 	}
 
-	got, err := DiffRanges(context.Background(), before, before, "npm", res, format)
+	got, err := Diff(context.Background(), before, before, "npm", res, format)
 	if err != nil {
-		t.Fatalf("DiffRanges() error = %v", err)
+		t.Fatalf("Diff() error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("DiffRanges() = %#v, want no mismatches when before == after", got)
+		t.Fatalf("Diff() = %#v, want no mismatches when before == after", got)
 	}
 
-	got, err = DiffRanges(context.Background(), before, after, "npm", res, format)
+	got, err = Diff(context.Background(), before, after, "npm", res, format)
 	if err != nil {
-		t.Fatalf("DiffRanges() error = %v", err)
+		t.Fatalf("Diff() error = %v", err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("DiffRanges() = %#v, want one mismatch for a newly added range", got)
+		t.Fatalf("Diff() = %#v, want one mismatch for a newly added range", got)
 	}
 }
 
@@ -259,17 +259,17 @@ func TestDiffRangesSkipsRangeThatAlreadyAllowsLatest(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:npm/current": "1.5.0"}}
 	format := func(v string) string { return v }
 
-	before := map[string]RangePin{}
-	after := map[string]RangePin{
-		"current": {Name: "current", Spec: "^1.0.0", PURL: "pkg:npm/current"},
+	before := map[string]Pin{}
+	after := map[string]Pin{
+		"current": {Name: "current", Spec: "^1.0.0", PURL: "pkg:npm/current", Range: true},
 	}
 
-	got, err := DiffRanges(context.Background(), before, after, "npm", res, format)
+	got, err := Diff(context.Background(), before, after, "npm", res, format)
 	if err != nil {
-		t.Fatalf("DiffRanges() error = %v", err)
+		t.Fatalf("Diff() error = %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("DiffRanges() = %#v, want no mismatches when the range already allows latest", got)
+		t.Fatalf("Diff() = %#v, want no mismatches when the range already allows latest", got)
 	}
 }
 
@@ -277,12 +277,12 @@ func TestDiffRangesFailsOpenOnUnresolvedPurl(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{}}
 	format := func(v string) string { return v }
 
-	before := map[string]RangePin{}
-	after := map[string]RangePin{
-		"unknown": {Name: "unknown", Spec: "^1.0.0", PURL: "pkg:npm/unknown"},
+	before := map[string]Pin{}
+	after := map[string]Pin{
+		"unknown": {Name: "unknown", Spec: "^1.0.0", PURL: "pkg:npm/unknown", Range: true},
 	}
 
-	if _, err := DiffRanges(context.Background(), before, after, "npm", res, format); err == nil {
-		t.Fatal("DiffRanges() returned nil error, want an error for an unresolved purl")
+	if _, err := Diff(context.Background(), before, after, "npm", res, format); err == nil {
+		t.Fatal("Diff() returned nil error, want an error for an unresolved purl")
 	}
 }

@@ -179,8 +179,8 @@ func TestParsePOMPinsCollectsSupportedDeclarations(t *testing.T) {
 			t.Errorf("parsePOMPins() missing %q", location)
 			continue
 		}
-		if pin.Version != version {
-			t.Errorf("parsePOMPins()[%q].Version = %q, want %q", location, pin.Version, version)
+		if pin.Spec != version {
+			t.Errorf("parsePOMPins()[%q].Spec = %q, want %q", location, pin.Spec, version)
 		}
 		if pin.PURL == "" {
 			t.Errorf("parsePOMPins()[%q].PURL is empty", location)

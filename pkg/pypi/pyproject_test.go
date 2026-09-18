@@ -20,7 +20,7 @@ docs = [
 ]
 `
 
-	got, _, err := parsePypi("pyproject.toml", content)
+	got, err := parsePypi("pyproject.toml", content)
 	if err != nil {
 		t.Fatalf("parsePypi() error = %v", err)
 	}
@@ -28,12 +28,9 @@ docs = [
 		"project/dependencies/requests":             requestsLatestVersion,
 		"project/optional-dependencies/test/pytest": "8.3.5",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parsePypi() returned %d pins, want %d: %#v", len(got), len(want), got)
-	}
 	for location, version := range want {
-		if got[location].Version != version {
-			t.Errorf("parsePypi()[%q].Version = %q, want %q", location, got[location].Version, version)
+		if got[location].Spec != version || got[location].Range {
+			t.Errorf("parsePypi()[%q] = %#v, want exact %q", location, got[location], version)
 		}
 	}
 }
@@ -45,25 +42,25 @@ func TestParsePyprojectPinsPoetryCaretIsNotExact(t *testing.T) {
 [tool.poetry.dependencies]
 requests = "2.32.4"
 `
-	got, _, err := parsePypi("pyproject.toml", content)
+	got, err := parsePypi("pyproject.toml", content)
 	if err != nil {
 		t.Fatalf("parsePypi() error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("parsePypi() = %#v, want no exact pins for a bare Poetry version", got)
+	if pin, ok := got["tool/poetry/dependencies/requests"]; !ok || !pin.Range {
+		t.Fatalf("parsePypi() = %#v, want a range pin (not exact) for a bare Poetry version", got)
 	}
 }
 
 func TestParsePyprojectPinsEmptyAndInvalid(t *testing.T) {
-	got, ranges, err := parsePypi("pyproject.toml", " \n")
+	got, err := parsePypi("pyproject.toml", " \n")
 	if err != nil {
 		t.Fatalf("parsePypi(empty) error = %v", err)
 	}
-	if len(got) != 0 || len(ranges) != 0 {
-		t.Fatalf("parsePypi(empty) = %#v, %#v, want no pins or ranges", got, ranges)
+	if len(got) != 0 {
+		t.Fatalf("parsePypi(empty) = %#v, want no pins", got)
 	}
 
-	if _, _, err := parsePypi("pyproject.toml", "[project"); err == nil {
+	if _, err := parsePypi("pyproject.toml", "[project"); err == nil {
 		t.Fatal("parsePypi(invalid) returned nil error")
 	}
 }
@@ -94,7 +91,7 @@ dependencies = [
 [tool.poetry.dependencies]
 requests = "^2.32.4"
 `
-	_, got, err := parsePypi("pyproject.toml", content)
+	got, err := parsePypi("pyproject.toml", content)
 	if err != nil {
 		t.Fatalf("parsePypi() error = %v", err)
 	}
@@ -102,12 +99,9 @@ requests = "^2.32.4"
 		"project/dependencies/flask":        ">=3.0.0",
 		"tool/poetry/dependencies/requests": "^2.32.4",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parsePypi() returned %d ranges, want %d: %#v", len(got), len(want), got)
-	}
 	for location, spec := range want {
-		if got[location].Spec != spec {
-			t.Errorf("parsePypi()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+		if got[location].Spec != spec || !got[location].Range {
+			t.Errorf("parsePypi()[%q] = %#v, want range %q", location, got[location], spec)
 		}
 	}
 }

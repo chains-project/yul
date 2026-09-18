@@ -20,7 +20,7 @@ flask>=3.0.0
 httpx[http2] == 0.28.1 ; python_version >= "3.10"
 `
 
-	got, _, err := parsePypi("requirements.txt", content)
+	got, err := parsePypi("requirements.txt", content)
 	if err != nil {
 		t.Fatalf("parsePypi() error = %v", err)
 	}
@@ -28,18 +28,15 @@ httpx[http2] == 0.28.1 ; python_version >= "3.10"
 		"requirements/requests": requestsLatestVersion,
 		"requirements/httpx":    httpxLatestVersion,
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parsePypi() returned %d pins, want %d: %#v", len(got), len(want), got)
-	}
 	for location, version := range want {
-		if got[location].Version != version {
-			t.Errorf("parsePypi()[%q].Version = %q, want %q", location, got[location].Version, version)
+		if got[location].Spec != version || got[location].Range {
+			t.Errorf("parsePypi()[%q] = %#v, want exact %q", location, got[location], version)
 		}
 	}
 }
 
 func TestParseRequirementsPinsUsesCanonicalPURL(t *testing.T) {
-	got, _, err := parsePypi("requirements.txt", "Django_Rest.Framework==1.0\n")
+	got, err := parsePypi("requirements.txt", "Django_Rest.Framework==1.0\n")
 	if err != nil {
 		t.Fatalf("parsePypi() error = %v", err)
 	}
@@ -50,7 +47,7 @@ func TestParseRequirementsPinsUsesCanonicalPURL(t *testing.T) {
 }
 
 func TestParseRequirementsPinsEmptyAndInvalid(t *testing.T) {
-	got, _, err := parsePypi("requirements.txt", " \n")
+	got, err := parsePypi("requirements.txt", " \n")
 	if err != nil {
 		t.Fatalf("parsePypi(empty) error = %v", err)
 	}
@@ -66,12 +63,14 @@ compatible~=2.0.0
 exclusion!=2.0.0
 ranged>=2.0.0,<3.0.0
 `
-	got, _, err := parsePypi("requirements.txt", content)
+	got, err := parsePypi("requirements.txt", content)
 	if err != nil {
 		t.Fatalf("parsePypi() error = %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("parsePypi() = %#v, want no exact pins", got)
+	for location, pin := range got {
+		if !pin.Range {
+			t.Errorf("parsePypi()[%q] = %#v, want a range not an exact pin", location, pin)
+		}
 	}
 }
 

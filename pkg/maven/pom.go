@@ -61,7 +61,7 @@ func parsePOMPins(content string) (map[string]pins.Pin, error) {
 		result[declaration.Location] = pins.Pin{
 			Namespace: namespace,
 			Name:      name,
-			Version:   version,
+			Spec:      version,
 			PURL:      declaration.PURL,
 		}
 	}
@@ -136,5 +136,5 @@ func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch,
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, nil)
 }

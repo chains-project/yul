@@ -96,7 +96,7 @@ func parseGoModPins(content string) (map[string]pins.Pin, error) {
 		if !ok {
 			continue
 		}
-		result[dep.Name] = pins.Pin{Name: dep.Name, Version: version, PURL: dep.PURL}
+		result[dep.Name] = pins.Pin{Name: dep.Name, Spec: version, PURL: dep.PURL}
 	}
 	return result, nil
 }
@@ -114,5 +114,5 @@ func CheckGoMod(before, after string, res resolver.Resolver) ([]mismatch.Mismatc
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res)
+	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, nil)
 }

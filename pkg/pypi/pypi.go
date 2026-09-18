@@ -20,16 +20,15 @@ const scheme = "pypi"
 // and returns its exactly-pinned ("==") and range-pinned dependencies, keyed
 // by their source declaration location and named by their canonical PURL
 // package name.
-func parsePypi(filename, content string) (map[string]pins.Pin, map[string]pins.RangePin, error) {
-	exact := make(map[string]pins.Pin)
-	ranges := make(map[string]pins.RangePin)
+func parsePypi(filename, content string) (map[string]pins.Pin, error) {
+	result := make(map[string]pins.Pin)
 	if strings.TrimSpace(content) == "" {
-		return exact, ranges, nil
+		return result, nil
 	}
 
 	parsed, err := manifests.Parse(filename, []byte(content))
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing %s: %w", filename, err)
+		return nil, fmt.Errorf("parsing %s: %w", filename, err)
 	}
 
 	for _, declaration := range parsed.Declarations {
@@ -39,24 +38,25 @@ func parsePypi(filename, content string) (map[string]pins.Pin, map[string]pins.R
 		}
 		canonical, err := purl.Parse(declaration.PURL)
 		if err != nil {
-			return nil, nil, fmt.Errorf("parsing declaration purl %q: %w", declaration.PURL, err)
+			return nil, fmt.Errorf("parsing declaration purl %q: %w", declaration.PURL, err)
 		}
 		if isExact {
-			exact[declaration.Location] = pins.Pin{
-				Name:    canonical.Name,
-				Version: version,
-				PURL:    declaration.PURL,
+			result[declaration.Location] = pins.Pin{
+				Name: canonical.Name,
+				Spec: version,
+				PURL: declaration.PURL,
 			}
 			continue
 		}
 		spec, _, _ := strings.Cut(declaration.Version, ";")
-		ranges[declaration.Location] = pins.RangePin{
-			Name: canonical.Name,
-			Spec: strings.TrimSpace(spec),
-			PURL: declaration.PURL,
+		result[declaration.Location] = pins.Pin{
+			Name:  canonical.Name,
+			Spec:  strings.TrimSpace(spec),
+			PURL:  declaration.PURL,
+			Range: true,
 		}
 	}
-	return exact, ranges, nil
+	return result, nil
 }
 
 // formatExactPin renders a latest version as pypi's exact-pin syntax.

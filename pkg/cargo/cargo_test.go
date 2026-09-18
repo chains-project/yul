@@ -43,7 +43,7 @@ workspace-dep = { workspace = true }
 exact = "=9.9.9"
 `
 
-	got, _, err := parseCargo(content)
+	got, err := parseCargo(content)
 	if err != nil {
 		t.Fatalf("parseCargo() error = %v", err)
 	}
@@ -53,17 +53,14 @@ exact = "=9.9.9"
 		"runtime/table-exact": "2.0.0",
 		"development/exact":   "9.9.9",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parseCargo() returned %d pins, want %d: %#v", len(got), len(want), got)
-	}
 	for location, version := range want {
 		pin, ok := got[location]
 		if !ok {
 			t.Errorf("parseCargo() missing %q", location)
 			continue
 		}
-		if pin.Version != version {
-			t.Errorf("parseCargo()[%q].Version = %q, want %q", location, pin.Version, version)
+		if pin.Spec != version || pin.Range {
+			t.Errorf("parseCargo()[%q] = %#v, want exact %q", location, pin, version)
 		}
 		if pin.PURL == "" {
 			t.Errorf("parseCargo()[%q].PURL is empty", location)
@@ -84,7 +81,7 @@ exact = "=1.2.3"
 workspace-dep = { workspace = true }
 `
 
-	_, got, err := parseCargo(content)
+	got, err := parseCargo(content)
 	if err != nil {
 		t.Fatalf("parseCargo() error = %v", err)
 	}
@@ -94,26 +91,26 @@ workspace-dep = { workspace = true }
 		"runtime/explicit-caret": "^1.2.3",
 		"runtime/tilde":          "~1.2.3",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parseCargo() returned %d ranges, want %d: %#v", len(got), len(want), got)
-	}
 	for location, spec := range want {
-		if got[location].Spec != spec {
-			t.Errorf("parseCargo()[%q].Spec = %q, want %q", location, got[location].Spec, spec)
+		if got[location].Spec != spec || !got[location].Range {
+			t.Errorf("parseCargo()[%q] = %#v, want range %q", location, got[location], spec)
 		}
+	}
+	if _, ok := got["runtime/wildcard"]; ok {
+		t.Errorf("parseCargo() = %#v, want bare \"*\" excluded", got)
 	}
 }
 
 func TestParseCargoPinsEmptyAndInvalid(t *testing.T) {
-	got, ranges, err := parseCargo(" \n")
+	got, err := parseCargo(" \n")
 	if err != nil {
 		t.Fatalf("parseCargo(empty) error = %v", err)
 	}
-	if len(got) != 0 || len(ranges) != 0 {
-		t.Fatalf("parseCargo(empty) = %#v, %#v, want no pins or ranges", got, ranges)
+	if len(got) != 0 {
+		t.Fatalf("parseCargo(empty) = %#v, want no pins", got)
 	}
 
-	got, _, err = parseCargo("[package]\nname = \"demo\"\nversion = \"0.1.0\"\n")
+	got, err = parseCargo("[package]\nname = \"demo\"\nversion = \"0.1.0\"\n")
 	if err != nil {
 		t.Fatalf("parseCargo(no deps) error = %v", err)
 	}

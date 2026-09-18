@@ -15,13 +15,15 @@ import (
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
-// Pin is an exactly-pinned dependency extracted from a manifest, along with
-// the PURL to resolve its latest version through.
+// Pin is a dependency extracted from a manifest, pinned to either a single
+// exact version or a version range, along with the PURL to resolve its
+// latest version through.
 type Pin struct {
-	Namespace string // e.g. Maven groupId; empty for npm/pypi
+	Namespace string // e.g. Maven groupId; empty for npm/pypi/cargo
 	Name      string
-	Version   string
+	Spec      string // the exact version, or the range exactly as written (e.g. "^4.0.0") when Range is true
 	PURL      string
+	Range     bool // true when Spec is a version range rather than a single exact version
 }
 
 // ExactVersion reports whether spec pins a package to exactly one version
@@ -59,15 +61,6 @@ func ExactVersion(spec, scheme string, requireOperator bool) (string, bool) {
 		return "", false
 	}
 	return version, true
-}
-
-// RangePin is a dependency pinned to a version range rather than a single
-// exact version.
-type RangePin struct {
-	Namespace string // e.g. Maven groupId; empty for npm/pypi/cargo
-	Name      string
-	Spec      string // the range exactly as written, e.g. "^4.0.0"
-	PURL      string
 }
 
 // IsRange reports whether spec is a version range under scheme rather than
@@ -127,60 +120,17 @@ func satisfiesRange(latest, spec, scheme string) bool {
 	return err == nil && ok
 }
 
-// DiffRanges reports range pins in after that are new or changed and whose
-// range excludes the latest release res knows about, recommending each be
-// replaced by an exact pin at that release. A range already allowing the
-// latest release is left alone. format renders a latest version into the
-// ecosystem's exact-pin syntax for Mismatch.Suggested.
-func DiffRanges(ctx context.Context, before, after map[string]RangePin, scheme string, res resolver.Resolver, format func(string) string) ([]mismatch.Mismatch, error) {
-	var changed []RangePin
-	for location, pin := range after {
-		if prior, ok := before[location]; ok && prior == pin {
-			continue // untouched by this write
-		}
-		changed = append(changed, pin)
-	}
-	if len(changed) == 0 {
-		return nil, nil
-	}
-
-	purls := make([]string, len(changed))
-	for i, pin := range changed {
-		purls[i] = pin.PURL
-	}
-
-	latest, err := res.LatestVersions(ctx, purls)
-	if err != nil {
-		return nil, fmt.Errorf("resolving latest versions: %w", err)
-	}
-
-	var mismatches []mismatch.Mismatch
-	for _, pin := range changed {
-		latestVersion, ok := latest[pin.PURL]
-		if !ok {
-			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
-		}
-		if satisfiesRange(latestVersion, pin.Spec, scheme) {
-			continue
-		}
-		mismatches = append(mismatches, mismatch.Mismatch{
-			Namespace: pin.Namespace,
-			Name:      pin.Name,
-			Current:   pin.Spec,
-			Latest:    latestVersion,
-			Suggested: format(latestVersion),
-			Range:     true,
-		})
-	}
-	return mismatches, nil
-}
-
-// Diff reports pins in after that are new or whose version changed from
-// before, and whose pinned version is older than the latest release res
-// knows about (compared under scheme's ordering rules). Pins left
-// untouched by the write are ignored even if outdated. Moving a declaration
-// to a different logical location counts as a change.
-func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// Diff reports pins in after that are new or changed from before and are
+// outdated: an exact pin older than the latest release res knows about
+// (compared under scheme's ordering rules), or a range that excludes the
+// latest release, recommending it be replaced by an exact pin at that
+// release. Pins left untouched by the write are ignored even if outdated.
+// Moving a declaration to a different logical location counts as a change.
+//
+// format renders a latest version into the ecosystem's exact-pin syntax for
+// a range mismatch's Mismatch.Suggested; it may be nil for an ecosystem
+// that never produces range pins.
+func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver, format func(string) string) ([]mismatch.Mismatch, error) {
 	var changed []Pin
 	for location, pin := range after {
 		if prior, ok := before[location]; ok && prior == pin {
@@ -208,11 +158,25 @@ func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res 
 		if !ok {
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
 		}
-		if vers.CompareWithScheme(pin.Version, latestVersion, scheme) < 0 {
+		if pin.Range {
+			if satisfiesRange(latestVersion, pin.Spec, scheme) {
+				continue
+			}
 			mismatches = append(mismatches, mismatch.Mismatch{
 				Namespace: pin.Namespace,
 				Name:      pin.Name,
-				Current:   pin.Version,
+				Current:   pin.Spec,
+				Latest:    latestVersion,
+				Suggested: format(latestVersion),
+				Range:     true,
+			})
+			continue
+		}
+		if vers.CompareWithScheme(pin.Spec, latestVersion, scheme) < 0 {
+			mismatches = append(mismatches, mismatch.Mismatch{
+				Namespace: pin.Namespace,
+				Name:      pin.Name,
+				Current:   pin.Spec,
 				Latest:    latestVersion,
 			})
 		}
