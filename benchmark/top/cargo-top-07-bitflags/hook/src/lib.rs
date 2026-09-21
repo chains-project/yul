@@ -1,18 +1,17 @@
 use bitflags::bitflags;
 
 bitflags! {
-    /// A type-safe set of permission flags that can be combined and checked.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct Permissions: u32 {
-        const READ    = 1 << 0;
-        const WRITE   = 1 << 1;
-        const EXECUTE = 1 << 2;
-        const DELETE  = 1 << 3;
+    /// File-style access permissions, each represented by a single bit so
+    /// they can be freely combined with `|` and tested with `contains`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct Permissions: u8 {
+        const READ    = 0b0000_0001;
+        const WRITE   = 0b0000_0010;
+        const EXECUTE = 0b0000_0100;
     }
 }
 
 impl Permissions {
-    /// Convenience constant combining the common read/write permissions.
     pub const READ_WRITE: Self = Self::READ.union(Self::WRITE);
 }
 
@@ -29,21 +28,23 @@ mod tests {
     }
 
     #[test]
-    fn named_combination_matches_bitor() {
+    fn named_combination_matches_manual_union() {
         assert_eq!(Permissions::READ_WRITE, Permissions::READ | Permissions::WRITE);
     }
 
     #[test]
-    fn empty_and_all() {
-        assert!(Permissions::empty().is_empty());
-        assert!(Permissions::all().contains(Permissions::DELETE));
+    fn empty_has_no_flags_set() {
+        let perms = Permissions::empty();
+        assert!(!perms.contains(Permissions::READ));
+        assert!(!perms.contains(Permissions::WRITE));
+        assert!(!perms.contains(Permissions::EXECUTE));
     }
 
     #[test]
-    fn remove_flag() {
-        let mut perms = Permissions::all();
-        perms.remove(Permissions::EXECUTE);
-        assert!(!perms.contains(Permissions::EXECUTE));
+    fn all_contains_every_flag() {
+        let perms = Permissions::all();
         assert!(perms.contains(Permissions::READ));
+        assert!(perms.contains(Permissions::WRITE));
+        assert!(perms.contains(Permissions::EXECUTE));
     }
 }

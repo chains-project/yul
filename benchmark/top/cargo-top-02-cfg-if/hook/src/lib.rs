@@ -22,14 +22,10 @@ cfg_if! {
 
 cfg_if! {
     if #[cfg(target_pointer_width = "64")] {
-        pub type Word = u64;
+        pub const POINTER_WIDTH: usize = 64;
     } else {
-        pub type Word = u32;
+        pub const POINTER_WIDTH: usize = 32;
     }
-}
-
-pub fn add(left: Word, right: Word) -> Word {
-    left + right
 }
 
 #[cfg(test)]
@@ -37,13 +33,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn platform_name_is_known() {
+        assert_ne!(platform_name(), "unknown");
     }
 
     #[test]
-    fn reports_a_platform_name() {
-        assert!(!platform_name().is_empty());
+    fn pointer_width_is_sane() {
+        assert!(POINTER_WIDTH == 32 || POINTER_WIDTH == 64);
     }
 }

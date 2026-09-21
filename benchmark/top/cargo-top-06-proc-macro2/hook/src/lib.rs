@@ -1,33 +1,30 @@
-use proc_macro2::TokenStream;
-use quote::quote;
+use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 
+/// Function-like macro entry point required by the compiler.
+///
+/// The real work happens in `expand`, which is written entirely against
+/// `proc_macro2::TokenStream` so it can be unit-tested outside of a
+/// `proc-macro` crate (the compiler's own `proc_macro::TokenStream` only
+/// exists inside an active macro expansion).
 #[proc_macro]
-pub fn make_answer(_input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    expand().into()
+pub fn identity(input: TokenStream) -> TokenStream {
+    expand(input.into()).into()
 }
 
-// All the real logic operates on `proc_macro2::TokenStream`, which (unlike
-// `proc_macro::TokenStream`) can be constructed and inspected outside of a
-// compiler-invoked macro context, e.g. in unit tests below.
-fn expand() -> TokenStream {
-    quote! {
-        fn answer() -> u32 {
-            42
-        }
-    }
+fn expand(input: TokenStream2) -> TokenStream2 {
+    input
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
-    fn expands_to_expected_tokens() {
-        let expected = quote! {
-            fn answer() -> u32 {
-                42
-            }
-        };
-        assert_eq!(expand().to_string(), expected.to_string());
+    fn expand_returns_input_unchanged() {
+        let input = TokenStream2::from_str("fn answer() -> u32 { 42 }").unwrap();
+        let output = expand(input.clone());
+        assert_eq!(input.to_string(), output.to_string());
     }
 }
