@@ -155,6 +155,23 @@ YUL_BIN="$YUL_BIN" "$OPENCODE_BIN" run "$PROMPT" \
 mv "$TRANSCRIPT_TMP" transcript.jsonl
 mv "$STDERR_TMP" stderr.log
 
+# Per-run token/cost summary, aggregated from each step's usage. cost is
+# whatever OpenCode's provider pricing table reports (0 for the "local"
+# self-hosted provider; real dollars for a priced provider like DeepSeek).
+jq -s '
+  [.[] | select(.type=="step_finish")] as $steps
+  | {
+      llm_calls: ($steps | length),
+      tokens: {
+        input: ($steps | map(.part.tokens.input // 0) | add // 0),
+        output: ($steps | map(.part.tokens.output // 0) | add // 0),
+        cache_read: ($steps | map(.part.tokens.cache.read // 0) | add // 0),
+        cache_write: ($steps | map(.part.tokens.cache.write // 0) | add // 0)
+      },
+      cost_usd: ($steps | map(.part.cost // 0) | add // 0)
+    }
+' transcript.jsonl > usage.json
+
 # When .manifest listed several candidate paths, use whichever one the
 # model actually wrote.
 FOUND_MANIFEST=""
