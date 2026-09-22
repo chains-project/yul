@@ -73,8 +73,11 @@ pin. With only 10 samples per condition, small-count noise like this is expected
 <details>
 <summary>Every repetition's classification</summary>
 
-"Flagged" is the (dependency, current → suggested) pair(s) from `yul`'s block message, when one fired
-(only the first two shown if there were more).
+"Already latest" is `n/a` whenever "Versioned" is `no` — no exact pin was in the final manifest at all
+(a range, or written by the ecosystem's own installer with no version), so there's nothing to check
+"latest" against. It's `yes`/`no` only when "Versioned" is `yes`. "Flagged" is the (dependency,
+current → suggested) pair(s) from `yul`'s block message, when one fired (only the first two shown if
+there were more).
 
 | Case | Condition | Rep | Versioned | Already latest | Blocked | Flagged (current -> suggested) |
 | --- | --- | --- | --- | --- | --- | --- |
