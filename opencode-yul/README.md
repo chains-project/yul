@@ -14,11 +14,25 @@ Supported ecosystems: Maven Central, PyPI, npm, GitHub Actions, Go modules, crat
 
 Add it to the `plugin` array in an `opencode.json`/`opencode.jsonc`:
 
+- **Project scope** (this project only): put it in `opencode.json`/`opencode.jsonc` at the project root.
+- **User scope** (every project you open): put it in `~/.config/opencode/opencode.json`/`opencode.jsonc` instead.
+
 ```json
 {
   "plugin": ["opencode-yul"]
 }
 ```
 
-- **Project scope** (this project only): put it in `opencode.json`/`opencode.jsonc` at the project root.
-- **User scope** (every project you open): put it in `~/.config/opencode/opencode.json`/`opencode.jsonc` instead.
+## Update
+
+OpenCode is supposed to re-resolve `@latest` and reinstall on its own, see [anomalyco/opencode#16998](https://github.com/anomalyco/opencode/pull/16998).
+However, if you suspect you're stuck on an old version, force it yourself:
+
+```sh
+rm -rf ~/.cache/opencode/packages/opencode-yul@latest
+```
+
+Then start a new OpenCode session.
+It reinstalls from scratch on next use.
+
+
