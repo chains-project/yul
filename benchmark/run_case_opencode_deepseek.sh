@@ -2,8 +2,14 @@
 # Runs one benchmark case under one condition (hook|nohook), same as
 # run_case_opencode.sh, but against DeepSeek's API via OpenCode's built-in
 # "deepseek" provider (models.dev catalog) instead of a self-hosted,
-# OpenAI-compatible endpoint - no custom provider config needed, just
-# DEEPSEEK_API_KEY in the environment.
+# OpenAI-compatible endpoint - no custom provider config needed.
+#
+# Credentials come from OpenCode's own store (`opencode auth login`, saved
+# to ~/.local/share/opencode/auth.json), not an env var - this script never
+# reads or holds the API key, so it can't leak it. (Earlier versions passed
+# DEEPSEEK_API_KEY through the environment; a run's bash tool dumped its own
+# env and the real key ended up in a committed transcript. See the
+# opencode-deepseek branch history.)
 #
 # Usage:
 #   run_case_opencode_deepseek.sh <cases.json> <case_id> <hook|nohook> <output_dir> [model_id] [repeat_index]
@@ -15,10 +21,9 @@
 #                 runs of the same case/condition.
 #
 # Env vars:
-#   DEEPSEEK_API_KEY  required - DeepSeek API key (e.g. from .env)
-#   YUL_BIN           path to the yul binary the hook condition execs
-#                     (default: "yul" on PATH; build one with `go build -o yul .`)
-#   OPENCODE_BIN      path to the opencode binary (default: "opencode" on PATH)
+#   YUL_BIN       path to the yul binary the hook condition execs
+#                 (default: "yul" on PATH; build one with `go build -o yul .`)
+#   OPENCODE_BIN  path to the opencode binary (default: "opencode" on PATH)
 set -euo pipefail
 
 CASES_JSON="$1"
@@ -27,8 +32,6 @@ CONDITION="$3"   # hook | nohook
 OUT_DIR="$4"
 MODEL_ID="${5:-deepseek/deepseek-v4-flash}"
 REPEAT_INDEX="${6:-}"
-
-: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY must be set (see .env)}"
 
 YUL_BIN="${YUL_BIN:-yul}"
 OPENCODE_BIN="${OPENCODE_BIN:-opencode}"
@@ -83,11 +86,28 @@ if [ "$CONDITION" = "hook" ]; then
   # model - the same self-correction loop Claude Code's exit-2/stderr gives.
   cat > "$WORKDIR/.opencode/plugins/yul.js" <<'EOF'
 // All the manifest/bash-bypass detection logic lives in main.go's runHook
-// now (it handles Write, Edit, and Bash tool_names), so this plugin is just
-// a thin translation layer: build yul's PreToolUse JSON shape from
+// now (it handles Write, Edit, and Bash tool_names), so this plugin is
+// mostly a thin translation layer: build yul's PreToolUse JSON shape from
 // whichever OpenCode tool fired, spawn the binary, and throw on exit 2 so
 // OpenCode surfaces the stderr reason back to the model - the same
 // self-correction loop Claude Code's exit-2/stderr gives.
+//
+// It also blocks any attempt to read OpenCode's own credential store
+// directly - the run's DeepSeek API key lives there (auth login, not an
+// env var, see run_case_opencode_deepseek.sh), so this is the one
+// exfiltration path left for a model that goes looking for it.
+const AUTH_STORE_RE = /\.local[/\\]share[/\\]opencode[/\\]auth\.json|opencode[/\\]auth\.json/i
+
+// Catches any tool call - read, bash, grep, glob, whatever - that names
+// the credential store anywhere in its arguments, without having to know
+// each tool's specific field names.
+function mentionsAuthStore(args) {
+  if (typeof args === "string") return AUTH_STORE_RE.test(args)
+  if (Array.isArray(args)) return args.some(mentionsAuthStore)
+  if (args && typeof args === "object") return Object.values(args).some(mentionsAuthStore)
+  return false
+}
+
 export const YulPlugin = async () => {
   const YUL_BIN = process.env.YUL_BIN || "yul"
   const check = async (payload) => {
@@ -101,6 +121,9 @@ export const YulPlugin = async () => {
   return {
     "tool.execute.before": async (input, output) => {
       const a = output.args
+      if (mentionsAuthStore(a)) {
+        throw new Error("yul: reading OpenCode's credential store is not permitted")
+      }
       if (input.tool === "bash") {
         await check({ tool_name: "Bash", tool_input: { command: a.command || "" } })
         return
@@ -143,15 +166,15 @@ STDERR_TMP=$(mktemp)
 # calls as children of itself, which inherit whatever's in its environment,
 # so anything beyond what opencode/yul actually need (a stray GITHUB_TOKEN,
 # SLURM credentials, etc. sitting in the launching shell) would otherwise
-# be exposed to a model command like `env`. DEEPSEEK_API_KEY still has to
-# be here for opencode's own provider auth - that risk is covered by the
-# redaction pass below instead.
+# be exposed to a model command like `env`. No DEEPSEEK_API_KEY here at
+# all - opencode reads its DeepSeek credential from its own auth store
+# (`opencode auth login`), not from the environment, so there's nothing
+# for a bash env dump to expose in the first place.
 env -i \
   PATH="$PATH" \
   HOME="$HOME" \
   TERM="${TERM:-xterm}" \
   TMPDIR="${TMPDIR:-/tmp}" \
-  DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
   YUL_BIN="$YUL_BIN" \
   "$OPENCODE_BIN" run "$PROMPT" \
   --model "$MODEL_ID" \
@@ -159,12 +182,11 @@ env -i \
   --format json \
   > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
 
-# Belt-and-suspenders: whatever the model's bash tool did or didn't dump,
-# scrub any literal occurrence of the real API key before these files ever
-# touch disk under their real names - covers `env`, `cat .env`, `printenv`,
-# or any other way a run could have echoed it back into its own output.
-ESCAPED_KEY=$(printf '%s' "$DEEPSEEK_API_KEY" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
-sed -i "s/$ESCAPED_KEY/***REDACTED-DEEPSEEK-API-KEY***/g" "$TRANSCRIPT_TMP" "$STDERR_TMP"
+# Belt-and-suspenders: the yul.js plugin above blocks reads of the auth
+# store, but redact anything DeepSeek-key-shaped that slips through
+# anyway (format is public: "sk-" + 32 hex chars) - this doesn't require
+# knowing the actual configured key, so it still works after rotation.
+sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$TRANSCRIPT_TMP" "$STDERR_TMP"
 
 mv "$TRANSCRIPT_TMP" transcript.jsonl
 mv "$STDERR_TMP" stderr.log
