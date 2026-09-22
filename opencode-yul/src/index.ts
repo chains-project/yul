@@ -18,9 +18,9 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-// Bump this alongside the `version` in .claude-plugin/plugin.json (and this
-// package's own package.json version) on every release — it's what pins
-// which yul binary this plugin downloads and runs.
+// Bumped in lockstep with .claude-plugin/plugin.json and this package's own
+// package.json version by the release workflow — it's what pins which yul
+// binary this plugin downloads and runs.
 const YUL_VERSION = "0.0.12"
 
 const CACHE_ROOT = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "yul")
