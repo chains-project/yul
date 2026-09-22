@@ -1,6 +1,6 @@
 # yul
 
-A `PreToolUse` hook that keeps dependencies current. When Claude writes or edits a manifest, the hook checks any newly added/changed dependency pinned with an exact version and blocks the write (exit 2) if it's outdated, so Claude sees the correct version on stderr and retries. Other files and untouched dependencies pass through untouched; resolver/network errors fail open.
+Force your AI agents (Claude and OpenCode) to use the latest release of dependencies instead of them writing the outdated version from training data.
 
 Supported manifests:
 - `pom.xml` — Maven Central
@@ -11,7 +11,7 @@ Supported manifests:
 - `go.mod` — Go modules, `require` entries (single-line and block form, direct and indirect)
 - `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins only (a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin)
 
-## Install as a Claude Code plugin (recommended)
+## Install as a Claude Code plugin
 
 Inside Claude Code, run:
 
@@ -19,8 +19,6 @@ Inside Claude Code, run:
 /plugin marketplace add chains-project/chains-hooks
 /plugin install yul@chains-project
 ```
-
-The install dialog lets you pick a scope (all your projects, or just the current one). That's it — nothing is written to your `settings.json` beyond enabling the plugin; the hook wiring ships inside the plugin itself (`hooks/hooks.json`), which Claude Code discovers when it clones this repo and registers on every session. On session start, `scripts/ensure-yul.sh` downloads the checksum-verified release binary pinned by `.claude-plugin/plugin.json` into `~/.cache/yul/v<version>/` — an instant no-op once the binary is there, and fails open (exit 0) if anything goes wrong. Plugin and binary updates are automatic, so you always get the latest release.
 
 ### Enabling it for a whole team
 
@@ -57,6 +55,7 @@ See [`opencode-yul/README.md`](opencode-yul/README.md) for details.
 
 > [!NOTE] Prefer this method if you want control over which version you run.
 > The `/plugin` installs above updates automatically as new releases ship.
+> 
 
 If you have Go installed, this is the preferred way to install the `yul` binary yourself:
 
@@ -73,6 +72,8 @@ curl -fsSL https://raw.githubusercontent.com/chains-project/yul/main/install.sh 
 ```
 
 This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`).
+
+If you're consuming `opencode-yul` through OpenCode's `@latest` plugin resolution instead, note that OpenCode had a bug where a stale cached plugin version was reused indefinitely regardless of `@latest` — fixed in [anomalyco/opencode#16998](https://github.com/anomalyco/opencode/pull/16998). Manual install sidesteps that class of issue entirely, since you control the version directly.
 
 ## Manual usage
 
