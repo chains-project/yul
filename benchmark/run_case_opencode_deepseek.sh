@@ -139,11 +139,33 @@ git config user.name "benchmark"
 # run's log mid-session. Moved into place only after the run finishes.
 TRANSCRIPT_TMP=$(mktemp)
 STDERR_TMP=$(mktemp)
-YUL_BIN="$YUL_BIN" "$OPENCODE_BIN" run "$PROMPT" \
+# Minimal env for the opencode process - it spawns the model's bash tool
+# calls as children of itself, which inherit whatever's in its environment,
+# so anything beyond what opencode/yul actually need (a stray GITHUB_TOKEN,
+# SLURM credentials, etc. sitting in the launching shell) would otherwise
+# be exposed to a model command like `env`. DEEPSEEK_API_KEY still has to
+# be here for opencode's own provider auth - that risk is covered by the
+# redaction pass below instead.
+env -i \
+  PATH="$PATH" \
+  HOME="$HOME" \
+  TERM="${TERM:-xterm}" \
+  TMPDIR="${TMPDIR:-/tmp}" \
+  DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+  YUL_BIN="$YUL_BIN" \
+  "$OPENCODE_BIN" run "$PROMPT" \
   --model "$MODEL_ID" \
   --auto \
   --format json \
   > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
+
+# Belt-and-suspenders: whatever the model's bash tool did or didn't dump,
+# scrub any literal occurrence of the real API key before these files ever
+# touch disk under their real names - covers `env`, `cat .env`, `printenv`,
+# or any other way a run could have echoed it back into its own output.
+ESCAPED_KEY=$(printf '%s' "$DEEPSEEK_API_KEY" | sed 's/[.[\*^$()+?{|\\]/\\&/g')
+sed -i "s/$ESCAPED_KEY/***REDACTED-DEEPSEEK-API-KEY***/g" "$TRANSCRIPT_TMP" "$STDERR_TMP"
+
 mv "$TRANSCRIPT_TMP" transcript.jsonl
 mv "$STDERR_TMP" stderr.log
 
