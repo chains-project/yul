@@ -55,7 +55,8 @@ See [`opencode-yul/README.md`](opencode-yul/README.md) for details.
 
 > [!NOTE] Prefer this method if you want control over which version you run.
 > The `/plugin` installs above updates automatically as new releases ship.
-> 
+> OpenCode install also ensures that the updates are automatically pulled in
+> whenever the [NPM package](https://www.npmjs.com/package/opencode-yul) is updated.
 
 If you have Go installed, this is the preferred way to install the `yul` binary yourself:
 
@@ -72,8 +73,6 @@ curl -fsSL https://raw.githubusercontent.com/chains-project/yul/main/install.sh 
 ```
 
 This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`).
-
-If you're consuming `opencode-yul` through OpenCode's `@latest` plugin resolution instead, note that OpenCode had a bug where a stale cached plugin version was reused indefinitely regardless of `@latest` — fixed in [anomalyco/opencode#16998](https://github.com/anomalyco/opencode/pull/16998). Manual install sidesteps that class of issue entirely, since you control the version directly.
 
 ## Manual usage
 
