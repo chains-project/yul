@@ -84,7 +84,11 @@ function toHookInput(tool: string, args: any): hookInput | undefined {
 }
 
 export const Yul: Plugin = async () => {
-	ensureYul()
+	try {
+		ensureYul()
+	} catch {
+		// fail open: cache setup errors must not disable OpenCode
+	}
 
 	return {
 		"tool.execute.before": async (input, output) => {
