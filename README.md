@@ -45,18 +45,6 @@ The `extraKnownMarketplaces` entry matters: it tells collaborators' Claude Code 
 
 Collaborators then don't run any install commands. The first time they start Claude Code in the repo, it reads the checked-in settings, asks them to confirm they trust the `chains-project` marketplace and the `yul` plugin, and — once accepted — installs the plugin and downloads the release binary on session start. Declining just leaves the plugin disabled for them; nothing else breaks. Updates are picked up automatically as new plugin versions are released.
 
-## Use with OpenCode
-
-Also ships as [`opencode-yul`](https://www.npmjs.com/package/opencode-yul), an [OpenCode](https://opencode.ai) plugin driving the same release binary through OpenCode's `tool.execute.before` hook instead of Claude Code's `PreToolUse`. Add it to `opencode.json`/`opencode.jsonc`:
-
-```json
-{
-  "plugin": ["opencode-yul"]
-}
-```
-
-See [`opencode-yul/README.md`](opencode-yul/README.md) for details.
-
 ## Manual install
 
 > [!NOTE] Prefer this method if you want control over which version you run.
