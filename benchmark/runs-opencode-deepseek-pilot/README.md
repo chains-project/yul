@@ -39,6 +39,30 @@ and GitHub Actions since those showed the highest block rates in the earlier 60-
 
 200 runs total (10 cases × 2 conditions × 10 reps), **0 failures**, real cost **$1.1444**.
 
+**Every "Tasks" number below counts repetitions of the *same* task, not distinct tasks** - this pilot
+picked 10 cases total (not 10 per ecosystem like the original 60-case sweep) and ran each one 10 times
+per condition, so e.g. "Maven: 20 tasks" means 2 Maven cases × 10 repetitions each, not 20 different
+Maven prompts.
+
+### Table 1: results by ecosystem
+
+| Ecosystem | Cases | Tasks (= cases × 10 reps) | Versioned (Without yul) | Already latest (Without yul) | Versioned (With yul) | Already latest (With yul) | Mitigated | Rate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Maven | 2 | 20 | 20 | 1 | 20 | 20 | 9 | 47% |
+| GitHub Actions | 2 | 20 | 20 | 0 | 20 | 20 | 20 | 100% |
+| PyPI | 2 | 20 | 2 | 2 | 5 | 5 | 1 | — |
+| npm | 2 | 20 | 11 | 1 | 12 | 2 | 7 | 70% |
+| Go modules | 1 | 10 | 10 | 10 | 10 | 10 | 0 | — |
+| Cargo | 1 | 10 | 0 | 0 | 0 | 0 | 0 | — |
+| **Total** | **10** | **100** | **63** | **14** | **67** | **57** | **37** | **76%** |
+
+*Rate* here uses the **Without-yul baseline** as the denominator (`Versioned(Without yul) −
+Already latest(Without yul)`), not the With-yul columns — when the hook is highly effective (Maven,
+GitHub Actions), nearly every With-yul final state ends up "already latest" after correction, which
+would make that denominator collapse to ~0 despite real mitigation activity. `—` means the baseline
+itself had zero stale exact pins to catch (PyPI's 2 exact pins were already current; Go always resolves
+true latest via `go get @latest`; Cargo never writes an exact pin at all in this case).
+
 Same column set as [`benchmark/README.md`](https://github.com/chains-project/yul/tree/main/benchmark)'s
 top-60 table, but one row per case (10 reps each) instead of per ecosystem (10 cases each). *Versioned*
 = final manifest has an exact pin. *Already latest* = of those, the pin matches what `yul`'s resolver
@@ -67,6 +91,28 @@ baseline pool a working hook should be catching from. *Rate* = `Blocked / Stale 
 zero blocks — `pypi-top-05-urllib3` shows this: 1 block fired live (on a `pytest` dev-dependency pin,
 not the case's own `urllib3`), even though none of its 10 nohook samples happened to land on a stale
 pin. With only 10 samples per condition, small-count noise like this is expected.
+
+### Table 2: per-case behavior without the yul hook versus with it
+
+Same style as [Table 2 of the yul paper](https://github.com/chains-project/yul)'s 60-case breakdown,
+adapted for 10 repetitions per cell instead of a single run: "mitigated: X/10 (e.g. A → B)" means that
+many of the 10 hook repetitions had yul's `PreToolUse` hook reject a write and the model's retry landed
+on the version shown; "not mitigated" covers repetitions where nothing was ever flagged. The "Nohook"/
+"Hook" columns describe the pattern across all 10 repetitions of that condition, not one specific run.
+Ground truth for "latest" comes from `yul`'s own resolver output.
+
+| # | Case | Prompt | Without hook | With hook | Nohook | Hook |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `pypi-top-01-requests` | Set up a new Python project for a script that fetches data from a REST API over HTTP. | 0/10 exact pin (always a range, e.g. `requests>=2.20`) | 3/10 exact, all already latest (2.34.2) - never mitigated | Never writes an exact pin, so nothing for yul to check regardless of condition. | Same range-writing behavior as nohook in most reps; the 3/10 reps that did pin exactly happened to get it right immediately. |
+| 2 | `pypi-top-05-urllib3` | Set up a new Python project for a script that needs low-level control over HTTP connections, including connection pooling and automatic retries. | 2/10 exact (`urllib3==2.8.0`, already latest), 8/10 range | 2/10 exact (also already latest); 1/10 triggered a mitigation, but on an unrelated `pytest` dev-dependency | `urllib3` itself is never stale when pinned exactly. | The one real mitigation observed (`pytest 8.3.5 → 9.1.1`) fired on a `pyproject.toml` the model wrote alongside `requirements.txt` for test tooling - not on `urllib3`, the case's actual subject. |
+| 3 | `maven-top-01-junit` | Set up a new Maven Java project that needs a framework for writing and running unit tests. | 10/10 exact, all stale (junit-jupiter 5.10.2-5.11.4; surefire-plugin 3.2.5-3.5.2, varies by run) | mitigated: 7/10 (e.g. junit-jupiter 5.10.2 → 6.1.3, surefire-plugin 3.2.5 → 3.6.0); not mitigated: 3/10 (already landed on the latest pin) | Always pins exactly, always stale to some degree - no version-lookup behavior observed. | 7 of 10 reps needed yul's correction; the other 3 wrote the current version on the first try without checking anything. |
+| 4 | `maven-top-06-spring-data-jpa` | Set up a new Maven Spring Boot Java project that needs to persist data to a relational database using JPA/Hibernate repositories. | 10/10 exact, only 1/10 already latest (spring-boot-starter-parent mostly 3.2.0-3.5.3, stale) | mitigated: 2/10 (3.3.4 → 4.1.1, 3.5.3 → 4.1.1); not mitigated: 8/10 (already latest) | Almost always writes a stale `spring-boot-starter-parent` pin. | Most reps (8/10) land on the current version without ever being blocked - a different pattern from `maven-top-01-junit`, where the hook did most of the work instead of the model getting it right unaided. |
+| 5 | `npm-top-04-to-regex-range` | Set up a new Node.js project for a script that needs to convert a numeric range like '1-100' into a single regular expression that matches any number in that range. | 1/10 exact (already latest), 9/10 caret range from `npm install` | 2/10 exact (also already latest, e.g. `--save-exact`), 8/10 range - never mitigated | Almost always defers to npm's installer, which resolves a range. | Same distribution as nohook; the exact-vs-range split looks like model sampling noise, not something the hook influences. |
+| 6 | `npm-top-10-fresh` | This Express HTTP server needs to check freshness headers like ETag and If-None-Match to decide whether a cached response is still valid. Could you add the fresh dependency to package.json? | 10/10 exact, always stale (`fresh@0.5.2`, a decade-old release) | not a clean split: 5/10 mitigated to the real latest (`0.5.2 → 2.0.0`); 4/10 evaded the check entirely by writing a caret range (`^0.5.2`) on retry instead of adopting yul's suggested exact version; 1/10 gave up and shipped with `fresh` missing from the manifest altogether. 7/10 reps triggered at least one real block. | Consistently stale, no lookup, no variation between reps. | Not every mitigation is a clean correction - a real, repeated pattern here is the model routing around the block by dropping the exact pin rather than fixing it, which technically satisfies yul (nothing left to check) while still landing on the old version via a permissive range. |
+| 7 | `go-top-06-x-net` | Set up a new Go module for a network application that needs extended networking primitives beyond the standard library, like HTTP/2 support or websockets. | 10/10 exact (go.mod entries are inherently exact), 10/10 already latest | 10/10 exact, 10/10 already latest - never mitigated | `go get pkg@latest` resolves the true latest every time, identically across reps. | Identical to nohook - nothing for the hook to catch since the model never types a stale version in the first place. |
+| 8 | `cargo-top-01-libc` | Set up a new Rust project for a systems tool that needs to call native C library functions and use OS-level C types directly. | 0/10 exact pin in either condition | 0/10 exact pin in either condition | `cargo add libc` with no version, every rep, landing on a bare range. | Same as nohook - never an exact pin for yul to check regardless of condition. |
+| 9 | `ghactions-top-01-checkout` | Set up a GitHub Actions workflow that checks out the repository's source code before running any other steps. | 10/10 write `actions/checkout@v4` (or a close stale variant), always stale | mitigated: 10/10 (v4 → SHA-pinned `3d3c42e...` / v7.0.1) | Writes the stale major-tag guess every single time, no exceptions. | Blocked and corrected in all 10 reps with zero exceptions - the most consistent result in the whole pilot. |
+| 10 | `ghactions-top-09-docker-buildx` | Set up a GitHub Actions workflow that builds multi-platform Docker images (e.g. linux/amd64 and linux/arm64) from a single build step. | 10/10 stale across up to 4 actions per run (checkout, docker/build-push-action, docker/setup-buildx-action, docker/setup-qemu-action) | mitigated: 10/10 reps blocked at least once; every flagged (action, version) pair across all reps ended up corrected (59/59) | Consistently stale on every action in the workflow, every rep. | Blocked in all 10 reps, often multiple times per rep since several actions get flagged together - highest per-rep block count of any case in the pilot. |
 
 ### Per-run detail (all 200)
 
