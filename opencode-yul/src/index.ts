@@ -38,6 +38,7 @@ function ensureYul(): void {
 	const result = spawnSync("sh", ["-c", `curl -fsSL "https://raw.githubusercontent.com/chains-project/yul/v${YUL_VERSION}/install.sh" | sh`], {
 		env: { ...process.env, YUL_VERSION: `v${YUL_VERSION}`, YUL_INSTALL_DIR: CACHE_DIR },
 		stdio: "ignore",
+		timeout: 60_000, // matches the outer timeout Claude Code's hooks.json puts on the equivalent script
 	})
 	if (result.status !== 0 || !existsSync(BIN_PATH)) return // fail open: hook below no-ops until the binary exists
 
