@@ -7,10 +7,10 @@
 //
 //   { "plugin": ["opencode-yul"] }
 //
-// NOTE: the exact `input.tool` values and `output.args` field names below
-// are based on OpenCode's documented plugin shape as of writing, not a
-// pinned SDK version — verify against @opencode-ai/plugin if the hook
-// doesn't seem to fire.
+// NOTE: `input.tool` values and `output.args` field names below were
+// confirmed against the built-in write/edit tool schemas in opencode-ai@1.18.31
+// (write: {content, filePath}; edit: {filePath, oldString, newString, replaceAll}).
+// Re-check if the hook stops firing after an OpenCode upgrade changes these.
 
 import type { Plugin } from "@opencode-ai/plugin"
 import { spawnSync } from "node:child_process"
