@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -72,13 +73,29 @@ type hookInput struct {
 		OldString  string `json:"old_string"`  // Edit
 		NewString  string `json:"new_string"`  // Edit
 		ReplaceAll bool   `json:"replace_all"` // Edit
+		Command    string `json:"command"`     // Bash
 	} `json:"tool_input"`
 }
 
-// runHook is a PreToolUse hook for the Write and Edit tools. It figures out
-// which ecosystem owns the manifest being written (by filename), and blocks
-// (exit 2) if a newly added/changed dependency is pinned older than what's
-// actually released. Claude sees the block reason on stderr and can retry.
+// manifestRE matches a known manifest name in a shell command. RE2 has no
+// lookahead, so the trailing boundary is a capturing alternative instead.
+var manifestRE = regexp.MustCompile(`(^|[/\\ '"=])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)([/\\ '"]|$)`)
+
+// writeConstructRE matches shell constructs that mutate a file's content,
+// other than `>`/`>>` (handled by redirectRE).
+var writeConstructRE = regexp.MustCompile(`\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\s+of=|\bcp\s|\bmv\s`)
+
+// redirectRE matches a `>`/`>>` that writes file content, excluding fd
+// duplication like `2>&1`.
+var redirectRE = regexp.MustCompile(`>>?[^&]|>>?$`)
+
+// looksLikeManifestWrite reports whether cmd looks like it rewrites a known
+// manifest's content directly, bypassing the Write/Edit path runHook checks.
+func looksLikeManifestWrite(cmd string) bool {
+	return manifestRE.MatchString(cmd) && (writeConstructRE.MatchString(cmd) || redirectRE.MatchString(cmd))
+}
+
+// runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
 func runHook() {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -89,6 +106,14 @@ func runHook() {
 	var in hookInput
 	if err := json.Unmarshal(raw, &in); err != nil {
 		fmt.Fprintf(os.Stderr, "hook: parsing hook payload: %v\n", err)
+		os.Exit(0)
+	}
+
+	if in.ToolName == "Bash" {
+		if looksLikeManifestWrite(in.ToolInput.Command) {
+			fmt.Fprintln(os.Stderr, "yul: use the Write or Edit tool to modify dependency manifests, not bash (bash writes bypass the outdated-dependency check)")
+			os.Exit(2)
+		}
 		os.Exit(0)
 	}
 

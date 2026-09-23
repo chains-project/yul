@@ -62,3 +62,39 @@ func TestNewCheckersWiresResolverIntoMaven(t *testing.T) {
 		t.Fatal("maven.Checker does not use the shared resolver")
 	}
 }
+
+func TestLooksLikeManifestWrite(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"redirect to requirements.txt", `cat > requirements.txt << 'EOF'`, true},
+		{"append redirect", `echo "foo==1.0" >> requirements.txt`, true},
+		{"tee", `echo pinned >> pom.xml; tee pom.xml`, true},
+		{"sed -i", `sed -i 's/1.0/2.0/' package.json`, true},
+		{"perl -i", `perl -i -pe 's/1.0/2.0/' Cargo.toml`, true},
+		{"dd of=", `dd of=go.mod if=/tmp/x`, true},
+		{"cp onto manifest", `cp /tmp/pom.xml pom.xml`, true},
+		{"mv onto manifest", `mv /tmp/new.mod go.mod`, true},
+		{"github actions workflow redirect", `cat > .github/workflows/ci.yml << 'EOF'`, true},
+		{"quoted path redirect", `printf '%s' "$content" > "requirements.txt"`, true},
+
+		{"plain read", `cat requirements.txt`, false},
+		{"grep manifest", `grep react package.json`, false},
+		{"git diff manifest", `git diff pom.xml`, false},
+		{"pip install using requirements", `pip install -r requirements.txt`, false},
+		{"fd duplication near manifest name, not a file write", `mvn test 2>&1 | grep -i pom.xml`, false},
+		{"unrelated file redirect", `echo hi > notes.txt`, false},
+		{"mkdir unrelated", `mkdir -p .github/workflows`, false},
+		{"ls workflows dir", `ls -la .github/workflows/`, false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := looksLikeManifestWrite(test.cmd); got != test.want {
+				t.Errorf("looksLikeManifestWrite(%q) = %v, want %v", test.cmd, got, test.want)
+			}
+		})
+	}
+}
