@@ -1,8 +1,0 @@
-FROM alpine:3.20
-
-RUN apk add --no-cache ca-certificates
-
-WORKDIR /app
-COPY . /app
-
-CMD ["sh", "-c", "echo 'multi-platform image'"]
