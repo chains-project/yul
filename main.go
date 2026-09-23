@@ -95,13 +95,7 @@ func looksLikeManifestWrite(cmd string) bool {
 	return manifestRE.MatchString(cmd) && (writeConstructRE.MatchString(cmd) || redirectRE.MatchString(cmd))
 }
 
-// runHook is a PreToolUse hook for the Write, Edit, and Bash tools. Write/Edit
-// get a real version check: it figures out which ecosystem owns the manifest
-// being written (by filename) and blocks (exit 2) if a newly added/changed
-// dependency is pinned older than what's actually released, so Claude sees
-// the block reason on stderr and can retry. Bash instead gets a coarse
-// "looks like it rewrites a manifest" block, since yul can't simulate
-// arbitrary shell to know what content would actually land.
+// runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
 func runHook() {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
