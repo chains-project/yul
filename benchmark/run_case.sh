@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Runs one benchmark case under one condition (hook|nohook).
-# Usage: run_case.sh <cases.json> <case_id> <hook|nohook> <output_dir>
+# Usage: run_case.sh <cases.json> <case_id> <hook|nohook> <output_dir> [rep]
+# [rep] is a repetition index (e.g. 01, 02, ...); when given, the run is
+# written to <output_dir>/<case_id>/<condition>/rep<rep> instead of
+# <output_dir>/<case_id>/<condition>, so repeats don't clobber each other.
 set -euo pipefail
 
 CASES_JSON="$1"
 CASE_ID="$2"
 CONDITION="$3"   # hook | nohook
 OUT_DIR="$4"
+REP="${5:-0}"    # "0" means no repeat subdirectory (single-run mode)
 YUL_BIN="/home/aman/Desktop/chains/ai-bump/yul"
 
 case_json() {
@@ -28,7 +32,11 @@ TYPE=$(echo "$C" | jq -r '.type')
 PROMPT=$(echo "$C" | jq -r '.prompt')
 SEED=$(echo "$C" | jq -r '.seed // empty')
 
-WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION"
+if [ "$REP" = "0" ]; then
+  WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION"
+else
+  WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION/rep$REP"
+fi
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR/.claude"
 
