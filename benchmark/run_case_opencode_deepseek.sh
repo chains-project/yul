@@ -70,37 +70,42 @@ if [ "$TYPE" = "existing" ]; then
   printf '%s' "$SEED" > "$WORKDIR/$MANIFEST"
 fi
 
-# No provider block needed - "deepseek" is a built-in OpenCode provider
-# (models.dev catalog); it reads DEEPSEEK_API_KEY from the environment.
-cat > "$WORKDIR/opencode.json" <<EOF
+# "deepseek" is a built-in OpenCode provider (models.dev catalog); it reads
+# the credential from OpenCode's own store (see the top of this file), not
+# an env var. write/edit checking is the published "opencode-yul" npm
+# package (chains-project/yul's own opencode-yul/ subdirectory) instead of
+# a hand-rolled copy - it downloads and caches its own pinned yul release
+# binary (currently v0.0.14), independent of $YUL_BIN below.
+if [ "$CONDITION" = "hook" ]; then
+  cat > "$WORKDIR/opencode.json" <<EOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-yul"]
+}
+EOF
+else
+  cat > "$WORKDIR/opencode.json" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json"
 }
 EOF
+fi
 
 if [ "$CONDITION" = "hook" ]; then
-  # Mirrors main.go's runHook: translate OpenCode's tool.execute.before
-  # payload (write: filePath/content; edit: filePath/oldString/newString/
-  # replaceAll) into yul's PreToolUse JSON shape, exec the binary, and
-  # throw on exit 2 so OpenCode surfaces the stderr reason back to the
-  # model - the same self-correction loop Claude Code's exit-2/stderr gives.
-  cat > "$WORKDIR/.opencode/plugins/yul.js" <<'EOF'
-// All the manifest/bash-bypass detection logic lives in main.go's runHook
-// now (it handles Write, Edit, and Bash tool_names), so this plugin is
-// mostly a thin translation layer: build yul's PreToolUse JSON shape from
-// whichever OpenCode tool fired, spawn the binary, and throw on exit 2 so
-// OpenCode surfaces the stderr reason back to the model - the same
-// self-correction loop Claude Code's exit-2/stderr gives.
-//
-// It also blocks any attempt to read OpenCode's own credential store
-// directly - the run's DeepSeek API key lives there (auth login, not an
-// env var, see run_case_opencode_deepseek.sh), so this is the one
-// exfiltration path left for a model that goes looking for it.
+  # opencode-yul (above) only covers write/edit as of its current release -
+  # it has no Bash case, so this local plugin fills that one gap plus our
+  # own auth-store-read block (neither is upstream yet). Talks to $YUL_BIN
+  # (our locally built binary), not opencode-yul's separately pinned one.
+  cat > "$WORKDIR/.opencode/plugins/yul-bash.js" <<'EOF'
+// Blocks two things opencode-yul's published plugin doesn't cover yet:
+// 1. Bash writes to a dependency manifest (main.go's runHook handles
+//    tool_name "Bash" itself; opencode-yul's toHookInput() only maps
+//    write/edit, so this delegates bash the same way write/edit already
+//    delegate to yul - see run_case_opencode.sh for the fuller original).
+// 2. Reading OpenCode's own credential store, wherever the DeepSeek API
+//    key lives (auth login, not an env var - see the top of this script).
 const AUTH_STORE_RE = /\.local[/\\]share[/\\]opencode[/\\]auth\.json|opencode[/\\]auth\.json/i
 
-// Catches any tool call - read, bash, grep, glob, whatever - that names
-// the credential store anywhere in its arguments, without having to know
-// each tool's specific field names.
 function mentionsAuthStore(args) {
   if (typeof args === "string") return AUTH_STORE_RE.test(args)
   if (Array.isArray(args)) return args.some(mentionsAuthStore)
@@ -108,39 +113,20 @@ function mentionsAuthStore(args) {
   return false
 }
 
-export const YulPlugin = async () => {
+export const YulBashPlugin = async () => {
   const YUL_BIN = process.env.YUL_BIN || "yul"
-  const check = async (payload) => {
-    const proc = Bun.spawn([YUL_BIN], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })
-    proc.stdin.write(JSON.stringify(payload))
-    proc.stdin.end()
-    const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
-    if (code === 2) throw new Error(stderr.trim() || "yul: blocked outdated dependency")
-  }
-
   return {
     "tool.execute.before": async (input, output) => {
       const a = output.args
       if (mentionsAuthStore(a)) {
         throw new Error("yul: reading OpenCode's credential store is not permitted")
       }
-      if (input.tool === "bash") {
-        await check({ tool_name: "Bash", tool_input: { command: a.command || "" } })
-        return
-      }
-      if (input.tool !== "write" && input.tool !== "edit") return
-      const payload = input.tool === "write"
-        ? { tool_name: "Write", tool_input: { file_path: a.filePath, content: a.content } }
-        : {
-            tool_name: "Edit",
-            tool_input: {
-              file_path: a.filePath,
-              old_string: a.oldString,
-              new_string: a.newString,
-              replace_all: !!a.replaceAll,
-            },
-          }
-      await check(payload)
+      if (input.tool !== "bash") return
+      const proc = Bun.spawn([YUL_BIN], { stdin: "pipe", stdout: "pipe", stderr: "pipe" })
+      proc.stdin.write(JSON.stringify({ tool_name: "Bash", tool_input: { command: a.command || "" } }))
+      proc.stdin.end()
+      const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
+      if (code === 2) throw new Error(stderr.trim() || "yul: blocked outdated dependency")
     },
   }
 }
