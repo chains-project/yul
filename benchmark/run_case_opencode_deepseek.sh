@@ -4,6 +4,14 @@
 # "deepseek" provider (models.dev catalog) instead of a self-hosted,
 # OpenAI-compatible endpoint - no custom provider config needed.
 #
+# The actual `opencode run` happens inside a fresh Apptainer container per
+# invocation (see opencode-sandbox.def/.sif) with only this run's own
+# WORKDIR bind-mounted - a model's bash/read tools can't see sibling runs'
+# directories at all, unlike the un-sandboxed version, where a run was
+# caught `cat`-ing a completed sibling repetition's manifest instead of
+# doing the task itself. Build the image once with:
+#   apptainer build benchmark/opencode-sandbox.sif benchmark/opencode-sandbox.def
+#
 # Credentials come from OpenCode's own store (`opencode auth login`, saved
 # to ~/.local/share/opencode/auth.json), not an env var - this script never
 # reads or holds the API key, so it can't leak it. (Earlier versions passed
@@ -36,9 +44,12 @@ REPEAT_INDEX="${6:-}"
 YUL_BIN="${YUL_BIN:-yul}"
 OPENCODE_BIN="${OPENCODE_BIN:-opencode}"
 command -v "$OPENCODE_BIN" >/dev/null 2>&1 || { echo "opencode not found (set OPENCODE_BIN or put it on PATH)" >&2; exit 1; }
+command -v apptainer >/dev/null 2>&1 || { echo "apptainer not found on PATH" >&2; exit 1; }
 if [ "$CONDITION" = "hook" ]; then
   command -v "$YUL_BIN" >/dev/null 2>&1 || { echo "yul not found (set YUL_BIN or put it on PATH)" >&2; exit 1; }
 fi
+SIF_IMAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/opencode-sandbox.sif"
+[ -f "$SIF_IMAGE" ] || { echo "$SIF_IMAGE not found - build it with: apptainer build $SIF_IMAGE $(dirname "$SIF_IMAGE")/opencode-sandbox.def" >&2; exit 1; }
 
 case_json() {
   jq -c --arg id "$CASE_ID" '.[] | select(.id == $id)' "$CASES_JSON"
@@ -148,28 +159,46 @@ git config user.name "benchmark"
 # run's log mid-session. Moved into place only after the run finishes.
 TRANSCRIPT_TMP=$(mktemp)
 STDERR_TMP=$(mktemp)
-# Minimal env for the opencode process - it spawns the model's bash tool
-# calls as children of itself, which inherit whatever's in its environment,
-# so anything beyond what opencode/yul actually need (a stray GITHUB_TOKEN,
-# SLURM credentials, etc. sitting in the launching shell) would otherwise
-# be exposed to a model command like `env`. No DEEPSEEK_API_KEY here at
-# all - opencode reads its DeepSeek credential from its own auth store
-# (`opencode auth login`), not from the environment, so there's nothing
-# for a bash env dump to expose in the first place.
-env -i \
-  PATH="$PATH" \
-  HOME="$HOME" \
-  TERM="${TERM:-xterm}" \
-  TMPDIR="${TMPDIR:-/tmp}" \
-  YUL_BIN="$YUL_BIN" \
-  "$OPENCODE_BIN" run "$PROMPT" \
+
+# Runs under Apptainer, one fresh container per run: --no-home plus binding
+# only this run's own WORKDIR means the model's bash/read tools can't see
+# sibling runs' directories at all (a real cross-run contamination bug
+# found by review - a model literally `cat ../run-1/pom.xml`'d another
+# repetition's already-corrected manifest instead of doing the task).
+#
+# Cache dirs: yul's release binary and the opencode-yul plugin package are
+# shared read-write across all containers (safe to race on - worst case is
+# a redundant re-download, no per-run data in either). Everything under
+# .local/share/opencode (sessions, snapshots, its own log) is NOT shared -
+# each run gets a throwaway one, with only auth.json bind-mounted in
+# read-only from the real one, so the container can authenticate without
+# ever seeing another run's session state or writing into the real one.
+SHARED_CACHE="$OUT_DIR/.container-shared-cache"
+mkdir -p "$SHARED_CACHE/yul" "$SHARED_CACHE/opencode-pkg"
+CONTAINER_HOME=$(mktemp -d)
+mkdir -p "$CONTAINER_HOME/.local/share/opencode"
+if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
+  cp "$HOME/.local/share/opencode/auth.json" "$CONTAINER_HOME/.local/share/opencode/auth.json"
+fi
+
+apptainer exec \
+  --home "$CONTAINER_HOME:/home/sandbox" \
+  --bind "$WORKDIR:/work" \
+  --bind "$SHARED_CACHE/yul:/home/sandbox/.cache/yul" \
+  --bind "$SHARED_CACHE/opencode-pkg:/home/sandbox/.cache/opencode" \
+  --bind "$(command -v "$OPENCODE_BIN"):/usr/local/bin/opencode:ro" \
+  --bind "$(command -v "$YUL_BIN"):/usr/local/bin/yul:ro" \
+  --env YUL_BIN=/usr/local/bin/yul \
+  --pwd /work \
+  "$SIF_IMAGE" \
+  opencode run "$PROMPT" \
   --model "$MODEL_ID" \
   --auto \
   --format json \
   > "$TRANSCRIPT_TMP" 2> "$STDERR_TMP" || true
 
-# Belt-and-suspenders: the yul.js plugin above blocks reads of the auth
-# store, but redact anything DeepSeek-key-shaped that slips through
+# Belt-and-suspenders: the yul-bash.js plugin above blocks reads of the
+# auth store, but redact anything DeepSeek-key-shaped that slips through
 # anyway (format is public: "sk-" + 32 hex chars) - this doesn't require
 # knowing the actual configured key, so it still works after rotation.
 sed -i -E 's/sk-[a-f0-9]{32}/***REDACTED-DEEPSEEK-API-KEY***/g' "$TRANSCRIPT_TMP" "$STDERR_TMP"
@@ -194,16 +223,17 @@ jq -s '
 ' transcript.jsonl > usage.json
 
 # Direct proof of which provider/model actually served this run: OpenCode's
-# transcript never records it, but its own runtime log does, per session.
-# Filtered by this run's sessionID so concurrent runs sharing the same
-# global log don't cross-contaminate.
-OPENCODE_LOG="${OPENCODE_LOG_PATH:-$HOME/.local/share/opencode/log/opencode.log}"
+# transcript never records it, but its own runtime log does. Each run has
+# its own throwaway container $HOME now, so this log is already isolated
+# to this run alone - the sessionID filter is just extra safety.
+OPENCODE_LOG="$CONTAINER_HOME/.local/share/opencode/log/opencode.log"
 SESSION_ID=$(jq -r 'select(.sessionID != null) | .sessionID' transcript.jsonl 2>/dev/null | head -1)
 if [ -n "$SESSION_ID" ] && [ -f "$OPENCODE_LOG" ]; then
   grep -F "session.id=$SESSION_ID" "$OPENCODE_LOG" | grep -E "providerID=|llm\.provider=" > model_used.log || true
 else
   : > model_used.log
 fi
+rm -rf "$CONTAINER_HOME"
 
 # When .manifest listed several candidate paths, use whichever one the
 # model actually wrote.
