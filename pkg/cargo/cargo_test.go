@@ -53,20 +53,48 @@ exact = "=9.9.9"
 		"runtime/table-exact": "2.0.0",
 		"development/exact":   "9.9.9",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("parseCargoPins() returned %d pins, want %d: %#v", len(got), len(want), got)
-	}
 	for location, version := range want {
 		pin, ok := got[location]
 		if !ok {
 			t.Errorf("parseCargoPins() missing %q", location)
 			continue
 		}
-		if pin.Version != version {
-			t.Errorf("parseCargoPins()[%q].Version = %q, want %q", location, pin.Version, version)
+		if pin.Version != version || pin.Range {
+			t.Errorf("parseCargoPins()[%q] = %#v, want exact %q", location, pin, version)
 		}
 		if pin.PURL == "" {
 			t.Errorf("parseCargoPins()[%q].PURL is empty", location)
+		}
+	}
+	if _, ok := got["runtime/wildcard"]; ok {
+		t.Errorf("parseCargoPins() = %#v, want bare \"*\" excluded", got)
+	}
+}
+
+// TestParseCargoRanges checks caret/tilde/bare-version specs are captured
+// as ranges (Cargo's default requirement operator is caret, so a bare
+// version is itself a range), alongside the exact pins above.
+func TestParseCargoRanges(t *testing.T) {
+	content := `
+[dependencies]
+caret = "1.2.3"
+explicit-caret = "^1.2.3"
+tilde = "~1.2.3"
+`
+
+	got, err := parseCargoPins(content)
+	if err != nil {
+		t.Fatalf("parseCargoPins() error = %v", err)
+	}
+
+	want := map[string]string{
+		"runtime/caret":          "1.2.3",
+		"runtime/explicit-caret": "^1.2.3",
+		"runtime/tilde":          "~1.2.3",
+	}
+	for location, spec := range want {
+		if got[location].Version != spec || !got[location].Range {
+			t.Errorf("parseCargoPins()[%q] = %#v, want range %q", location, got[location], spec)
 		}
 	}
 }
@@ -100,7 +128,7 @@ existing = "=1.0.0"
 added = "=1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
@@ -124,7 +152,11 @@ func TestCheckCargoTomlAtLatestNoMismatch(t *testing.T) {
 added = "=1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	// hasLockfile is irrelevant here: "added" is an exact pin, not a
+	// range, so it's never consulted. true is passed everywhere in this
+	// file that isn't specifically testing the lockfile check itself, to
+	// keep those tests from also having to reason about it.
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
@@ -135,8 +167,8 @@ added = "=1.0.0"
 
 // TestCheckCargoTomlBareVersionIsCaretRangeNotExact covers the
 // Cargo-specific gotcha noted in the package doc comment: a bare version
-// like "1.2.3" means "^1.2.3" by default, not an exact pin, so it must never
-// be flagged even when it's older than the latest release.
+// like "1.2.3" means "^1.2.3" by default, not an exact pin, so it's
+// flagged as a range recommendation, never as an outdated exact pin.
 func TestCheckCargoTomlBareVersionIsCaretRangeNotExact(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{"pkg:cargo/added": "9.0.0"}}
 
@@ -146,15 +178,12 @@ func TestCheckCargoTomlBareVersionIsCaretRangeNotExact(t *testing.T) {
 added = "1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
-	if res.lookups != 0 {
-		t.Fatalf("CheckCargoToml() made %d resolver lookups, want 0 (bare version isn't an exact pin)", res.lookups)
-	}
-	if len(got) != 0 {
-		t.Fatalf("CheckCargoToml() = %#v, want no mismatches for a bare (caret) version", got)
+	if len(got) != 1 || !got[0].Range || got[0].Current != "1.0.0" || got[0].Suggested != "^9.0.0" {
+		t.Fatalf("CheckCargoToml() = %#v, want a single range recommendation for the bare (caret) version", got)
 	}
 }
 
@@ -170,7 +199,7 @@ added = "=1.0.0"
 `
 	res.latest["pkg:cargo/added"] = "1.0.0"
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}
@@ -181,6 +210,24 @@ added = "=1.0.0"
 	}
 	if len(got) != 0 {
 		t.Fatalf("CheckCargoToml() = %#v, want no mismatches", got)
+	}
+}
+
+func TestCheckCargoTomlFlagsRangeWithNoLockfile(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:cargo/added": "1.5.0"}}
+
+	before := `[dependencies]
+`
+	after := `[dependencies]
+added = "^1.0.0"
+`
+
+	got, err := CheckCargoToml(before, after, res, false)
+	if err != nil {
+		t.Fatalf("CheckCargoToml() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || !got[0].NoLockfile {
+		t.Fatalf("CheckCargoToml() = %#v, want a lockfile-only mismatch since the range already allows latest", got)
 	}
 }
 
@@ -200,7 +247,7 @@ dual = "=1.0.0"
 dual = "=1.0.0"
 `
 
-	got, err := CheckCargoToml(before, after, res)
+	got, err := CheckCargoToml(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckCargoToml() error = %v", err)
 	}

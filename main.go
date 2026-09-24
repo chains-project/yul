@@ -19,6 +19,7 @@ import (
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -76,14 +77,12 @@ type hookInput struct {
 	} `json:"tool_input"`
 }
 
-// manifestRE matches a known manifest name in a shell command, mirroring
-// pkg/*'s Filename() values. RE2 has no lookahead, so the boundary is a
-// capturing alternative instead of a real (?=...).
+// manifestRE matches a known manifest name in a shell command. RE2 has no
+// lookahead, so the trailing boundary is a capturing alternative instead.
 var manifestRE = regexp.MustCompile(`(^|[/\\ '"=])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)([/\\ '"]|$)`)
 
 // writeConstructRE matches shell constructs that mutate a file's content,
-// other than `>`/`>>` (handled by redirectRE below since RE2 can't express
-// the JS version's negative lookahead excluding `>&` fd-duplication).
+// other than `>`/`>>` (handled by redirectRE).
 var writeConstructRE = regexp.MustCompile(`\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\s+of=|\bcp\s|\bmv\s`)
 
 // redirectRE matches a `>`/`>>` that writes file content, excluding fd
@@ -91,16 +90,12 @@ var writeConstructRE = regexp.MustCompile(`\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\s
 var redirectRE = regexp.MustCompile(`>>?[^&]|>>?$`)
 
 // looksLikeManifestWrite reports whether cmd looks like it rewrites a known
-// manifest's content directly, bypassing the Write/Edit tools yul's
-// PreToolUse hook actually inspects.
+// manifest's content directly, bypassing the Write/Edit path runHook checks.
 func looksLikeManifestWrite(cmd string) bool {
 	return manifestRE.MatchString(cmd) && (writeConstructRE.MatchString(cmd) || redirectRE.MatchString(cmd))
 }
 
-// runHook is a PreToolUse hook for Write, Edit, and Bash. Write/Edit get a
-// real version check (exit 2 if a changed pin is outdated); Bash gets a
-// coarse "looks like it rewrites a manifest" block, since yul can't
-// simulate arbitrary shell to know what content would land.
+// runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
 func runHook() {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -157,7 +152,9 @@ func runHook() {
 		after = strings.Replace(before, in.ToolInput.OldString, in.ToolInput.NewString, count)
 	}
 
-	mismatches, err := checker.Check(before, after)
+	hasLockfile := manifestchecker.HasLockfile(filepath.Dir(in.ToolInput.FilePath), checker)
+
+	mismatches, err := checker.Check(before, after, hasLockfile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook: %v\n", err)
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
@@ -167,17 +164,43 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+	var outdated, ranges []mismatch.Mismatch
 	for _, m := range mismatches {
-		name := m.Name
-		if m.Namespace != "" {
-			name = m.Namespace + ":" + m.Name
+		if m.Range {
+			ranges = append(ranges, m)
+		} else {
+			outdated = append(outdated, m)
 		}
-		latest := m.Latest
-		if m.Suggested != "" {
-			latest = m.Suggested
+	}
+
+	if len(outdated) > 0 {
+		fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+		for _, m := range outdated {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			latest := m.Latest
+			if m.Suggested != "" {
+				latest = m.Suggested
+			}
+			fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
 		}
-		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintln(os.Stderr, "these pinned ranges need attention:")
+		for _, m := range ranges {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			if m.Suggested != "" {
+				fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> widen to %s\n", name, m.Current, m.Latest, m.Suggested)
+			}
+			if m.NoLockfile {
+				fmt.Fprintf(os.Stderr, "  %s: no lockfile found next to this manifest -> run your package manager's install to generate one\n", name)
+			}
+		}
 	}
 	os.Exit(2)
 }
@@ -294,19 +317,47 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		os.Exit(0)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
-		scannedAt.Format("2006-01-02"), len(findings))
+	var outdated, ranges []scan.Finding
 	for _, f := range findings {
-		name := f.Name
-		if f.Namespace != "" {
-			name = f.Namespace + ":" + f.Name
+		if f.Range {
+			ranges = append(ranges, f)
+		} else {
+			outdated = append(outdated, f)
 		}
-		latest := f.Latest
-		if f.Suggested != "" {
-			latest = f.Suggested
+	}
+
+	var b strings.Builder
+	b.WriteString("yul scanned this project's manifests")
+	fmt.Fprintf(&b, " (as of %s)", scannedAt.Format("2006-01-02"))
+	b.WriteString(" and found:\n")
+	if len(outdated) > 0 {
+		fmt.Fprintf(&b, "%d pinned dependencies older than the latest release:\n", len(outdated))
+		for _, f := range outdated {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			latest := f.Latest
+			if f.Suggested != "" {
+				latest = f.Suggested
+			}
+			fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
 		}
-		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintf(&b, "%d pinned ranges that need attention:\n", len(ranges))
+		for _, f := range ranges {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			if f.Suggested != "" {
+				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> widen to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
+			}
+			if f.NoLockfile {
+				fmt.Fprintf(&b, "  %s: %s: no lockfile found next to this manifest\n", f.File, name)
+			}
+		}
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
 
