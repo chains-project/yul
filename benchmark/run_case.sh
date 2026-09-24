@@ -72,6 +72,7 @@ git config user.email "benchmark@example.com"
 git config user.name "benchmark"
 
 claude -p "$PROMPT" \
+  --model sonnet \
   --permission-mode bypassPermissions \
   --setting-sources project \
   --output-format stream-json \
