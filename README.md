@@ -53,7 +53,8 @@ See [`opencode-yul/README.md`](opencode-yul/README.md) for details.
 
 ## Manual install
 
-> [!NOTE] Prefer this method if you want control over which version you run.
+> [!NOTE]
+> Prefer this method if you want control over which version you run.
 > The `/plugin` installs above updates automatically as new releases ship.
 > OpenCode install also ensures that the updates are automatically pulled in
 > whenever the [NPM package](https://www.npmjs.com/package/opencode-yul) is updated.
