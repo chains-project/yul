@@ -55,13 +55,14 @@ function ensureYul(): void {
 // (see hookInput in main.go), so this plugin can drive the same binary
 // unmodified regardless of which agent host it's running under.
 type hookInput = {
-	tool_name: "Write" | "Edit"
+	tool_name: "Write" | "Edit" | "Bash"
 	tool_input: {
 		file_path: string
 		content?: string
 		old_string?: string
 		new_string?: string
 		replace_all?: boolean
+		command?: string
 	}
 }
 
@@ -79,6 +80,12 @@ function toHookInput(tool: string, args: any): hookInput | undefined {
 				replace_all: args.replaceAll,
 			},
 		}
+	}
+	if (tool === "bash") {
+		// main.go's runHook does the actual detection (a command that both
+		// names a known manifest and contains a content-mutating construct);
+		// this just has to forward the command, same as write/edit above.
+		return { tool_name: "Bash", tool_input: { file_path: "", command: args.command } }
 	}
 	return undefined
 }
