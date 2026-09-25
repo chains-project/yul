@@ -79,32 +79,6 @@ func TestLooksLikeManifestWrite(t *testing.T) {
 		{"mv onto manifest", `mv /tmp/new.mod go.mod`, true},
 		{"github actions workflow redirect", `cat > .github/workflows/ci.yml << 'EOF'`, true},
 		{"quoted path redirect", `printf '%s' "$content" > "requirements.txt"`, true},
-
-		{"plain read", `cat requirements.txt`, false},
-		{"grep manifest", `grep react package.json`, false},
-		{"git diff manifest", `git diff pom.xml`, false},
-		{"pip install using requirements", `pip install -r requirements.txt`, false},
-		{"fd duplication near manifest name, not a file write", `mvn test 2>&1 | grep -i pom.xml`, false},
-		{"unrelated file redirect", `echo hi > notes.txt`, false},
-		{"mkdir unrelated", `mkdir -p .github/workflows`, false},
-		{"ls workflows dir", `ls -la .github/workflows/`, false},
-
-		// Regression cases: stderr-to-file (not fd dup) or an unrelated `>`
-		// elsewhere in the command used to false-positive because the old
-		// check only required the manifest name and *some* `>` to co-occur
-		// anywhere in cmd, rather than requiring the `>` to actually target
-		// the manifest.
-		{"read with stderr to /dev/null", `cat Cargo.toml 2>/dev/null`, false},
-		{"read with stderr to /dev/null, compound", `ls -la && cat go.mod 2>/dev/null; go version`, false},
-		{"unrelated redirect elsewhere, manifest read in same clause", `npm init -y >/dev/null && cat package.json`, false},
-		{"manifest named in different clause than the write", `cat > .gitignore << 'EOF'
-ignored
-EOF
-git add pyproject.toml .gitignore`, false},
-		{"manifest mentioned in a URL, no local write", `curl -s "https://example.com/spring-boot/pom.xml" | grep version`, false},
-		{"manifest mentioned inside a string literal, unrelated redirect", `python3 -c "print('pyproject.toml')" > /tmp/out.log`, false},
-		{"find pattern for manifest name, not a write", `find . -iname "go.mod" 2>/dev/null`, false},
-
 		{"redirect target is the manifest despite trailing stderr redirect", `cat > pom.xml << 'EOF'
 <project/>
 EOF
@@ -118,6 +92,25 @@ EOF`, true},
 		{"redirect target with a relative directory prefix", `cat > node_modules/pkg-a/package.json <<'EOF'
 {}
 EOF`, true},
+
+		{"plain read", `cat requirements.txt`, false},
+		{"grep manifest", `grep react package.json`, false},
+		{"git diff manifest", `git diff pom.xml`, false},
+		{"pip install using requirements", `pip install -r requirements.txt`, false},
+		{"fd duplication near manifest name, not a file write", `mvn test 2>&1 | grep -i pom.xml`, false},
+		{"unrelated file redirect", `echo hi > notes.txt`, false},
+		{"mkdir unrelated", `mkdir -p .github/workflows`, false},
+		{"ls workflows dir", `ls -la .github/workflows/`, false},
+		{"read with stderr to /dev/null", `cat Cargo.toml 2>/dev/null`, false},
+		{"read with stderr to /dev/null, compound", `ls -la && cat go.mod 2>/dev/null; go version`, false},
+		{"unrelated redirect elsewhere, manifest read in same clause", `npm init -y >/dev/null && cat package.json`, false},
+		{"manifest named in different clause than the write", `cat > .gitignore << 'EOF'
+ignored
+EOF
+git add pyproject.toml .gitignore`, false},
+		{"manifest mentioned in a URL, no local write", `curl -s "https://example.com/spring-boot/pom.xml" | grep version`, false},
+		{"manifest mentioned inside a string literal, unrelated redirect", `python3 -c "print('pyproject.toml')" > /tmp/out.log`, false},
+		{"find pattern for manifest name, not a write", `find . -iname "go.mod" 2>/dev/null`, false},
 	}
 
 	for _, test := range tests {
