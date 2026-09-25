@@ -33,7 +33,7 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
-		githubactions.Checker{Resolver: res, Sha: githubactions.GitHubShaResolver{}},
+		githubactions.Checker{Resolver: res, Sha: githubactions.EcosystemsShaResolver{}},
 		golang.Checker{Resolver: res},
 		cargo.Checker{Resolver: res},
 	}

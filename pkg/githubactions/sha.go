@@ -2,13 +2,14 @@ package githubactions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
+	"net/url"
 	"strings"
 	"time"
 
-	githubforge "github.com/git-pkgs/forge/github"
+	"github.com/ecosyste-ms/ecosystems-go/packages"
 )
 
 // ShaResolver resolves GitHub refs to commit SHAs for suggested immutable
@@ -20,60 +21,71 @@ type ShaResolver interface {
 	ResolveSHA(ctx context.Context, repo, tag string) (string, error)
 }
 
-// defaultShaTimeout bounds a single GitHub API lookup, mirroring
+// defaultShaTimeout bounds a single ecosyste.ms lookup, mirroring
 // resolver.EnrichmentResolver's defaultTimeout.
 const defaultShaTimeout = 10 * time.Second
 
-// GitHubShaResolver resolves tags through git-pkgs/forge. Requests are
-// unauthenticated unless GITHUB_TOKEN is set.
-type GitHubShaResolver struct {
+// EcosystemsShaResolver resolves tags to commit SHAs through the sha
+// ecosyste.ms already mirrors for each githubactions release, so this stays
+// within the same backend and rate limits LatestVersions relies on instead
+// of adding a second, GitHub-specific one.
+type EcosystemsShaResolver struct {
 	// Client is the HTTP client to use; a zero-value resolver builds one
 	// with defaultShaTimeout on first use.
 	Client *http.Client
 
-	// baseURL overrides forge's public GitHub API URL for tests.
+	// baseURL overrides packages.ServerURLHTTPSPackagesEcosysteMsAPIV1 for
+	// tests.
 	baseURL string
 }
 
-type userAgentTransport struct {
-	base http.RoundTripper
+// ecosystemsVersion is the subset of packages.ecosyste.ms's version
+// response this resolver needs.
+type ecosystemsVersion struct {
+	Metadata struct {
+		Sha string `json:"sha"`
+	} `json:"metadata"`
 }
 
-// RoundTrip sends req with yul's User-Agent without mutating the caller's
-// request.
-func (t userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	clone.Header.Set("User-Agent", "yul")
-	return t.base.RoundTrip(clone)
-}
-
-// ResolveSHA returns the full commit SHA for tag in an owner/repo GitHub
-// repository.
-func (g GitHubShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
-	client := g.Client
+// ResolveSHA returns the commit SHA ecosyste.ms recorded for repo (an
+// "owner/name" GitHub repository) at tag.
+func (r EcosystemsShaResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
+	client := r.Client
 	if client == nil {
 		client = &http.Client{Timeout: defaultShaTimeout}
 	}
-	httpClient := *client
-	transport := httpClient.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-	httpClient.Transport = userAgentTransport{base: transport}
 
-	base := g.baseURL
+	base := r.baseURL
 	if base == "" {
-		base = githubforge.DefaultAPIBaseURL
+		base = packages.ServerURLHTTPSPackagesEcosysteMsAPIV1
 	}
-	owner, name, ok := strings.Cut(repo, "/")
-	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-		return "", fmt.Errorf("invalid GitHub repository %q", repo)
-	}
-	resolver, err := githubforge.NewCommitResolverWithBase(base, os.Getenv("GITHUB_TOKEN"), &httpClient)
+	reqURL := fmt.Sprintf("%s/registries/github%%20actions/packages/%s/versions/%s",
+		base, url.PathEscape(repo), url.PathEscape(tag))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("creating GitHub commit resolver: %w", err)
+		return "", fmt.Errorf("building request: %w", err)
 	}
-	return resolver.ResolveCommit(ctx, owner, name, tag)
+	req.Header.Set("User-Agent", "yul")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetching %s: %w", reqURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetching %s: unexpected status %d", reqURL, resp.StatusCode)
+	}
+
+	var version ecosystemsVersion
+	if err := json.NewDecoder(resp.Body).Decode(&version); err != nil {
+		return "", fmt.Errorf("decoding response from %s: %w", reqURL, err)
+	}
+	if version.Metadata.Sha == "" {
+		return "", fmt.Errorf("no sha in version metadata for %s@%s", repo, tag)
+	}
+	return version.Metadata.Sha, nil
 }
 
 // repoOf reduces an action name to the "owner/repo" GitHub repository it
