@@ -21,7 +21,7 @@ import { join } from "node:path"
 // Bumped in lockstep with .claude-plugin/plugin.json and this package's own
 // package.json version by the release workflow — it's what pins which yul
 // binary this plugin downloads and runs.
-const YUL_VERSION = "0.0.15"
+const YUL_VERSION = "0.0.16"
 
 const CACHE_ROOT = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "yul")
 const CACHE_DIR = join(CACHE_ROOT, `v${YUL_VERSION}`)
