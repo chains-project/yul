@@ -77,17 +77,13 @@ type hookInput struct {
 	} `json:"tool_input"`
 }
 
-// manifestNamesRE is the shared alternation of known manifest names/paths,
-// reused as a suffix by every check below so each one requires the manifest
-// to be the actual target of a write, not merely mentioned somewhere else in
-// the command (e.g. `git add pyproject.toml && cat > .gitignore <<EOF`, or
-// `cat Cargo.toml 2>/dev/null` where the manifest is just cat's read arg and
-// the `>` belongs to an unrelated stderr redirect).
 const manifestNamesRE = `(?:pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)`
 
-// clause is a same-pipeline-stage character class: it stops at `;`, `&&`,
-// `||`, `|`, and newlines so a write construct in one shell clause can't be
-// matched against a manifest name that only appears in a different clause.
+// clause bounds the gap between a write construct's keyword (e.g. `tee`)
+// and the manifest name that must be its own target argument, so e.g.
+// `tee notes.txt; cat package.json` doesn't match: the `;` before
+// package.json stops the gap, since tee's real target is notes.txt, not the
+// manifest.
 const clause = `[^;&|\n]`
 
 // writeConstructToManifestRE matches shell constructs that mutate a file's
@@ -101,12 +97,10 @@ var writeConstructToManifestRE = regexp.MustCompile(
 )
 
 // redirectToManifestRE matches a `>`/`>>` whose target is a known manifest
-// name, e.g. `cat > pom.xml <<EOF`, `echo "foo==1.0" >> requirements.txt`, or
-// `cat > node_modules/pkg/package.json <<EOF` (an optional relative
-// directory prefix before the filename). Excludes fd duplication like
-// `2>&1` and unrelated redirects like `2>/dev/null` by requiring the
-// manifest name immediately after the operator, rather than just matching
-// any `>` present elsewhere in cmd.
+// name, e.g. `cat > pom.xml <<EOF`, `echo "foo==1.0" >> requirements.txt`.
+// Excludes fd duplication like `2>&1` and unrelated redirects like `2>/dev/null`
+// by requiring the manifest name immediately after the operator, rather
+// than just matching any `>` present elsewhere in cmd.
 var redirectToManifestRE = regexp.MustCompile(`>>?\s*['"]?(?:[^\s'"]*/)?` + manifestNamesRE + `['"]?(\s|;|&|\||$)`)
 
 // looksLikeManifestWrite reports whether cmd looks like it rewrites a known
