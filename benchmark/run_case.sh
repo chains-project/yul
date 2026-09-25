@@ -51,7 +51,7 @@ if [ "$CONDITION" = "hook" ]; then
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Bash",
         "hooks": [
           {
             "type": "command",
