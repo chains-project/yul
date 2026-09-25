@@ -77,22 +77,36 @@ type hookInput struct {
 	} `json:"tool_input"`
 }
 
-// manifestRE matches a known manifest name in a shell command. RE2 has no
-// lookahead, so the trailing boundary is a capturing alternative instead.
-var manifestRE = regexp.MustCompile(`(^|[/\\ '"=])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)([/\\ '"]|$)`)
+const manifestNamesRE = `(?:pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)`
 
-// writeConstructRE matches shell constructs that mutate a file's content,
-// other than `>`/`>>` (handled by redirectRE).
-var writeConstructRE = regexp.MustCompile(`\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\s+of=|\bcp\s|\bmv\s`)
+// clause bounds the gap between a write construct's keyword (e.g. `tee`)
+// and the manifest name that must be its own target argument, so e.g.
+// `tee notes.txt; cat package.json` doesn't match: the `;` before
+// package.json stops the gap, since tee's real target is notes.txt, not the
+// manifest.
+const clause = `[^;&|\n]`
 
-// redirectRE matches a `>`/`>>` that writes file content, excluding fd
-// duplication like `2>&1`.
-var redirectRE = regexp.MustCompile(`>>?[^&]|>>?$`)
+// writeConstructToManifestRE matches shell constructs that mutate a file's
+// content, other than `>`/`>>` (handled by redirectToManifestRE), where the
+// manifest name is the construct's own target argument.
+var writeConstructToManifestRE = regexp.MustCompile(
+	`\btee\b` + clause + `*` + manifestNamesRE +
+		`|\b(?:sed|perl)\s+-i\b` + clause + `*` + manifestNamesRE +
+		`|\bdd\b` + clause + `*?\bof=['"]?(?:[^\s'"]*/)?` + manifestNamesRE +
+		`|\b(?:cp|mv)\s+` + clause + `*` + manifestNamesRE,
+)
+
+// redirectToManifestRE matches a `>`/`>>` whose target is a known manifest
+// name, e.g. `cat > pom.xml <<EOF`, `echo "foo==1.0" >> requirements.txt`.
+// Excludes fd duplication like `2>&1` and unrelated redirects like `2>/dev/null`
+// by requiring the manifest name immediately after the operator, rather
+// than just matching any `>` present elsewhere in cmd.
+var redirectToManifestRE = regexp.MustCompile(`>>?\s*['"]?(?:[^\s'"]*/)?` + manifestNamesRE + `['"]?(\s|;|&|\||$)`)
 
 // looksLikeManifestWrite reports whether cmd looks like it rewrites a known
 // manifest's content directly, bypassing the Write/Edit path runHook checks.
 func looksLikeManifestWrite(cmd string) bool {
-	return manifestRE.MatchString(cmd) && (writeConstructRE.MatchString(cmd) || redirectRE.MatchString(cmd))
+	return writeConstructToManifestRE.MatchString(cmd) || redirectToManifestRE.MatchString(cmd)
 }
 
 // runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
