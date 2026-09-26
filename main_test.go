@@ -121,3 +121,40 @@ git add pyproject.toml .gitignore`, false},
 		})
 	}
 }
+
+func TestLooksLikePkgManagerExactPin(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"go get exact version", `go get github.com/davecgh/go-spew@v1.1.0`, true},
+		{"npm install exact version", `npm install react@18.2.0`, true},
+		{"npm add exact version", `npm add lodash@4.17.20`, true},
+		{"yarn add exact version", `yarn add lodash@4.17.20`, true},
+		{"pip install exact version", `pip install requests==2.28.0`, true},
+		{"pip3 install exact version", `pip3 install requests==2.28.0`, true},
+		{"poetry add exact version", `poetry add requests==2.28.0`, true},
+		{"uv add exact version", `uv add requests==2.28.0`, true},
+		{"cargo add exact version", `cargo add serde@1.0.150`, true},
+
+		{"go get no version", `go get github.com/davecgh/go-spew`, false},
+		{"go get latest", `go get github.com/davecgh/go-spew@latest`, false},
+		{"npm install no version", `npm install react`, false},
+		{"npm install caret range", `npm install react@^18.2.0`, false},
+		{"npm install tilde range", `npm install react@~18.2.0`, false},
+		{"pip install no version", `pip install requests`, false},
+		{"pip install range", `pip install requests>=2.28.0`, false},
+		{"cargo add no version", `cargo add serde`, false},
+		{"unrelated at-sign in path", `cat notes@2.txt`, false},
+		{"different clause has the pin", `go get github.com/foo/bar; echo done@v1.0.0`, false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := looksLikePkgManagerExactPin(test.cmd); got != test.want {
+				t.Errorf("looksLikePkgManagerExactPin(%q) = %v, want %v", test.cmd, got, test.want)
+			}
+		})
+	}
+}

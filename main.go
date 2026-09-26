@@ -109,6 +109,23 @@ func looksLikeManifestWrite(cmd string) bool {
 	return writeConstructToManifestRE.MatchString(cmd) || redirectToManifestRE.MatchString(cmd)
 }
 
+// pkgManagerExactPinRE matches a package manager's own CLI syntax for
+// pinning a dependency to an exact version, e.g. `go get mod@v1.2.3`,
+// `npm install pkg@1.2.3`, `pip install pkg==1.2.3`, `cargo add crate@1.2.3`.
+var pkgManagerExactPinRE = regexp.MustCompile(
+	`\bgo\s+get\s+` + clause + `*@v\d[\w.\-+]*` +
+		`|\b(?:npm|pnpm|yarn)\s+(?:install|add|i)\b` + clause + `*@\d[\w.\-+]*` +
+		`|\bcargo\s+add\b` + clause + `*@\d[\w.\-+]*` +
+		`|\b(?:pip3?|poetry|uv)\s+(?:install|add)\b` + clause + `*==\d[\w.\-+]*`,
+)
+
+// looksLikePkgManagerExactPin reports whether cmd uses a package manager's
+// CLI to pin a dependency to an exact version, bypassing the Write/Edit path
+// runHook checks the same way a direct manifest write does.
+func looksLikePkgManagerExactPin(cmd string) bool {
+	return pkgManagerExactPinRE.MatchString(cmd)
+}
+
 // runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
 func runHook() {
 	raw, err := io.ReadAll(os.Stdin)
@@ -126,6 +143,10 @@ func runHook() {
 	if in.ToolName == "Bash" {
 		if looksLikeManifestWrite(in.ToolInput.Command) {
 			fmt.Fprintln(os.Stderr, "yul: use the Write or Edit tool to modify dependency manifests, not bash (bash writes bypass the outdated-dependency check)")
+			os.Exit(2)
+		}
+		if looksLikePkgManagerExactPin(in.ToolInput.Command) {
+			fmt.Fprintln(os.Stderr, "yul: don't pin an exact dependency version via a package manager's CLI (bypasses the outdated-dependency check) - edit the manifest directly with Write/Edit, or run the install/get without a version to pick up latest")
 			os.Exit(2)
 		}
 		os.Exit(0)
