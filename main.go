@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/git-pkgs/purl"
+
 	"github.com/chains-project/yul/pkg/cargo"
 	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/golang"
@@ -20,6 +23,7 @@ import (
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
 	"github.com/chains-project/yul/pkg/util/mismatch"
+	"github.com/chains-project/yul/pkg/util/pins"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -109,21 +113,75 @@ func looksLikeManifestWrite(cmd string) bool {
 	return writeConstructToManifestRE.MatchString(cmd) || redirectToManifestRE.MatchString(cmd)
 }
 
-// pkgManagerExactPinRE matches a package manager's own CLI syntax for
+// pkgManagerPinPatterns matches a package manager's own CLI syntax for
 // pinning a dependency to an exact version, e.g. `go get mod@v1.2.3`,
-// `npm install pkg@1.2.3`, `pip install pkg==1.2.3`, `cargo add crate@1.2.3`.
-var pkgManagerExactPinRE = regexp.MustCompile(
-	`\bgo\s+get\s+` + clause + `*@v\d[\w.\-+]*` +
-		`|\b(?:npm|pnpm|yarn)\s+(?:install|add|i)\b` + clause + `*@\d[\w.\-+]*` +
-		`|\bcargo\s+add\b` + clause + `*@\d[\w.\-+]*` +
-		`|\b(?:pip3?|poetry|uv)\s+(?:install|add)\b` + clause + `*==\d[\w.\-+]*`,
-)
+// `npm install pkg@1.2.3`, `pip install pkg==1.2.3`, `cargo add crate@1.2.3`
+// - these write the manifest just as much as a redirect does, but don't
+// match looksLikeManifestWrite's direct-write patterns at all.
+var pkgManagerPinPatterns = []struct {
+	re     *regexp.Regexp
+	scheme string
+}{
+	{regexp.MustCompile(`\bgo\s+get\s+` + clause + `*?(?P<name>[\w.\-/]+)@(?P<version>v\d[\w.\-+]*)`), "golang"},
+	{regexp.MustCompile(`\b(?:npm|pnpm|yarn)\s+(?:install|add|i)\b` + clause + `*?(?P<name>@[\w.\-]+/[\w.\-]+|[\w.\-]+)@(?P<version>\d[\w.\-+]*)`), "npm"},
+	{regexp.MustCompile(`\bcargo\s+add\b` + clause + `*?(?P<name>[\w.\-]+)@(?P<version>\d[\w.\-+]*)`), "cargo"},
+	{regexp.MustCompile(`\b(?:pip3?|poetry|uv)\s+(?:install|add)\b` + clause + `*?(?P<name>[\w.\-]+)==(?P<version>\d[\w.\-+]*)`), "pypi"},
+}
 
-// looksLikePkgManagerExactPin reports whether cmd uses a package manager's
-// CLI to pin a dependency to an exact version, bypassing the Write/Edit path
-// runHook checks the same way a direct manifest write does.
-func looksLikePkgManagerExactPin(cmd string) bool {
-	return pkgManagerExactPinRE.MatchString(cmd)
+// parsePkgManagerPin extracts the ecosystem, package name, and pinned
+// version from a package manager CLI command, if cmd matches one of
+// pkgManagerPinPatterns.
+func parsePkgManagerPin(cmd string) (scheme, name, version string, ok bool) {
+	for _, p := range pkgManagerPinPatterns {
+		m := p.re.FindStringSubmatch(cmd)
+		if m == nil {
+			continue
+		}
+		for i, group := range p.re.SubexpNames() {
+			switch group {
+			case "name":
+				name = m[i]
+			case "version":
+				version = m[i]
+			}
+		}
+		return p.scheme, name, version, true
+	}
+	return "", "", "", false
+}
+
+// checkPkgManagerPin resolves name's latest released version under scheme
+// and, if pinnedVersion is older, blocks (exit 2) with the same "outdated
+// dependencies" message the Write/Edit path prints - so Claude retries with
+// the correct version instead of pinning it via bash and never finding out.
+// It exits 0 (fails open) if the purl can't be built or the resolver can't
+// find a latest version, same as the Write/Edit path's own resolver errors.
+func checkPkgManagerPin(scheme, name, pinnedVersion string) {
+	res, err := resolver.NewEnrichmentResolver()
+	if err != nil {
+		return // fail open: a resolver construction error shouldn't block the command
+	}
+
+	// The resolver's response keys purls without a version component (see
+	// pins.Diff / EnrichmentResolver.LatestVersions), same as every other
+	// checker's manifest-parsed PURLs - so this must match, not carry
+	// pinnedVersion.
+	purlStr := purl.BuildPURLString(scheme, name, "", "")
+	if purlStr == "" {
+		return
+	}
+
+	pin := pins.Pin{Name: name, Version: pinnedVersion, PURL: purlStr}
+	mismatches, err := pins.Diff(context.Background(), nil, map[string]pins.Pin{name: pin}, scheme, res, pins.NoRangeSupport, nil)
+	if err != nil || len(mismatches) == 0 {
+		return // fail open on a resolver error; nothing to flag if it's already latest
+	}
+
+	fmt.Fprintln(os.Stderr, "outdated dependency pinned via package manager CLI, use this version instead:")
+	for _, m := range mismatches {
+		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", m.Name, m.Current, m.Latest)
+	}
+	os.Exit(2)
 }
 
 // runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
@@ -145,9 +203,8 @@ func runHook() {
 			fmt.Fprintln(os.Stderr, "yul: use the Write or Edit tool to modify dependency manifests, not bash (bash writes bypass the outdated-dependency check)")
 			os.Exit(2)
 		}
-		if looksLikePkgManagerExactPin(in.ToolInput.Command) {
-			fmt.Fprintln(os.Stderr, "yul: don't pin an exact dependency version via a package manager's CLI (bypasses the outdated-dependency check) - edit the manifest directly with Write/Edit, or run the install/get without a version to pick up latest")
-			os.Exit(2)
+		if scheme, name, pinnedVersion, ok := parsePkgManagerPin(in.ToolInput.Command); ok {
+			checkPkgManagerPin(scheme, name, pinnedVersion)
 		}
 		os.Exit(0)
 	}
