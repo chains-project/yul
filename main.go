@@ -128,9 +128,6 @@ var pkgManagerPinPatterns = []struct {
 	{regexp.MustCompile(`\b(?:pip3?|poetry|uv)\s+(?:install|add)\b` + clause + `*?(?P<name>[\w.\-]+)==(?P<version>\d[\w.\-+]*)`), "pypi"},
 }
 
-// parsePkgManagerPin extracts the ecosystem, package name, and pinned
-// version from a package manager CLI command, if cmd matches one of
-// pkgManagerPinPatterns.
 func parsePkgManagerPin(cmd string) (scheme, name, version string, ok bool) {
 	for _, p := range pkgManagerPinPatterns {
 		m := p.re.FindStringSubmatch(cmd)
