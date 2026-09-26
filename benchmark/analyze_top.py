@@ -90,10 +90,16 @@ def find_pin_pypi_pyproject(content, pkg):
     namere = re.escape(pkg)
     normre = pkg.replace("-", "[-_.]").replace("_", "[-_.]")
     for pat in (namere, normre):
-        m = re.search(rf'"({pat})\s*(==|>=|<=|~=|!=|>|<|\^)\s*([^"\s;,]+)"', content, re.IGNORECASE)
+        # PEP 621 dependency strings can chain multiple constraints inside one
+        # quoted spec (e.g. "click>=8.1,<9") - only bare, unchained "==" counts
+        # as an exact pin, same as requirements.txt's comma check below.
+        m = re.search(rf'"({pat})\s*(==|>=|<=|~=|!=|>|<|\^)\s*([^"]+)"', content, re.IGNORECASE)
         if m:
-            op, ver = m.group(2), m.group(3)
-            return ("exact", ver) if op == "==" else ("range", f"{op}{ver}")
+            op, spec = m.group(2), m.group(3).strip()
+            ver = spec.split(",")[0].strip()
+            if op == "==" and "," not in spec:
+                return ("exact", ver)
+            return ("range", f"{op}{ver}")
         m = re.search(rf'^\s*({pat})\s*=\s*"([^"]+)"', content, re.IGNORECASE | re.MULTILINE)
         if m:
             spec = m.group(2).strip()
@@ -225,6 +231,57 @@ def find_pin(eco, manifest_filename, content, pkg):
         return find_pin_ghactions(content, pkg)
     finder = PIN_FINDERS.get((eco, manifest_filename))
     return finder(content, pkg) if finder else None
+
+
+# Manual review of the hook condition's "not found" list (see PR #68 review
+# comments): a target package genuinely absent isn't always a hook miss -
+# some reps solved the task without ever depending on anything (excluded
+# below, since there's no dependency for yul to have acted on), others just
+# reached for a different-but-equivalent package/mechanism (counted as
+# satisfied via an "alternative" route, distinct from native/tool/hook).
+# Keyed by (case, condition, rep) - hook and nohook are separate runs of the
+# same case/rep number, so a rep's classification never carries across
+# conditions.
+EXCLUDED_REPS = {
+    ("cargo-top-08-lazy_static", "hook", "rep1"),          # used std/built-in instead of any crate
+    ("cargo-top-08-lazy_static", "nohook", "rep3"),        # same, different rep
+    ("go-top-09-objx", "hook", "rep2"),                    # wrote the assertion helper itself
+    ("npm-top-03-fill-range", "hook", "rep1"),
+    ("npm-top-03-fill-range", "hook", "rep3"),             # wrote the range-filling logic itself
+    ("npm-top-03-fill-range", "nohook", "rep1"),           # same, different rep
+    ("npm-top-06-resolve", "nohook", "rep2"),              # wrote the module-resolution algorithm itself
+    ("npm-top-07-statuses", "hook", "rep3"),               # wrote the status-code table itself
+    ("npm-top-07-statuses", "nohook", "rep2"),
+    ("npm-top-07-statuses", "nohook", "rep3"),             # same, different reps
+}
+
+ALTERNATIVE_REPS = {
+    ("cargo-top-03-winapi", "hook", "rep3"),                              # used the `windows` crate instead
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "hook", "rep1"),        # pulled in transitively via `windows`/`winapi`
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "hook", "rep2"),
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "nohook", "rep1"),      # same, different reps
+    ("cargo-top-09-winapi-x86_64-pc-windows-gnu", "nohook", "rep2"),
+    ("ghactions-top-05-cache", "hook", "rep1"),                           # used setup-node's built-in `cache: npm` instead
+    ("ghactions-top-05-cache", "hook", "rep2"),
+    ("ghactions-top-05-cache", "hook", "rep3"),
+    ("ghactions-top-05-cache", "nohook", "rep1"),                         # same, different reps
+    ("ghactions-top-05-cache", "nohook", "rep2"),
+    ("maven-top-01-junit", "hook", "rep1"),                               # used JUnit 5 (org.junit.jupiter) instead of JUnit 4
+    ("maven-top-01-junit", "hook", "rep2"),
+    ("maven-top-01-junit", "hook", "rep3"),
+    ("maven-top-01-junit", "nohook", "rep1"),                             # same, different reps
+    ("maven-top-01-junit", "nohook", "rep2"),
+    ("maven-top-01-junit", "nohook", "rep3"),
+    ("maven-top-04-mysql-connector", "hook", "rep1"),                     # used the renamed mysql-connector-j artifact
+    ("maven-top-04-mysql-connector", "hook", "rep2"),
+    ("maven-top-04-mysql-connector", "hook", "rep3"),
+    ("maven-top-04-mysql-connector", "nohook", "rep1"),                   # same, different reps
+    ("maven-top-04-mysql-connector", "nohook", "rep2"),
+    ("maven-top-04-mysql-connector", "nohook", "rep3"),
+    ("npm-top-07-statuses", "nohook", "rep1"),                            # used `http-status-codes` instead of `statuses`
+    ("pypi-top-04-pytz", "nohook", "rep1"),                               # used `tzdata` instead of `pytz`
+    ("pypi-top-04-pytz", "nohook", "rep3"),
+}
 
 
 def short_pkg_name(pkg):
@@ -390,13 +447,20 @@ def main():
                     short = short_pkg_name(pkg)
                     is_latest = not any(k == pkg or k == short or k.endswith("/" + short) for k in outdated)
 
+                rep_key = (cid, condition, rep_dir.name)
+                if rep_key in EXCLUDED_REPS:
+                    continue
+
                 mitigated_pkg, used_tool = analyze_transcript(rep_dir / "transcript.jsonl", pkg)
 
-                how = None
-                if is_latest:
-                    how = "hook" if (condition == "hook" and mitigated_pkg) else ("tool" if used_tool else "native")
+                if rep_key in ALTERNATIVE_REPS:
+                    is_latest, how = True, "alternative"
+                else:
+                    how = None
+                    if is_latest:
+                        how = "hook" if (condition == "hook" and mitigated_pkg) else ("tool" if used_tool else "native")
 
-                not_found_mentions = find_short_mentions(content, short_pkg_name(pkg)) if pin_kind == "none" else []
+                not_found_mentions = find_short_mentions(content, short_pkg_name(pkg)) if pin_kind == "none" and not is_latest else []
 
                 rows.append({
                     "case": cid, "ecosystem": eco, "package": pkg, "condition": condition, "rep": rep_dir.name,
@@ -417,11 +481,11 @@ def main():
         return {
             "satisfied": f"{len(latest)}/{len(sub)}",
             "native": how_counts["native"], "tool": how_counts["tool"], "hook": how_counts["hook"],
-            "via_range": via_range,
+            "alt": how_counts["alternative"], "via_range": via_range,
         }
 
     ecosystems = sorted({r["ecosystem"] for r in rows})
-    cols = [("Condition", 10), ("Ecosystem", 14), ("Satisfied", 10), ("Native", 7), ("Tool", 6), ("Hook", 6), ("via range", 9)]
+    cols = [("Condition", 10), ("Ecosystem", 14), ("Satisfied", 10), ("Native", 7), ("Tool", 6), ("Hook", 6), ("Alt", 5), ("via range", 9)]
 
     def print_row(*vals):
         print(" | ".join(f"{v:<{w}}" if isinstance(v, str) else f"{v:<{w}}" for v, (_, w) in zip(vals, cols)))
@@ -434,35 +498,49 @@ def main():
     for condition in ("nohook", "hook"):
         sub = [r for r in rows if r["condition"] == condition]
         s = summarize(sub)
-        print_row(condition, "all", s["satisfied"], s["native"], s["tool"], s["hook"], s["via_range"])
+        print_row(condition, "all", s["satisfied"], s["native"], s["tool"], s["hook"], s["alt"], s["via_range"])
         for eco in ecosystems:
             s = summarize([r for r in sub if r["ecosystem"] == eco])
-            print_row(condition, eco, s["satisfied"], s["native"], s["tool"], s["hook"], s["via_range"])
+            print_row(condition, eco, s["satisfied"], s["native"], s["tool"], s["hook"], s["alt"], s["via_range"])
 
-    # ---------------- hook condition: why a rep did NOT end up latest ----------------
-    # nohook not being latest is expected (no memory of the latest release,
-    # not investigated). hook is supposed to force every exact pin to latest,
-    # so anything else here is worth a manual look.
-    print()
-    print("=" * 100)
-    print("HOOK CONDITION: reps that did NOT end up satisfied")
-    print("=" * 100)
-    hook_rows = [r for r in rows if r["condition"] == "hook"]
-    hook_outdated = [r for r in hook_rows if r["pin_kind"] != "none" and not r["is_latest"]]
-    hook_not_found = [r for r in hook_rows if r["pin_kind"] == "none"]
+    # ---------------- why a rep did NOT end up latest ----------------
+    # nohook not being latest is common (no memory of the latest release) -
+    # this just documents which reps and why. hook is supposed to force every
+    # exact pin to latest, so anything unsatisfied there is worth a closer look.
+    for condition in ("nohook", "hook"):
+        print()
+        print("=" * 100)
+        print(f"{condition.upper()} CONDITION: reps that did NOT end up satisfied")
+        print("=" * 100)
+        cond_rows = [r for r in rows if r["condition"] == condition]
+        outdated = [r for r in cond_rows if r["pin_kind"] != "none" and not r["is_latest"]]
+        not_found = [r for r in cond_rows if r["pin_kind"] == "none" and not r["is_latest"]]
+        alternative = [r for r in cond_rows if r["how"] == "alternative"]
+        excluded = sorted((cid, rep) for (cid, cond, rep) in EXCLUDED_REPS if cond == condition)
 
-    print(f"\nPin present but still outdated / range excludes latest (yul should have blocked this): {len(hook_outdated)} reps")
-    for r in hook_outdated:
-        print(f"  - {r['case']}/{r['rep']}: {r['package']} ({r['pin_kind']}) = {r['version']}")
+        label = "Pin present but still outdated / range excludes latest"
+        if condition == "hook":
+            label += " (yul should have blocked this)"
+        print(f"\n{label}: {len(outdated)} reps")
+        for r in outdated:
+            print(f"  - {r['case']}/{r['rep']}: {r['package']} ({r['pin_kind']}) = {r['version']}")
 
-    print(f"\nTarget package not found at all in the final manifest: {len(hook_not_found)} reps")
-    for r in hook_not_found:
-        if r["not_found_mentions"]:
-            print(f"  - {r['case']}/{r['rep']}: {r['package']} absent, but its short name turns up elsewhere (possible package swap):")
-            for m in r["not_found_mentions"][:3]:
-                print(f"        {m}")
-        else:
-            print(f"  - {r['case']}/{r['rep']}: {r['package']} absent, no trace of it anywhere (likely never added)")
+        print(f"\nTarget package not found at all in the final manifest: {len(not_found)} reps")
+        for r in not_found:
+            if r["not_found_mentions"]:
+                print(f"  - {r['case']}/{r['rep']}: {r['package']} absent, but its short name turns up elsewhere (possible package swap):")
+                for m in r["not_found_mentions"][:3]:
+                    print(f"        {m}")
+            else:
+                print(f"  - {r['case']}/{r['rep']}: {r['package']} absent, no trace of it anywhere (likely never added)")
+
+        print(f"\nCounted as satisfied via an alternative (equivalent) package/mechanism, per manual review: {len(alternative)} reps")
+        for r in alternative:
+            print(f"  - {r['case']}/{r['rep']}: {r['package']} absent, but an equivalent alternative was used instead")
+
+        print(f"\nExcluded from analysis - no dependency was ever declared, model implemented the functionality itself: {len(excluded)} reps")
+        for cid, rep in excluded:
+            print(f"  - {cid}/{rep}")
 
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(rows, indent=2))
