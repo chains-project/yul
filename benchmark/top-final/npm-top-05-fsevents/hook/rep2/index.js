@@ -1,0 +1,15 @@
+const fsevents = require('fsevents');
+
+const watchPath = process.argv[2] || process.cwd();
+
+const stop = fsevents.watch(watchPath, (path, flags, id) => {
+  const info = fsevents.getInfo(path, flags, id);
+  console.log(info);
+});
+
+process.on('SIGINT', () => {
+  stop();
+  process.exit(0);
+});
+
+console.log(`Watching ${watchPath} for changes...`);
