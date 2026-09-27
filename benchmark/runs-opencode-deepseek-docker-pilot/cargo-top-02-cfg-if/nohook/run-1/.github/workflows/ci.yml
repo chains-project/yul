@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --no-default-features
+
+  wasm:
+    name: wasm32-unknown-unknown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo build --target wasm32-unknown-unknown
+
+  cfg-hygiene:
+    name: raw cfg hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Raw target predicates only in build.rs and src/platform
+        run: |
+          matches=$(grep -rnE 'cfg\([^)]*target_(os|arch|family|pointer_width|env|vendor)' src \
+            --include='*.rs' \
+            | grep -v '^src/platform/' \
+            | grep -vE ':[0-9]+:[[:space:]]*//' || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Raw target cfg outside src/platform/. Use a build.rs alias instead."
+            echo "$matches"
+            exit 1
+          fi
