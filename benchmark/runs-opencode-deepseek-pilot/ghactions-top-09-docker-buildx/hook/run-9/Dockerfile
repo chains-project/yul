@@ -1,9 +1,0 @@
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS build
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-RUN echo "Building for ${TARGETPLATFORM} on ${BUILDPLATFORM}"
-
-FROM alpine:3.20
-ARG TARGETPLATFORM
-RUN echo "${TARGETPLATFORM}" > /platform
-CMD ["cat", "/platform"]
