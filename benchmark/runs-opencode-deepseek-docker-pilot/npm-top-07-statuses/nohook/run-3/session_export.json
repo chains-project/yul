@@ -1,0 +1,1313 @@
+{
+  "info": {
+    "id": "ses_f134aec3affe4sWZpkYtVUj8jE",
+    "slug": "stellar-river",
+    "projectID": "global",
+    "directory": "/work",
+    "path": "",
+    "title": "HTTP status code lookup for Node.js server",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "version": "1.18.32",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0.004661466,
+    "tokens": {
+      "input": 2375,
+      "output": 3195,
+      "reasoning": 3421,
+      "cache": {
+        "read": 111872,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1790677685189,
+      "updated": 1790678197828
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1790677685239
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "deepseek",
+          "modelID": "deepseek-flash"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "package.json",
+              "patch": "Index: package.json\n===================================================================\n--- package.json\t\n+++ package.json\t\n@@ -0,0 +1,19 @@\n+{\n+  \"name\": \"http-status-server\",\n+  \"version\": \"1.0.0\",\n+  \"description\": \"Node.js HTTP server backed by a lookup table of HTTP status codes and reason phrases\",\n+  \"type\": \"module\",\n+  \"main\": \"src/server.js\",\n+  \"exports\": {\n+    \".\": \"./src/server.js\",\n+    \"./status-codes\": \"./src/status-codes.js\"\n+  },\n+  \"scripts\": {\n+    \"start\": \"node src/server.js\",\n+    \"test\": \"node --test\"\n+  },\n+  \"engines\": {\n+    \"node\": \">=18\"\n+  },\n+  \"license\": \"MIT\"\n+}\n",
+              "additions": 19,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/server.js",
+              "patch": "Index: src/server.js\n===================================================================\n--- src/server.js\t\n+++ src/server.js\t\n@@ -0,0 +1,57 @@\n+import http from \"node:http\";\n+import { pathToFileURL } from \"node:url\";\n+import { STATUS_CODES, getReasonPhrase, isStatusCode } from \"./status-codes.js\";\n+\n+const EMPTY_BODY_CODES = new Set([204, 205, 304]);\n+\n+function sendJson(res, statusCode, payload) {\n+  const body = JSON.stringify(payload);\n+  res.writeHead(statusCode, {\n+    \"Content-Type\": \"application/json; charset=utf-8\",\n+    \"Content-Length\": Buffer.byteLength(body),\n+  });\n+  res.end(body);\n+}\n+\n+export function requestHandler(req, res) {\n+  const { pathname } = new URL(req.url, `http://${req.headers.host ?? \"localhost\"}`);\n+\n+  if (req.method === \"GET\" && pathname === \"/health\") {\n+    return sendJson(res, 200, { status: 200, reason: getReasonPhrase(200) });\n+  }\n+\n+  if (req.method === \"GET\" && pathname === \"/status\") {\n+    return sendJson(res, 200, STATUS_CODES);\n+  }\n+\n+  const match = /^\\/status\\/(\\d{3})$/.exec(pathname);\n+  if (req.method === \"GET\" && match) {\n+    const code = Number(match[1]);\n+\n+    if (!isStatusCode(code)) {\n+      return sendJson(res, 404, { error: `Unknown status code: ${match[1]}` });\n+    }\n+    if (code < 200 || code > 599) {\n+      return sendJson(res, 400, { error: `Status code ${code} cannot be sent as a response` });\n+    }\n+    if (EMPTY_BODY_CODES.has(code)) {\n+      res.writeHead(code);\n+      return res.end();\n+    }\n+    return sendJson(res, code, { status: code, reason: getReasonPhrase(code) });\n+  }\n+\n+  return sendJson(res, 404, { status: 404, reason: getReasonPhrase(404) });\n+}\n+\n+export function createServer() {\n+  return http.createServer(requestHandler);\n+}\n+\n+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {\n+  const port = Number(process.env.PORT) || 3000;\n+  const server = createServer();\n+  server.listen(port, () => {\n+    console.log(`HTTP server listening on http://localhost:${server.address().port}`);\n+  });\n+}\n",
+              "additions": 57,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/status-codes.js",
+              "patch": "Index: src/status-codes.js\n===================================================================\n--- src/status-codes.js\t\n+++ src/status-codes.js\t\n@@ -0,0 +1,88 @@\n+export const STATUS_CODES = Object.freeze({\n+  100: \"Continue\",\n+  101: \"Switching Protocols\",\n+  102: \"Processing\",\n+  103: \"Early Hints\",\n+\n+  200: \"OK\",\n+  201: \"Created\",\n+  202: \"Accepted\",\n+  203: \"Non-Authoritative Information\",\n+  204: \"No Content\",\n+  205: \"Reset Content\",\n+  206: \"Partial Content\",\n+  207: \"Multi-Status\",\n+  208: \"Already Reported\",\n+  226: \"IM Used\",\n+\n+  300: \"Multiple Choices\",\n+  301: \"Moved Permanently\",\n+  302: \"Found\",\n+  303: \"See Other\",\n+  304: \"Not Modified\",\n+  305: \"Use Proxy\",\n+  307: \"Temporary Redirect\",\n+  308: \"Permanent Redirect\",\n+\n+  400: \"Bad Request\",\n+  401: \"Unauthorized\",\n+  402: \"Payment Required\",\n+  403: \"Forbidden\",\n+  404: \"Not Found\",\n+  405: \"Method Not Allowed\",\n+  406: \"Not Acceptable\",\n+  407: \"Proxy Authentication Required\",\n+  408: \"Request Timeout\",\n+  409: \"Conflict\",\n+  410: \"Gone\",\n+  411: \"Length Required\",\n+  412: \"Precondition Failed\",\n+  413: \"Payload Too Large\",\n+  414: \"URI Too Long\",\n+  415: \"Unsupported Media Type\",\n+  416: \"Range Not Satisfiable\",\n+  417: \"Expectation Failed\",\n+  418: \"I'm a Teapot\",\n+  421: \"Misdirected Request\",\n+  422: \"Unprocessable Entity\",\n+  423: \"Locked\",\n+  424: \"Failed Dependency\",\n+  425: \"Too Early\",\n+  426: \"Upgrade Required\",\n+  428: \"Precondition Required\",\n+  429: \"Too Many Requests\",\n+  431: \"Request Header Fields Too Large\",\n+  451: \"Unavailable For Legal Reasons\",\n+\n+  500: \"Internal Server Error\",\n+  501: \"Not Implemented\",\n+  502: \"Bad Gateway\",\n+  503: \"Service Unavailable\",\n+  504: \"Gateway Timeout\",\n+  505: \"HTTP Version Not Supported\",\n+  506: \"Variant Also Negotiates\",\n+  507: \"Insufficient Storage\",\n+  508: \"Loop Detected\",\n+  510: \"Not Extended\",\n+  511: \"Network Authentication Required\",\n+});\n+\n+const CODE_BY_REASON = Object.freeze(\n+  Object.fromEntries(\n+    Object.entries(STATUS_CODES).map(([code, reason]) => [reason, Number(code)])\n+  )\n+);\n+\n+export function getReasonPhrase(code) {\n+  const numeric = Number(code);\n+  return STATUS_CODES[numeric];\n+}\n+\n+export function getStatusCode(reason) {\n+  return CODE_BY_REASON[reason];\n+}\n+\n+export function isStatusCode(code) {\n+  const numeric = Number(code);\n+  return Number.isInteger(numeric) && Object.hasOwn(STATUS_CODES, numeric);\n+}\n",
+              "additions": 88,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "test/server.test.js",
+              "patch": "Index: test/server.test.js\n===================================================================\n--- test/server.test.js\t\n+++ test/server.test.js\t\n@@ -0,0 +1,51 @@\n+import { test, before, after } from \"node:test\";\n+import assert from \"node:assert/strict\";\n+import { createServer } from \"../src/server.js\";\n+\n+let server;\n+let baseUrl;\n+\n+before(async () => {\n+  server = createServer();\n+  await new Promise((resolve) => server.listen(0, resolve));\n+  baseUrl = `http://localhost:${server.address().port}`;\n+});\n+\n+after(() => new Promise((resolve) => server.close(resolve)));\n+\n+test(\"GET /health returns 200 OK\", async () => {\n+  const res = await fetch(`${baseUrl}/health`);\n+  assert.equal(res.status, 200);\n+  assert.deepEqual(await res.json(), { status: 200, reason: \"OK\" });\n+});\n+\n+test(\"GET /status returns the full lookup table\", async () => {\n+  const res = await fetch(`${baseUrl}/status`);\n+  assert.equal(res.status, 200);\n+  const body = await res.json();\n+  assert.equal(body[\"200\"], \"OK\");\n+  assert.equal(body[\"404\"], \"Not Found\");\n+  assert.equal(body[\"503\"], \"Service Unavailable\");\n+});\n+\n+test(\"GET /status/:code mirrors the code and reason phrase\", async () => {\n+  const res = await fetch(`${baseUrl}/status/404`);\n+  assert.equal(res.status, 404);\n+  assert.deepEqual(await res.json(), { status: 404, reason: \"Not Found\" });\n+});\n+\n+test(\"GET /status/:code with an unknown code returns 404\", async () => {\n+  const res = await fetch(`${baseUrl}/status/999`);\n+  assert.equal(res.status, 404);\n+});\n+\n+test(\"bodyless status codes return an empty body\", async () => {\n+  const res = await fetch(`${baseUrl}/status/204`);\n+  assert.equal(res.status, 204);\n+  assert.equal(await res.text(), \"\");\n+});\n+\n+test(\"unknown routes return 404\", async () => {\n+  const res = await fetch(`${baseUrl}/does-not-exist`);\n+  assert.equal(res.status, 404);\n+});\n",
+              "additions": 51,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "test/status-codes.test.js",
+              "patch": "Index: test/status-codes.test.js\n===================================================================\n--- test/status-codes.test.js\t\n+++ test/status-codes.test.js\t\n@@ -0,0 +1,39 @@\n+import { test } from \"node:test\";\n+import assert from \"node:assert/strict\";\n+import {\n+  STATUS_CODES,\n+  getReasonPhrase,\n+  getStatusCode,\n+  isStatusCode,\n+} from \"../src/status-codes.js\";\n+\n+test(\"maps well-known codes to their reason phrases\", () => {\n+  assert.equal(getReasonPhrase(200), \"OK\");\n+  assert.equal(getReasonPhrase(301), \"Moved Permanently\");\n+  assert.equal(getReasonPhrase(404), \"Not Found\");\n+  assert.equal(getReasonPhrase(500), \"Internal Server Error\");\n+});\n+\n+test(\"getReasonPhrase accepts numeric strings\", () => {\n+  assert.equal(getReasonPhrase(\"418\"), \"I'm a Teapot\");\n+});\n+\n+test(\"getReasonPhrase returns undefined for unknown codes\", () => {\n+  assert.equal(getReasonPhrase(999), undefined);\n+});\n+\n+test(\"getStatusCode performs the reverse lookup\", () => {\n+  assert.equal(getStatusCode(\"No Content\"), 204);\n+  assert.equal(getStatusCode(\"Not a real phrase\"), undefined);\n+});\n+\n+test(\"isStatusCode validates known codes\", () => {\n+  assert.equal(isStatusCode(200), true);\n+  assert.equal(isStatusCode(\"418\"), true);\n+  assert.equal(isStatusCode(999), false);\n+  assert.equal(isStatusCode(\"nope\"), false);\n+});\n+\n+test(\"lookup table is frozen\", () => {\n+  assert.equal(Object.isFrozen(STATUS_CODES), true);\n+});\n",
+              "additions": 39,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Set up a new Node.js HTTP server project that needs a lookup table of HTTP status codes and their standard reason phrases.\"",
+          "id": "prt_0ecb513fd001kOsH7KATXR3C5d",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb513f7001NYkB4ridn3id5h"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000099054,
+        "tokens": {
+          "total": 7433,
+          "input": 181,
+          "output": 41,
+          "reasoning": 43,
+          "cache": {
+            "write": 0,
+            "read": 7168
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790677686516,
+          "completed": 1790677688500
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecb518f4001gjwCfUVBO3FVAZ",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-start",
+          "id": "prt_0ecb51d24001N8jWLHmMDjUbOT",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb518f4001gjwCfUVBO3FVAZ"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants me to set up a new Node.js HTTP server project that needs a lookup table of HTTP status codes and their standard reason phrases. Let me first look at the current directory to understand what's there.",
+          "time": {
+            "start": 1790677688116,
+            "end": 1790677688272
+          },
+          "id": "prt_0ecb51f340011Sk8mqLLUoQEgG",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb518f4001gjwCfUVBO3FVAZ"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_I3Y3FTzK6Ta0nzXVaV305316",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la /work"
+            },
+            "output": "total 8\ndrwxr-xr-x 5  501 dialout  160 Sep 29  2026 .\ndrwxr-xr-x 1 root root    4096 Sep 29 10:28 ..\ndrwxr-xr-x 9  501 dialout  288 Sep 29  2026 .git\ndrwxr-xr-x 4  501 dialout  128 Sep 29  2026 .opencode\n-rw-r--r-- 1  501 dialout   51 Sep 29  2026 opencode.json\n",
+            "metadata": {
+              "output": "total 8\ndrwxr-xr-x 5  501 dialout  160 Sep 29  2026 .\ndrwxr-xr-x 1 root root    4096 Sep 29 10:28 ..\ndrwxr-xr-x 9  501 dialout  288 Sep 29  2026 .git\ndrwxr-xr-x 4  501 dialout  128 Sep 29  2026 .opencode\n-rw-r--r-- 1  501 dialout   51 Sep 29  2026 opencode.json\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "ls -la /work",
+            "time": {
+              "start": 1790677688326,
+              "end": 1790677688412
+            }
+          },
+          "id": "prt_0ecb51fd3001R56G0VRrMd7zkg",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb518f4001gjwCfUVBO3FVAZ"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7433,
+            "input": 181,
+            "output": 41,
+            "reasoning": 43,
+            "cache": {
+              "write": 0,
+              "read": 7168
+            }
+          },
+          "cost": 0.000099054,
+          "id": "prt_0ecb5208a001KMQsykZf9PBv70",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb518f4001gjwCfUVBO3FVAZ"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000131172,
+        "tokens": {
+          "total": 7709,
+          "input": 138,
+          "output": 132,
+          "reasoning": 15,
+          "cache": {
+            "write": 0,
+            "read": 7424
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790677688503,
+          "completed": 1790677689985
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecb520b7001lLo0PV4QJxu4Dn",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-start",
+          "id": "prt_0ecb5233e001mcD2eTRpvT5ju8",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb520b7001lLo0PV4QJxu4Dn"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me look at the git repo and opencode.json to understand context.",
+          "time": {
+            "start": 1790677689400,
+            "end": 1790677689579
+          },
+          "id": "prt_0ecb52438001o00hd3ixp3oSYa",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb520b7001lLo0PV4QJxu4Dn"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_D7o4B70Wzgjxx6yXBLT73216",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cat /work/opencode.json; echo \"---\"; git -C /work log --oneline -10 2>/dev/null; echo \"---\"; git -C /work status"
+            },
+            "output": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n---\n---\nOn branch main\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\topencode.json\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n",
+            "metadata": {
+              "output": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n---\n---\nOn branch main\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\topencode.json\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cat /work/opencode.json; echo \"---\"; git -C /work log --oneline -10 2>/dev/null; echo \"---\"; git -C /work status",
+            "time": {
+              "start": 1790677689709,
+              "end": 1790677689744
+            }
+          },
+          "id": "prt_0ecb524ed001k6k9cPQJjvo5mO",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb520b7001lLo0PV4QJxu4Dn"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_01_m1gL4aI1gX1H78Rc1N2A5516",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la /work/.opencode; find /work/.opencode -type f -not -path '*/.git/*' | head -50"
+            },
+            "output": "total 4\ndrwxr-xr-x 4  501 dialout 128 Sep 29  2026 .\ndrwxr-xr-x 5 root root    160 Sep 29  2026 ..\n-rw-r--r-- 1  501 dialout  63 Sep 29  2026 .gitignore\ndrwxr-xr-x 2  501 dialout  64 Sep 29  2026 plugins\n/work/.opencode/.gitignore\n",
+            "metadata": {
+              "output": "total 4\ndrwxr-xr-x 4  501 dialout 128 Sep 29  2026 .\ndrwxr-xr-x 5 root root    160 Sep 29  2026 ..\n-rw-r--r-- 1  501 dialout  63 Sep 29  2026 .gitignore\ndrwxr-xr-x 2  501 dialout  64 Sep 29  2026 plugins\n/work/.opencode/.gitignore\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "ls -la /work/.opencode; find /work/.opencode -type f -not -path '*/.git/*' | head -50",
+            "time": {
+              "start": 1790677689866,
+              "end": 1790677689884
+            }
+          },
+          "id": "prt_0ecb52571001UQ8bAxA7wDKqwC",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb520b7001lLo0PV4QJxu4Dn"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7709,
+            "input": 138,
+            "output": 132,
+            "reasoning": 15,
+            "cache": {
+              "write": 0,
+              "read": 7424
+            }
+          },
+          "cost": 0.000131172,
+          "id": "prt_0ecb52659001RIqQEq1aeRjr8s",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb520b7001lLo0PV4QJxu4Dn"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00024969,
+        "tokens": {
+          "total": 8222,
+          "input": 219,
+          "output": 117,
+          "reasoning": 206,
+          "cache": {
+            "write": 0,
+            "read": 7680
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790677689991,
+          "completed": 1790678166680
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecb52687001Xmz9HiUo1Qc8Z9",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-start",
+          "id": "prt_0ecbc64db001hb5mDfGPbWxecW",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb52687001Xmz9HiUo1Qc8Z9"
+        },
+        {
+          "type": "reasoning",
+          "text": "This is essentially an empty project. The user wants to set up a Node.js HTTP server project with a lookup table of HTTP status codes and their standard reason phrases.\n\nLet me think about this. There's a built-in Node.js module `http.STATUS_CODES` that provides exactly this. I could use that. But the user says \"needs a lookup table of HTTP status codes and their standard reason phrases.\" Maybe they want an actual generated lookup table.\n\nLet me plan:\n1. Initialize a package.json\n2. Create an HTTP server (server.js)\n3. Create a status codes lookup module (status-codes.js) with the table\n4. Maybe tests\n\nBut wait — there might be a hidden twist. Let me reconsider. The task is fairly straightforward. Let me just build it well with the standard structure. I should be careful not to over-engineer (no comments per instructions).\n\nLet me check the .opencode .gitignore to see patterns and whether there's a plugin that matters.",
+          "time": {
+            "start": 1790678165128,
+            "end": 1790678165941
+          },
+          "id": "prt_0ecbc6688001FNw2mvnrmoSymW",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb52687001Xmz9HiUo1Qc8Z9"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_BtXuIkPbI85MkWNQB5kn4225",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cat /work/.opencode/.gitignore; echo \"---plugins---\"; ls -la /work/.opencode/plugins; find /work/.opencode/plugins -type f -exec echo {} \\; -exec cat {} \\;"
+            },
+            "output": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore---plugins---\ntotal 0\ndrwxr-xr-x 2  501 dialout  64 Sep 29 10:35 .\ndrwxr-xr-x 5 root root    160 Sep 29 10:36 ..\n",
+            "metadata": {
+              "output": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore---plugins---\ntotal 0\ndrwxr-xr-x 2  501 dialout  64 Sep 29 10:35 .\ndrwxr-xr-x 5 root root    160 Sep 29 10:36 ..\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cat /work/.opencode/.gitignore; echo \"---plugins---\"; ls -la /work/.opencode/plugins; find /work/.opencode/plugins -type f -exec echo {} \\; -exec cat {} \\;",
+            "time": {
+              "start": 1790678166053,
+              "end": 1790678166077
+            }
+          },
+          "id": "prt_0ecbc69b8001gm1aNbR7jcroVU",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb52687001Xmz9HiUo1Qc8Z9"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_01_zPZs7PDgoAowEJLPrJId9641",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "node --version; npm --version"
+            },
+            "output": "v18.20.4\n9.2.0\n",
+            "metadata": {
+              "output": "v18.20.4\n9.2.0\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "node --version; npm --version",
+            "time": {
+              "start": 1790678166141,
+              "end": 1790678166583
+            }
+          },
+          "id": "prt_0ecbc6a340010G22KKFOtwbynT",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb52687001Xmz9HiUo1Qc8Z9"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8222,
+            "input": 219,
+            "output": 117,
+            "reasoning": 206,
+            "cache": {
+              "write": 0,
+              "read": 7680
+            }
+          },
+          "cost": 0.00024969,
+          "id": "prt_0ecbc6c67001pwXmTtitVb7TEp",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecb52687001Xmz9HiUo1Qc8Z9"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.002036292,
+        "tokens": {
+          "total": 11611,
+          "input": 258,
+          "output": 160,
+          "reasoning": 3129,
+          "cache": {
+            "write": 0,
+            "read": 8064
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678166684,
+          "completed": 1790678178411
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecbc6c9c001wp5MEY65zsuF6R",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-start",
+          "id": "prt_0ecbc6eae001TtIVSuogE2p7QB",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc6c9c001wp5MEY65zsuF6R"
+        },
+        {
+          "type": "reasoning",
+          "text": "Interesting - the `.opencode/.gitignore` ignores package.json which is odd. Wait, that's `.opencode/.gitignore` so it only applies to the `.opencode` directory. That's standard for opencode.\n\nNow let me set up the project. The user wants a Node.js HTTP server project with a lookup table of HTTP status codes and reason phrases.\n\nLet me create:\n- `package.json`\n- `src/status-codes.js` - lookup table\n- `src/server.js` - HTTP server\n- maybe `test/` tests using node:test (built-in, Node 18 has node:test)\n\nActually, Node 18.20 has `node:test`. Let me use it.\n\nLet me think about what the status codes table should contain. Standard IANA HTTP status codes with reason phrases. I'll include 1xx-5xx.\n\nActually, `http.STATUS_CODES` in Node provides this. But having an explicit lookup table is what's requested. I could seed from `http.STATUS_CODES` but that feels like a cop-out. The user explicitly wants a lookup table. Let me build a comprehensive one.\n\nLet me plan the structure:\n\n```\npackage.json\nsrc/\n  status-codes.js\n  server.js\ntest/\n  status-codes.test.js\n  server.test.js\n```\n\nstatus-codes.js:\n```js\nconst STATUS_CODES = {\n  100: \"Continue\",\n  ...\n};\n\nfunction getReasonPhrase(code) {\n  return STATUS_CODES[code];\n}\n\nfunction isStatusCode(code) ...\n```\n\nHmm, let me not over-engineer. Let me provide the table plus helpers.\n\nActually, a cleaner design: a frozen object of code->phrase, plus `getReasonPhrase(code)` and maybe `getStatusLine`.\n\nserver.js: simple HTTP server that uses the lookup table to send responses. Maybe a route that echoes a status code, plus a health route.\n\nLet me write a good, complete mini project.\n\nLet me create the files. I'll use ES modules or CommonJS? Node 18. Given no existing convention, I'll use CommonJS for broad compatibility... Actually modern Node projects lean ESM. But ESM with node:test works fine. Let me use ESM with `\"type\": \"module\"`. Hmm, but many prefer CJS. I'll go with ESM as modern default. Actually let me reconsider - simplicity and compatibility. ESM is fine on Node 18.\n\nLet me write the status codes table. Full IANA list:\n\n1xx:\n100 Continue\n101 Switching Protocols\n102 Processing\n103 Early Hints\n\n2xx:\n200 OK\n201 Created\n202 Accepted\n203 Non-Authoritative Information\n204 No Content\n205 Reset Content\n206 Partial Content\n207 Multi-Status\n208 Already Reported\n226 IM Used\n\n3xx:\n300 Multiple Choices\n301 Moved Permanently\n302 Found\n303 See Other\n304 Not Modified\n305 Use Proxy\n307 Temporary Redirect\n308 Permanent Redirect\n\n4xx:\n400 Bad Request\n401 Unauthorized\n402 Payment Required\n403 Forbidden\n404 Not Found\n405 Method Not Allowed\n406 Not Acceptable\n407 Proxy Authentication Required\n408 Request Timeout\n409 Conflict\n410 Gone\n411 Length Required\n412 Precondition Failed\n413 Payload Too Large\n414 URI Too Long\n415 Unsupported Media Type\n416 Range Not Satisfiable\n417 Expectation Failed\n418 I'm a teapot (RFC 2324/7168; Node uses \"I'm a Teapot\" capitalization)\n421 Misdirected Request\n422 Unprocessable Entity\n423 Locked\n424 Failed Dependency\n425 Too Early\n426 Upgrade Required\n428 Precondition Required\n429 Too Many Requests\n431 Request Header Fields Too Large\n451 Unavailable For Legal Reasons\n\n5xx:\n500 Internal Server Error\n501 Not Implemented\n502 Bad Gateway\n503 Service Unavailable\n504 Gateway Timeout\n505 HTTP Version Not Supported\n506 Variant Also Negotiates\n507 Insufficient Storage\n508 Loop Detected\n510 Not Extended\n511 Network Authentication Required\n\nThat's comprehensive.\n\nNow let me build. I'll make the table the source of truth, and add a reverse map maybe. Keep it focused.\n\nLet me use a todo list since this is multi-step. Actually it's ~4 files, moderately multi-step. I'll use a short todo list.\n\nLet me create files.\n\npackage.json:\n```json\n{\n  \"name\": \"http-status-server\",\n  \"version\": \"1.0.0\",\n  \"description\": \"Node.js HTTP server with a lookup table of HTTP status codes and reason phrases\",\n  \"type\": \"module\",\n  \"main\": \"src/server.js\",\n  \"scripts\": {\n    \"start\": \"node src/server.js\",\n    \"test\": \"node --test\"\n  },\n  \"engines\": { \"node\": \">=18\" },\n  \"license\": \"MIT\"\n}\n```\n\nstatus-codes.js:\n```js\nexport const STATUS_CODES = Object.freeze({\n  100: \"Continue\",\n  ...\n});\n\nconst REASON_PHRASES = Object.freeze(\n  Object.fromEntries(Object.entries(STATUS_CODES).map(([code, phrase]) => [phrase, Number(code)]))\n);\n\nexport function getReasonPhrase(code) {\n  const numeric = Number(code);\n  if (!Number.isInteger(numeric)) return undefined;\n  return STATUS_CODES[numeric];\n}\n\nexport function getStatusCode(phrase) {\n  ...\n}\n\nexport function isStatusCode(code) {\n  return Object.prototype.hasOwnProperty.call(STATUS_CODES, Number(code));\n}\n```\n\nHmm, phrase reverse lookup - phrases may be ambiguous? \"Continue\" etc are unique. Fine.\n\nActually keeping it lean: table + getReasonPhrase + isStatusCode. Reverse lookup maybe useful. I'll include getStatusCode too but keep it simple.\n\nserver.js:\n```js\nimport http from \"node:http\";\nimport { getReasonPhrase, isStatusCode, STATUS_CODES } from \"./status-codes.js\";\n\nconst DEFAULT_PORT = 3000;\n\nexport function createServer() {\n  return http.createServer((req, res) => {\n    const url = new URL(req.url, `http://${req.headers.host ?? \"localhost\"}`);\n    ...\n  });\n}\n```\n\nRoutes:\n- GET /status -> JSON of all status codes\n- GET /status/:code -> returns that status with reason phrase\n- GET /health -> 200 OK\n- fallback 404\n\nI need to handle path parsing. Let's write it.\n\n```js\nfunction send(res, statusCode, body, contentType = \"application/json\") {\n  res.writeHead(statusCode, { \"Content-Type\": contentType });\n  res.end(typeof body === \"string\" ? body : JSON.stringify(body));\n}\n```\n\nActually `server.js` should also start the server when run directly. With ESM, detect `import.meta.url === pathToFileURL(process.argv[1]).href`.\n\nLet me write it.\n\nLet me also add tests.\n\ntest/status-codes.test.js using node:test and node:assert.\n\nLet me write files now.\n\nFor the server, let me make it clean:\n\n```js\nimport http from \"node:http\";\nimport { pathToFileURL } from \"node:url\";\nimport { STATUS_CODES, getReasonPhrase, isStatusCode } from \"./status-codes.js\";\n\nconst DEFAULT_PORT = Number(process.env.PORT) || 3000;\n\nfunction sendJson(res, statusCode, payload) {\n  const body = JSON.stringify(payload);\n  res.writeHead(statusCode, {\n    \"Content-Type\": \"application/json; charset=utf-8\",\n    \"Content-Length\": Buffer.byteLength(body),\n  });\n  res.end(body);\n}\n\nexport function requestHandler(req, res) {\n  const { pathname } = new URL(req.url, `http://${req.headers.host ?? \"localhost\"}`);\n\n  if (req.method === \"GET\" && pathname === \"/health\") {\n    return sendJson(res, 200, { status: 200, reason: getReasonPhrase(200) });\n  }\n\n  if (req.method === \"GET\" && pathname === \"/status\") {\n    return sendJson(res, 200, STATUS_CODES);\n  }\n\n  const match = pathname.match(/^\\/status\\/(\\d{3})$/);\n  if (req.method === \"GET\" && match) {\n    const code = Number(match[1]);\n    if (!isStatusCode(code)) {\n      return sendJson(res, 404, { error: `Unknown status code: ${match[1]}` });\n    }\n    return sendJson(res, code, { status: code, reason: getReasonPhrase(code) });\n  }\n\n  return sendJson(res, 404, { status: 404, reason: getReasonPhrase(404) });\n}\n\nexport function createServer() {\n  return http.createServer(requestHandler);\n}\n\nfunction start() {\n  const server = createServer();\n  server.listen(DEFAULT_PORT, () => {\n    const { port } = server.address();\n    console.log(`HTTP server listening on http://localhost:${port}`);\n  });\n  return server;\n}\n\nif (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {\n  start();\n}\n```\n\nWait: sending a body with status codes like 204/304 is not allowed; Node may complain about Content-Length with 204. For the /status/:code route, if code is 204 or 304, writing a body would be invalid. Let me handle that: for 204, 304, and 1xx, don't send a body. Actually Node's http will throw for 204 with body? Let me handle no-content codes.\n\nLet me add:\n```js\nconst NO_BODY_STATUS = new Set([204, 205, 304]);\n```\nActually 205 Reset Content should have no body too. 1xx are informational and can't be final responses normally. To keep it robust, if code < 200 or code in NO_BODY, just `res.writeHead(code); res.end();` with no body. But then the endpoint loses its JSON. That's fine; it's semantically correct.\n\nHmm, but returning status 100 as a response doesn't work in Node. Let me restrict the /status/:code endpoint to >= 200? Or just handle gracefully. I'll handle: for 1xx and no-body codes, send no body. Node may throw for 1xx \"writeHead\" - actually Node allows res.writeHead(100) but then you'd need another response. It's an edge case. Let me just guard codes < 200 to return 400 error saying use of informational codes not supported? Over-engineering.\n\nSimpler: only handle codes 200-599, and for 204/205/304 omit body. For 1xx return 400. Fine.\n\nLet me update:\n\n```js\nconst EMPTY_BODY = new Set([204, 205, 304]);\n\nif (code < 200 || code > 599) {\n  return sendJson(res, 400, { error: `Status code ${code} cannot be used as a response` });\n}\nif (EMPTY_BODY.has(code)) {\n  res.writeHead(code);\n  res.end();\n  return;\n}\nreturn sendJson(res, code, ...);\n```\n\nThat's clean enough.\n\nNow tests. server.test.js can start the server on port 0 and fetch. Node 18 has global fetch. Good.\n\n```js\nimport { test, before, after } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { createServer } from \"../src/server.js\";\n\nlet server;\nlet baseUrl;\n\nbefore(async () => {\n  server = createServer();\n  await new Promise((resolve) => server.listen(0, resolve));\n  baseUrl = `http://localhost:${server.address().port}`;\n});\n\nafter(() => new Promise((resolve) => server.close(resolve)));\n\ntest(\"GET /health returns 200\", async () => {\n  const res = await fetch(`${baseUrl}/health`);\n  assert.equal(res.status, 200);\n  assert.deepEqual(await res.json(), { status: 200, reason: \"OK\" });\n});\n\ntest(\"GET /status returns the full lookup table\", async () => {\n  const res = await fetch(`${baseUrl}/status`);\n  const body = await res.json();\n  assert.equal(body[\"404\"], \"Not Found\");\n});\n\ntest(\"GET /status/404 mirrors the code and reason\", async () => {\n  const res = await fetch(`${baseUrl}/status/404`);\n  assert.equal(res.status, 404);\n  assert.deepEqual(await res.json(), { status: 404, reason: \"Not Found\" });\n});\n\ntest(\"unknown status code returns 404\", async () => {\n  const res = await fetch(`${baseUrl}/status/999`);\n  assert.equal(res.status, 404);\n});\n\ntest(\"204 returns no body\", async () => {\n  const res = await fetch(`${baseUrl}/status/204`);\n  assert.equal(res.status, 204);\n  assert.equal(await res.text(), \"\");\n});\n\ntest(\"unknown route returns 404\", async () => {\n  const res = await fetch(`${baseUrl}/nope`);\n  assert.equal(res.status, 404);\n});\n```\n\nWait, fetch with 204 - res.text() returns \"\". Good.\n\nstatus-codes.test.js:\n```js\nimport { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { STATUS_CODES, getReasonPhrase, isStatusCode } from \"../src/status-codes.js\";\n\ntest(\"maps well-known codes\", () => {\n  assert.equal(getReasonPhrase(200), \"OK\");\n  assert.equal(getReasonPhrase(404), \"Not Found\");\n  assert.equal(getReasonPhrase(500), \"Internal Server Error\");\n});\n\ntest(\"getReasonPhrase accepts numeric strings\", () => {\n  assert.equal(getReasonPhrase(\"301\"), \"Moved Permanently\");\n});\n\ntest(\"getReasonPhrase returns undefined for unknown codes\", () => {\n  assert.equal(getReasonPhrase(999), undefined);\n});\n\ntest(\"isStatusCode\", () => {\n  assert.equal(isStatusCode(200), true);\n  assert.equal(isStatusCode(\"418\"), true);\n  assert.equal(isStatusCode(999), false);\n});\n\ntest(\"table is frozen\", () => {\n  assert.equal(Object.isFrozen(STATUS_CODES), true);\n});\n```\n\nNow let me write the files. Let me create a todo list first.\n\nActually the task is small enough. But guidance says 3+ distinct steps. I'll do a brief todo list.\n\nLet me write the files with the write tool. Since they're new files, no read needed.\n\nLet me be careful with status-codes.js completeness.\n\nLet me write it.",
+          "time": {
+            "start": 1790678167461,
+            "end": 1790678178026
+          },
+          "id": "prt_0ecbc6fa5001PTBbjM0IVSGVXN",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc6c9c001wp5MEY65zsuF6R"
+        },
+        {
+          "type": "text",
+          "text": "I'll set up the project: a status-code lookup module, an HTTP server that uses it, and tests.",
+          "time": {
+            "start": 1790678178030,
+            "end": 1790678178358
+          },
+          "id": "prt_0ecbc98ee001dtOSyTlzmpico4",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc6c9c001wp5MEY65zsuF6R"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_zTeKR3PNwqWcl7WSBxaj2197",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Create package.json and project scaffolding",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP status code lookup table module",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP server that uses the lookup table",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify they pass",
+                  "status": "pending",
+                  "priority": "medium"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Create package.json and project scaffolding\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add HTTP status code lookup table module\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add HTTP server that uses the lookup table\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests and verify they pass\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Create package.json and project scaffolding",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP status code lookup table module",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP server that uses the lookup table",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify they pass",
+                  "status": "pending",
+                  "priority": "medium"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "4 todos",
+            "time": {
+              "start": 1790678178353,
+              "end": 1790678178356
+            }
+          },
+          "id": "prt_0ecbc98f40010Mfu46n34xS8xk",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc6c9c001wp5MEY65zsuF6R"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-finish",
+          "tokens": {
+            "total": 11611,
+            "input": 258,
+            "output": 160,
+            "reasoning": 3129,
+            "cache": {
+              "write": 0,
+              "read": 8064
+            }
+          },
+          "cost": 0.002036292,
+          "id": "prt_0ecbc9a49001qsZDldiXykwqOF",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc6c9c001wp5MEY65zsuF6R"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00058446,
+        "tokens": {
+          "total": 12609,
+          "input": 230,
+          "output": 859,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 11520
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678178417,
+          "completed": 1790678182222
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecbc9a710016qf3V6qEZiG072",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "type": "step-start",
+          "id": "prt_0ecbc9e86001DhSOlSS0LBDGgT",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc9a710016qf3V6qEZiG072"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_GQGbgaIJ39GbXRdtEZ908474",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/package.json",
+              "content": "{\n  \"name\": \"http-status-server\",\n  \"version\": \"1.0.0\",\n  \"description\": \"Node.js HTTP server backed by a lookup table of HTTP status codes and reason phrases\",\n  \"type\": \"module\",\n  \"main\": \"src/server.js\",\n  \"exports\": {\n    \".\": \"./src/server.js\",\n    \"./status-codes\": \"./src/status-codes.js\"\n  },\n  \"scripts\": {\n    \"start\": \"node src/server.js\",\n    \"test\": \"node --test\"\n  },\n  \"engines\": {\n    \"node\": \">=18\"\n  },\n  \"license\": \"MIT\"\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/package.json",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "package.json",
+            "time": {
+              "start": 1790678180542,
+              "end": 1790678180550
+            }
+          },
+          "id": "prt_0ecbca108001692S2pBg2Rak5f",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc9a710016qf3V6qEZiG072"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_01_ET_lydOBCs0o6y6Z9k8Tqgi0305",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/src/status-codes.js",
+              "content": "export const STATUS_CODES = Object.freeze({\n  100: \"Continue\",\n  101: \"Switching Protocols\",\n  102: \"Processing\",\n  103: \"Early Hints\",\n\n  200: \"OK\",\n  201: \"Created\",\n  202: \"Accepted\",\n  203: \"Non-Authoritative Information\",\n  204: \"No Content\",\n  205: \"Reset Content\",\n  206: \"Partial Content\",\n  207: \"Multi-Status\",\n  208: \"Already Reported\",\n  226: \"IM Used\",\n\n  300: \"Multiple Choices\",\n  301: \"Moved Permanently\",\n  302: \"Found\",\n  303: \"See Other\",\n  304: \"Not Modified\",\n  305: \"Use Proxy\",\n  307: \"Temporary Redirect\",\n  308: \"Permanent Redirect\",\n\n  400: \"Bad Request\",\n  401: \"Unauthorized\",\n  402: \"Payment Required\",\n  403: \"Forbidden\",\n  404: \"Not Found\",\n  405: \"Method Not Allowed\",\n  406: \"Not Acceptable\",\n  407: \"Proxy Authentication Required\",\n  408: \"Request Timeout\",\n  409: \"Conflict\",\n  410: \"Gone\",\n  411: \"Length Required\",\n  412: \"Precondition Failed\",\n  413: \"Payload Too Large\",\n  414: \"URI Too Long\",\n  415: \"Unsupported Media Type\",\n  416: \"Range Not Satisfiable\",\n  417: \"Expectation Failed\",\n  418: \"I'm a Teapot\",\n  421: \"Misdirected Request\",\n  422: \"Unprocessable Entity\",\n  423: \"Locked\",\n  424: \"Failed Dependency\",\n  425: \"Too Early\",\n  426: \"Upgrade Required\",\n  428: \"Precondition Required\",\n  429: \"Too Many Requests\",\n  431: \"Request Header Fields Too Large\",\n  451: \"Unavailable For Legal Reasons\",\n\n  500: \"Internal Server Error\",\n  501: \"Not Implemented\",\n  502: \"Bad Gateway\",\n  503: \"Service Unavailable\",\n  504: \"Gateway Timeout\",\n  505: \"HTTP Version Not Supported\",\n  506: \"Variant Also Negotiates\",\n  507: \"Insufficient Storage\",\n  508: \"Loop Detected\",\n  510: \"Not Extended\",\n  511: \"Network Authentication Required\",\n});\n\nconst CODE_BY_REASON = Object.freeze(\n  Object.fromEntries(\n    Object.entries(STATUS_CODES).map(([code, reason]) => [reason, Number(code)])\n  )\n);\n\nexport function getReasonPhrase(code) {\n  const numeric = Number(code);\n  return STATUS_CODES[numeric];\n}\n\nexport function getStatusCode(reason) {\n  return CODE_BY_REASON[reason];\n}\n\nexport function isStatusCode(code) {\n  const numeric = Number(code);\n  return Number.isInteger(numeric) && Object.hasOwn(STATUS_CODES, numeric);\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/status-codes.js",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/status-codes.js",
+            "time": {
+              "start": 1790678182124,
+              "end": 1790678182132
+            }
+          },
+          "id": "prt_0ecbca2c9001b2sIIYYhknfOdX",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc9a710016qf3V6qEZiG072"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "02fe3c29976624a6471f962280937339a2bb1526",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12609,
+            "input": 230,
+            "output": 859,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 11520
+            }
+          },
+          "cost": 0.00058446,
+          "id": "prt_0ecbca92f001wfzMErG7pmtFcR",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc9a710016qf3V6qEZiG072"
+        },
+        {
+          "type": "patch",
+          "hash": "03def09e2838f4009feebe5d12a8772eeacca4bb",
+          "files": [
+            "/work/package.json",
+            "/work/src/status-codes.js"
+          ],
+          "id": "prt_0ecbca94c001P0Fp4H7eiHXPLg",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbc9a710016qf3V6qEZiG072"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000918198,
+        "tokens": {
+          "total": 14050,
+          "input": 221,
+          "output": 1409,
+          "reasoning": 4,
+          "cache": {
+            "write": 0,
+            "read": 12416
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678182225,
+          "completed": 1790678186970
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecbca951001zISyFNM8jyIMec",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "02fe3c29976624a6471f962280937339a2bb1526",
+          "type": "step-start",
+          "id": "prt_0ecbcab64001k3EmgO3QBvPoe5",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now the server.",
+          "time": {
+            "start": 1790678183233,
+            "end": 1790678183319
+          },
+          "id": "prt_0ecbcad41001Pm4QQNpyKo14P5",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_YoKOBYopfHA3FrDLAQUr3491",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "import http from \"node:http\";\nimport { pathToFileURL } from \"node:url\";\nimport { STATUS_CODES, getReasonPhrase, isStatusCode } from \"./status-codes.js\";\n\nconst EMPTY_BODY_CODES = new Set([204, 205, 304]);\n\nfunction sendJson(res, statusCode, payload) {\n  const body = JSON.stringify(payload);\n  res.writeHead(statusCode, {\n    \"Content-Type\": \"application/json; charset=utf-8\",\n    \"Content-Length\": Buffer.byteLength(body),\n  });\n  res.end(body);\n}\n\nexport function requestHandler(req, res) {\n  const { pathname } = new URL(req.url, `http://${req.headers.host ?? \"localhost\"}`);\n\n  if (req.method === \"GET\" && pathname === \"/health\") {\n    return sendJson(res, 200, { status: 200, reason: getReasonPhrase(200) });\n  }\n\n  if (req.method === \"GET\" && pathname === \"/status\") {\n    return sendJson(res, 200, STATUS_CODES);\n  }\n\n  const match = /^\\/status\\/(\\d{3})$/.exec(pathname);\n  if (req.method === \"GET\" && match) {\n    const code = Number(match[1]);\n\n    if (!isStatusCode(code)) {\n      return sendJson(res, 404, { error: `Unknown status code: ${match[1]}` });\n    }\n    if (code < 200 || code > 599) {\n      return sendJson(res, 400, { error: `Status code ${code} cannot be sent as a response` });\n    }\n    if (EMPTY_BODY_CODES.has(code)) {\n      res.writeHead(code);\n      return res.end();\n    }\n    return sendJson(res, code, { status: code, reason: getReasonPhrase(code) });\n  }\n\n  return sendJson(res, 404, { status: 404, reason: getReasonPhrase(404) });\n}\n\nexport function createServer() {\n  return http.createServer(requestHandler);\n}\n\nif (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {\n  const port = Number(process.env.PORT) || 3000;\n  const server = createServer();\n  server.listen(port, () => {\n    console.log(`HTTP server listening on http://localhost:${server.address().port}`);\n  });\n}\n",
+              "filePath": "/work/src/server.js"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/server.js",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/server.js",
+            "time": {
+              "start": 1790678184668,
+              "end": 1790678184673
+            }
+          },
+          "id": "prt_0ecbcad99001UPiGBy6xF5Scfc",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_01_d8u5ZkdRZm3glt1WhLSs4370",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport {\n  STATUS_CODES,\n  getReasonPhrase,\n  getStatusCode,\n  isStatusCode,\n} from \"../src/status-codes.js\";\n\ntest(\"maps well-known codes to their reason phrases\", () => {\n  assert.equal(getReasonPhrase(200), \"OK\");\n  assert.equal(getReasonPhrase(301), \"Moved Permanently\");\n  assert.equal(getReasonPhrase(404), \"Not Found\");\n  assert.equal(getReasonPhrase(500), \"Internal Server Error\");\n});\n\ntest(\"getReasonPhrase accepts numeric strings\", () => {\n  assert.equal(getReasonPhrase(\"418\"), \"I'm a Teapot\");\n});\n\ntest(\"getReasonPhrase returns undefined for unknown codes\", () => {\n  assert.equal(getReasonPhrase(999), undefined);\n});\n\ntest(\"getStatusCode performs the reverse lookup\", () => {\n  assert.equal(getStatusCode(\"No Content\"), 204);\n  assert.equal(getStatusCode(\"Not a real phrase\"), undefined);\n});\n\ntest(\"isStatusCode validates known codes\", () => {\n  assert.equal(isStatusCode(200), true);\n  assert.equal(isStatusCode(\"418\"), true);\n  assert.equal(isStatusCode(999), false);\n  assert.equal(isStatusCode(\"nope\"), false);\n});\n\ntest(\"lookup table is frozen\", () => {\n  assert.equal(Object.isFrozen(STATUS_CODES), true);\n});\n",
+              "filePath": "/work/test/status-codes.test.js"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/test/status-codes.test.js",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "test/status-codes.test.js",
+            "time": {
+              "start": 1790678185547,
+              "end": 1790678185559
+            }
+          },
+          "id": "prt_0ecbcb2ee001Im96zI3Os9bmG9",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_02_LUNRQK7hnHtJ26LkeiS57820",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "import { test, before, after } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { createServer } from \"../src/server.js\";\n\nlet server;\nlet baseUrl;\n\nbefore(async () => {\n  server = createServer();\n  await new Promise((resolve) => server.listen(0, resolve));\n  baseUrl = `http://localhost:${server.address().port}`;\n});\n\nafter(() => new Promise((resolve) => server.close(resolve)));\n\ntest(\"GET /health returns 200 OK\", async () => {\n  const res = await fetch(`${baseUrl}/health`);\n  assert.equal(res.status, 200);\n  assert.deepEqual(await res.json(), { status: 200, reason: \"OK\" });\n});\n\ntest(\"GET /status returns the full lookup table\", async () => {\n  const res = await fetch(`${baseUrl}/status`);\n  assert.equal(res.status, 200);\n  const body = await res.json();\n  assert.equal(body[\"200\"], \"OK\");\n  assert.equal(body[\"404\"], \"Not Found\");\n  assert.equal(body[\"503\"], \"Service Unavailable\");\n});\n\ntest(\"GET /status/:code mirrors the code and reason phrase\", async () => {\n  const res = await fetch(`${baseUrl}/status/404`);\n  assert.equal(res.status, 404);\n  assert.deepEqual(await res.json(), { status: 404, reason: \"Not Found\" });\n});\n\ntest(\"GET /status/:code with an unknown code returns 404\", async () => {\n  const res = await fetch(`${baseUrl}/status/999`);\n  assert.equal(res.status, 404);\n});\n\ntest(\"bodyless status codes return an empty body\", async () => {\n  const res = await fetch(`${baseUrl}/status/204`);\n  assert.equal(res.status, 204);\n  assert.equal(await res.text(), \"\");\n});\n\ntest(\"unknown routes return 404\", async () => {\n  const res = await fetch(`${baseUrl}/does-not-exist`);\n  assert.equal(res.status, 404);\n});\n",
+              "filePath": "/work/test/server.test.js"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/test/server.test.js",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "test/server.test.js",
+            "time": {
+              "start": 1790678186855,
+              "end": 1790678186874
+            }
+          },
+          "id": "prt_0ecbcb665001KwHKTaD7vE7vrw",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14050,
+            "input": 221,
+            "output": 1409,
+            "reasoning": 4,
+            "cache": {
+              "write": 0,
+              "read": 12416
+            }
+          },
+          "cost": 0.000918198,
+          "id": "prt_0ecbcbbb7001ywchy4KPiqUAoh",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        },
+        {
+          "type": "patch",
+          "hash": "02fe3c29976624a6471f962280937339a2bb1526",
+          "files": [
+            "/work/src/server.js",
+            "/work/test/server.test.js",
+            "/work/test/status-codes.test.js"
+          ],
+          "id": "prt_0ecbcbbd8001HefVM1boq6VGOb",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbca951001zISyFNM8jyIMec"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000145356,
+        "tokens": {
+          "total": 14228,
+          "input": 138,
+          "output": 138,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 13952
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678186972,
+          "completed": 1790678188558
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecbcbbdc001Ud33SnWKLu8eOz",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-start",
+          "id": "prt_0ecbcbe4a001Di261BCRbzeiOp",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcbbdc001Ud33SnWKLu8eOz"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_ET_SHZueSsVGTW6LhVzv4bZ2156",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Create package.json and project scaffolding",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add HTTP status code lookup table module",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add HTTP server that uses the lookup table",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add tests and verify they pass",
+                  "priority": "medium",
+                  "status": "in_progress"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Create package.json and project scaffolding\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add HTTP status code lookup table module\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add HTTP server that uses the lookup table\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests and verify they pass\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Create package.json and project scaffolding",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP status code lookup table module",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP server that uses the lookup table",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify they pass",
+                  "status": "in_progress",
+                  "priority": "medium"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "1 todos",
+            "time": {
+              "start": 1790678188500,
+              "end": 1790678188502
+            }
+          },
+          "id": "prt_0ecbcc0e5001xQ2DpBN7D2oveD",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcbbdc001Ud33SnWKLu8eOz"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14228,
+            "input": 138,
+            "output": 138,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 13952
+            }
+          },
+          "cost": 0.000145356,
+          "id": "prt_0ecbcc1f9001xrdL24rKUAYVJv",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcbbdc001Ud33SnWKLu8eOz"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000100074,
+        "tokens": {
+          "total": 14423,
+          "input": 159,
+          "output": 56,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 14208
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678188561,
+          "completed": 1790678194459
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecbcc211001RprQF7TFdrORg6",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-start",
+          "id": "prt_0ecbcc419001ZTqCbDfE0P0qY7",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcc211001RprQF7TFdrORg6"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_PRKOyYTNcpuGXGyybNMl4362",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "npm test",
+              "workdir": "/work"
+            },
+            "output": "\n> http-status-server@1.0.0 test\n> node --test\n\nTAP version 13\n# Subtest: GET /health returns 200 OK\nok 1 - GET /health returns 200 OK\n  ---\n  duration_ms: 56.494917\n  ...\n# Subtest: GET /status returns the full lookup table\nok 2 - GET /status returns the full lookup table\n  ---\n  duration_ms: 3.435167\n  ...\n# Subtest: GET /status/:code mirrors the code and reason phrase\nok 3 - GET /status/:code mirrors the code and reason phrase\n  ---\n  duration_ms: 1.894458\n  ...\n# Subtest: GET /status/:code with an unknown code returns 404\nok 4 - GET /status/:code with an unknown code returns 404\n  ---\n  duration_ms: 1.649125\n  ...\n# Subtest: bodyless status codes return an empty body\nok 5 - bodyless status codes return an empty body\n  ---\n  duration_ms: 2.547291\n  ...\n# Subtest: unknown routes return 404\nok 6 - unknown routes return 404\n  ---\n  duration_ms: 1.581833\n  ...\n# Subtest: maps well-known codes to their reason phrases\nok 7 - maps well-known codes to their reason phrases\n  ---\n  duration_ms: 0.722292\n  ...\n# Subtest: getReasonPhrase accepts numeric strings\nok 8 - getReasonPhrase accepts numeric strings\n  ---\n  duration_ms: 0.070125\n  ...\n# Subtest: getReasonPhrase returns undefined for unknown codes\nok 9 - getReasonPhrase returns undefined for unknown codes\n  ---\n  duration_ms: 0.082458\n  ...\n# Subtest: getStatusCode performs the reverse lookup\nok 10 - getStatusCode performs the reverse lookup\n  ---\n  duration_ms: 0.067625\n  ...\n# Subtest: isStatusCode validates known codes\nok 11 - isStatusCode validates known codes\n  ---\n  duration_ms: 0.0775\n  ...\n# Subtest: lookup table is frozen\nok 12 - lookup table is frozen\n  ---\n  duration_ms: 0.050292\n  ...\n1..12\n# tests 12\n# suites 0\n# pass 12\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4184.452461\n",
+            "metadata": {
+              "output": "\n> http-status-server@1.0.0 test\n> node --test\n\nTAP version 13\n# Subtest: GET /health returns 200 OK\nok 1 - GET /health returns 200 OK\n  ---\n  duration_ms: 56.494917\n  ...\n# Subtest: GET /status returns the full lookup table\nok 2 - GET /status returns the full lookup table\n  ---\n  duration_ms: 3.435167\n  ...\n# Subtest: GET /status/:code mirrors the code and reason phrase\nok 3 - GET /status/:code mirrors the code and reason phrase\n  ---\n  duration_ms: 1.894458\n  ...\n# Subtest: GET /status/:code with an unknown code returns 404\nok 4 - GET /status/:code with an unknown code returns 404\n  ---\n  duration_ms: 1.649125\n  ...\n# Subtest: bodyless status codes return an empty body\nok 5 - bodyless status codes return an empty body\n  ---\n  duration_ms: 2.547291\n  ...\n# Subtest: unknown routes return 404\nok 6 - unknown routes return 404\n  ---\n  duration_ms: 1.581833\n  ...\n# Subtest: maps well-known codes to their reason phrases\nok 7 - maps well-known codes to their reason phrases\n  ---\n  duration_ms: 0.722292\n  ...\n# Subtest: getReasonPhrase accepts numeric strings\nok 8 - getReasonPhrase accepts numeric strings\n  ---\n  duration_ms: 0.070125\n  ...\n# Subtest: getReasonPhrase returns undefined for unknown codes\nok 9 - getReasonPhrase returns undefined for unknown codes\n  ---\n  duration_ms: 0.082458\n  ...\n# Subtest: getStatusCode performs the reverse lookup\nok 10 - getStatusCode performs the reverse lookup\n  ---\n  duration_ms: 0.067625\n  ...\n# Subtest: isStatusCode validates known codes\nok 11 - isStatusCode validates known codes\n  ---\n  duration_ms: 0.0775\n  ...\n# Subtest: lookup table is frozen\nok 12 - lookup table is frozen\n  ---\n  duration_ms: 0.050292\n  ...\n1..12\n# tests 12\n# suites 0\n# pass 12\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4184.452461\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "npm test",
+            "time": {
+              "start": 1790678189898,
+              "end": 1790678194413
+            }
+          },
+          "id": "prt_0ecbcc6f2001mq2ruaJDrg3hu2",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcc211001RprQF7TFdrORg6"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14423,
+            "input": 159,
+            "output": 56,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 14208
+            }
+          },
+          "cost": 0.000100074,
+          "id": "prt_0ecbcd9040010AMSMYaQnCI143",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcc211001RprQF7TFdrORg6"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000236658,
+        "tokens": {
+          "total": 15147,
+          "input": 651,
+          "output": 136,
+          "reasoning": 24,
+          "cache": {
+            "write": 0,
+            "read": 14336
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678194463,
+          "completed": 1790678196098
+        },
+        "finish": "tool-calls",
+        "id": "msg_0ecbcd91f001f05pf9OmafKuob",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-start",
+          "id": "prt_0ecbcdb1f001scyKz6hrsFrxSr",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcd91f001f05pf9OmafKuob"
+        },
+        {
+          "type": "reasoning",
+          "text": "All tests pass. Let me quickly smoke test the server manually. Actually tests cover it. Let me finalize todo.",
+          "time": {
+            "start": 1790678195541,
+            "end": 1790678195811
+          },
+          "id": "prt_0ecbcdd55001Z1btiMfMvztugx",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcd91f001f05pf9OmafKuob"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_mq3fsyetFGX1SwD7yQGc9179",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Create package.json and project scaffolding",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add HTTP status code lookup table module",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add HTTP server that uses the lookup table",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add tests and verify they pass",
+                  "priority": "medium",
+                  "status": "completed"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Create package.json and project scaffolding\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add HTTP status code lookup table module\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add HTTP server that uses the lookup table\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests and verify they pass\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Create package.json and project scaffolding",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP status code lookup table module",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add HTTP server that uses the lookup table",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify they pass",
+                  "status": "completed",
+                  "priority": "medium"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "0 todos",
+            "time": {
+              "start": 1790678196017,
+              "end": 1790678196019
+            }
+          },
+          "id": "prt_0ecbcde65001mBZpTJAsYk24pA",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcd91f001f05pf9OmafKuob"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15147,
+            "input": 651,
+            "output": 136,
+            "reasoning": 24,
+            "cache": {
+              "write": 0,
+              "read": 14336
+            }
+          },
+          "cost": 0.000236658,
+          "id": "prt_0ecbcdf65001lardKfZC9UfiYk",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcd91f001f05pf9OmafKuob"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_0ecb513f7001NYkB4ridn3id5h",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000160512,
+        "tokens": {
+          "total": 15431,
+          "input": 180,
+          "output": 147,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 15104
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1790678196101,
+          "completed": 1790678197822
+        },
+        "finish": "stop",
+        "id": "msg_0ecbcdf850018SPZE7HciJsula",
+        "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE"
+      },
+      "parts": [
+        {
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-start",
+          "id": "prt_0ecbce1bc001WqhjYwmX3B52HZ",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcdf850018SPZE7HciJsula"
+        },
+        {
+          "type": "text",
+          "text": "Done. Project scaffolded with all 12 tests passing.\n\n- `src/status-codes.js` — frozen lookup table (1xx–5xx IANA reason phrases) plus `getReasonPhrase`, `getStatusCode`, `isStatusCode`.\n- `src/server.js` — ESM HTTP server: `GET /health`, `GET /status`, `GET /status/:code` (handles bodyless codes like 204).\n- `test/` — `node:test` suites for the table and server.\n- `package.json` — `npm start`, `npm test` (no dependencies; Node ≥18).\n\nRun with `npm start` (port 3000 or `PORT`).",
+          "time": {
+            "start": 1790678197279,
+            "end": 1790678197770
+          },
+          "id": "prt_0ecbce41f001dD2GDj6dHdB7am",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcdf850018SPZE7HciJsula"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "d2f9ac62c880c27892f511db01a133c270cd2a6e",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15431,
+            "input": 180,
+            "output": 147,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 15104
+            }
+          },
+          "cost": 0.000160512,
+          "id": "prt_0ecbce629001Q6jF6hFSoXb1Xd",
+          "sessionID": "ses_f134aec3affe4sWZpkYtVUj8jE",
+          "messageID": "msg_0ecbcdf850018SPZE7HciJsula"
+        }
+      ]
+    }
+  ]
+}
