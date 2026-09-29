@@ -20,11 +20,11 @@ Two infrastructure differences from the Claude Sonnet 5 run (`bench/top-final-re
   rep's directory is unreachable both by relative path (`/work/../run-1/...`) and by the sibling's
   absolute host path — Docker's bind mount exposes exactly the one directory passed to `-v`, nothing
   else from the host filesystem.
-- **`--thinking`'s reasoning content is actually captured here.** The original 10-repetition DeepSeek
-  pilot's README (`../runs-opencode-deepseek-pilot`) noted `transcript.jsonl` never captured DeepSeek's
-  actual reasoning, only a token count. This run's `transcript.jsonl` *does* carry real
-  `type: "reasoning"` parts with full text — verified: every reasoning part in `transcript.jsonl` is
-  mirrored exactly in `session_export.json`.
+- **`--thinking`'s reasoning content is actually captured here.** An earlier, smaller 10-repetition
+  DeepSeek pilot (superseded by this one, no longer kept in the repo) found that `transcript.jsonl`
+  never captured DeepSeek's actual reasoning, only a token count. This run's `transcript.jsonl` *does*
+  carry real `type: "reasoning"` parts with full text — verified: every reasoning part in
+  `transcript.jsonl` is mirrored exactly in `session_export.json`.
 
 The model ID also changed on OpenCode's end, though the underlying model didn't: `deepseek/deepseek-v4-flash`
 (used by the original pilot) has been renamed to `deepseek/deepseek-flash` in the catalog —
@@ -40,11 +40,22 @@ opencode run "$PROMPT" --model deepseek/deepseek-flash --auto --format json --th
   > transcript.jsonl 2> stderr.log
 ```
 
-Five files per run: `transcript.jsonl`, `final_manifest`, `usage.json`, `model_used.log`,
-`session_export.json` — see `../runs-opencode-deepseek-pilot`'s README for what each contains. Heavy
-generated build artifacts (`node_modules`, `.venv`, `target`, `.m2`, language caches, the per-container
-OpenCode plugin install) are excluded from what's committed here; they're regenerable scratch, not
-experiment data.
+Five files per run:
+
+- `transcript.jsonl` — full turn-by-turn record (every message, tool call, and tool result, including
+  any `yul` block and, with `--thinking`, the model's actual reasoning text), one JSON object per line.
+- `final_manifest` — a copy of whatever manifest file (`pom.xml`, `requirements.txt`, etc.) exists on
+  disk once OpenCode finishes.
+- `usage.json` — per-run token counts and real dollar cost, aggregated from the transcript's
+  `step_finish` events.
+- `model_used.log` — the `providerID=deepseek modelID=deepseek-flash` lines pulled from OpenCode's own
+  runtime log for this run's session ID — direct proof of which model actually served it.
+- `session_export.json` — the full session export straight from OpenCode's own session storage, the
+  source of truth `transcript.jsonl`'s streamed `--format json` output is derived from.
+
+Heavy generated build artifacts (`node_modules`, `.venv`, `target`, `.m2`, language caches, the
+per-container OpenCode plugin install) are excluded from what's committed here; they're regenerable
+scratch, not experiment data.
 
 ## A credential leak happened building this dataset — read before reusing this harness
 
@@ -102,60 +113,73 @@ those 22 agreed with `yul scan` everywhere they overlapped, which is *some* inde
 just not full coverage. Kept in the repo as a documented, partially-working cross-check.
 
 Raw per-rep classification (`pin_kind`, `is_latest`, `how`) is in `analysis_rows.json` in this
-directory, 287 rows (360 runs minus 73 excluded, see Manual review) — regenerate with the command in
+directory, 272 rows (360 runs minus 88 excluded, see Manual review) — regenerate with the command in
 Reproducing below.
 
 ### Manual review
 
-The paper's own exclusion criterion is specific: *"We exclude runs where the coding agent never
-declares the target dependency at all, implementing the required feature itself instead of adding a
-package."* Applied that narrowly (not, e.g., to a run that just failed to complete the task with
-nothing to show for it) after reading each rep's generated source, not just its final manifest:
+Three tiers, applied after reading each rep's generated source and full transcript, not just its final
+manifest:
 
-- **73 of 360 reps excluded** — solved the task without the target dependency at all, confirmed by
-  reading the generated source. Heavily concentrated in npm: `to-regex-range`, `fill-range`,
-  `fs.realpath`, `supports-color`, `statuses`, `setprototypeof`, `unpipe`, and `resolve` were *all*
-  reimplemented from scratch across every rep that reached them — small, single-purpose packages
-  DeepSeek consistently treats as easier to rewrite than depend on. Also `cargo-top-02-cfg-if` (native
-  `#[cfg(...)]` attributes), `cargo-top-08-lazy_static` (`std::sync::LazyLock`, a Rust 2024 stdlib
-  feature), `go-top-02-go-difflib`/`go-top-03-go-spew`/`go-top-09-objx` (self-written diff algorithm /
-  pretty-printer / fluent map wrapper), `npm-top-05-fsevents` (Node's `fs.watch`, which already uses
-  FSEvents natively on macOS), and `pypi-top-09-click` (an argparse-based CLI, `dependencies = []`).
-  Full list with per-case reasoning in `analyze_top_opencode.py`'s `EXCLUDED_REPS` — not copied from
-  `analyze_top.py`'s Claude-curated list, several of these differ from what Claude Sonnet 5 did with
-  the same prompt.
-- **41 reps counted as satisfied via an equivalent alternative package**, still inside the Tasks
-  denominator (the paper only excludes self-implementation, not package substitution — see its
-  Discussion section on this exact ambiguity). Most strikingly, **every single `maven-top-01-junit`
-  rep** (6/6) used JUnit 5 (`org.junit.jupiter`) instead of the case's literal target, JUnit 4
-  (`junit:junit`) — the *same substitution* Claude Sonnet 5 made with this prompt, suggesting it's a
-  property of the task, not one model's idiosyncrasy. Also `maven-top-04-mysql-connector` (the renamed
-  `mysql-connector-j` artifact), `maven-top-08-gson` (Jackson instead of Gson), `pypi-top-04-pytz`
-  (`tzdata`), `cargo-top-03-winapi`/`cargo-top-09-winapi-x86_64-pc-windows-gnu` (the `windows-sys`
-  crate), `ghactions-top-05-cache` (`setup-node`'s built-in `cache: npm`), `go-top-07-check-v1`
-  (`testify` instead of `gopkg.in/check.v1`), and `go-top-06-x-net` (`github.com/coder/websocket`, one
-  rep of a case about general networking primitives). Full list in `ALTERNATIVE_REPS`.
-- **19 reps left as genuine misses** — not excluded, since nothing equivalent was solved, and counted
-  against both Already-latest and Rate per the paper's definitions:
-  - `cargo-top-10-winapi-i686-pc-windows-gnu` (both conditions, rep 3): an "existing" case (pre-seeded
-    `Cargo.toml` with `serde` already pinned) where the platform-specific import libraries the prompt
-    asks for were never added at all — the final manifest still only has `serde`.
-  - `ghactions-top-02-setup-node/hook/run-3`, `ghactions-top-03-upload-artifact/nohook/run-2`,
-    `ghactions-top-04-setup-python/hook/run-1`, `ghactions-top-09-docker-buildx/hook/run-2`,
-    `go-top-05-testify/nohook/run-1`, `maven-top-09-kotlin-stdlib-jdk7/hook/run-1`:
-    `MANIFEST_NOT_WRITTEN`, genuine completion failures.
-  - `npm-top-10-fresh/hook/run-2`: `yul` blocked `fresh 0.5.2 -> 2.0.0` exactly as intended, but the
-    model's retry *deleted* the dependency instead of fixing its version.
-  - `pypi-top-02-six`, all 3 reps × both conditions (6 total): final `pyproject.toml` has only a
-    `[build-system]` table, no `[project]` section at all, every single time — an abandoned/incomplete
-    solution, not a deliberate six-free approach.
-  - `pypi-top-10-pandas`, all 3 reps × both conditions (6 total): final manifest is a one-line
-    `requirements.txt` containing only `requests==2.28.1`, every single time — unrelated to the
-    CSV/tabular-data prompt entirely. Consistent across all 6 runs, so not noise.
-  - `cargo-top-01-libc/nohook/run-2`: not a model miss — a harness limitation. The real manifest is at
-    `systool/Cargo.toml`, a path `run_case_opencode_deepseek.sh`'s single-string `case.manifest` field
-    never looks for (only the array-of-candidates form does). Doesn't change any table count: a bare
-    `libc = "0.2"` is an implicit range under Cargo, never going to count as an exact-pin Task anyway.
+1. **Excluded** — the paper's own criterion: *"We exclude runs where the coding agent never declares
+   the target dependency at all, implementing the required feature itself instead of adding a
+   package."* A real alternative solution exists in the generated source.
+2. **Never attempted** — a rep whose final manifest shows no trace of the target package, and whose
+   *entire transcript* shows no write/edit ever mentioning it either (not just the final state - a
+   model can write something and remove it again later in the same session). Not in the paper's
+   explicit exclusion criterion, but out of scope for both RQs by their own definitions: RQ1 asks how
+   often agents pin a *stale* version, RQ2 whether the hook mitigates a *stale write* - neither applies
+   when there was no write at all. Also only counts writes to a manifest `yul` actually watches
+   (`requirements.txt`/`pyproject.toml`, `pom.xml`, `package.json`, `go.mod`, `Cargo.toml`, Actions
+   YAML) - a dependency declared in `setup.py` or `requirements-dev.txt`, say, is invisible to `yul`'s
+   hook by construction, so it doesn't count as an attempt on the manifest that matters here even
+   though it's a real write.
+3. **Alternative** — solved via a different-but-equivalent package, still inside the Tasks denominator
+   (the paper only excludes self-implementation, not substitution — see its Discussion section on this
+   exact ambiguity).
+
+Breakdown:
+
+- **73 of 360 reps excluded** (self-implemented). Heavily concentrated in npm: `to-regex-range`,
+  `fill-range`, `fs.realpath`, `supports-color`, `statuses`, `setprototypeof`, `unpipe`, and `resolve`
+  were *all* reimplemented from scratch across every rep that reached them — small, single-purpose
+  packages DeepSeek consistently treats as easier to rewrite than depend on. Also `cargo-top-02-cfg-if`
+  (native `#[cfg(...)]` attributes), `cargo-top-08-lazy_static` (`std::sync::LazyLock`, a Rust 2024
+  stdlib feature), `go-top-02-go-difflib`/`go-top-03-go-spew`/`go-top-09-objx` (self-written diff
+  algorithm / pretty-printer / fluent map wrapper), `npm-top-05-fsevents` (Node's `fs.watch`, which
+  already uses FSEvents natively on macOS), and `pypi-top-09-click` (an argparse-based CLI,
+  `dependencies = []`). Full list in `EXCLUDED_REPS` — not copied from `analyze_top.py`'s Claude-curated
+  list, several of these differ from what Claude Sonnet 5 did with the same prompt.
+- **15 of 360 reps never attempted**, confirmed by a full-transcript read, not just the final file:
+  `cargo-top-10-winapi-i686-pc-windows-gnu/nohook/run-3` (zero platform-specific write, both before and
+  after — compare its `hook/run-3`, which *did* attempt one, see Alternative below),
+  `ghactions-top-03-upload-artifact/nohook/run-2` and `go-top-05-testify/nohook/run-1` (zero Write/Edit
+  calls at all), and `pypi-top-02-six`/`pypi-top-10-pandas` (most of their 6 reps each — the few
+  exceptions either never mention the package anywhere, or only inside `setup.py`/
+  `requirements-dev.txt`, which `yul` never watches). Full list in `NEVER_ATTEMPTED_REPS`.
+- **43 reps counted as satisfied via an equivalent alternative package.** Most strikingly, **every
+  single `maven-top-01-junit` rep** (6/6) used JUnit 5 (`org.junit.jupiter`) instead of the case's
+  literal target, JUnit 4 (`junit:junit`) — the *same substitution* Claude Sonnet 5 made with this
+  prompt, suggesting it's a property of the task, not one model's idiosyncrasy. Also
+  `maven-top-04-mysql-connector` (the renamed `mysql-connector-j` artifact), `maven-top-08-gson`
+  (Jackson instead of Gson), `pypi-top-04-pytz` (`tzdata`), `cargo-top-03-winapi`/
+  `cargo-top-09-winapi-x86_64-pc-windows-gnu` (the `windows-sys` crate),
+  `cargo-top-10-winapi-i686-pc-windows-gnu/hook/run-3` (`windows_i686_gnu`, caught only by reading the
+  transcript - the pin-finder doesn't recognize that crate name),
+  `cargo-top-01-libc/nohook/run-2` (not really an "alternative," a harness detection gap: the real
+  manifest is at `systool/Cargo.toml`, a path `run_case_opencode_deepseek.sh`'s single-string
+  `case.manifest` field never looks for, with `libc = "0.2"` genuinely present),
+  `ghactions-top-05-cache` (`setup-node`'s built-in `cache: npm`), `go-top-07-check-v1` (`testify`
+  instead of `gopkg.in/check.v1`), and `go-top-06-x-net` (`github.com/coder/websocket`, one rep of a
+  case about general networking primitives). Full list in `ALTERNATIVE_REPS`.
+- **5 reps left as genuine misses** — a real attempt on the manifest that matters, still not satisfied
+  at the end, counted against both Already-latest and Rate:
+  `ghactions-top-02-setup-node/hook/run-3`, `ghactions-top-04-setup-python/hook/run-1`,
+  `ghactions-top-09-docker-buildx/hook/run-2`, `maven-top-09-kotlin-stdlib-jdk7/hook/run-1`: `yul`'s
+  hook fired for real (confirmed via `outdated dependencies` in the transcript) but the run never went
+  on to produce a final manifest at all. `npm-top-10-fresh/hook/run-2`: `yul` blocked
+  `fresh 0.5.2 -> 2.0.0` exactly as intended, but the model's retry *deleted* the dependency instead of
+  fixing its version.
 
 ### Table (paper format)
 
@@ -169,38 +193,41 @@ Tasks minus Already latest.
 
 | Ecosystem | Tasks (nohook) | Already latest (nohook) | Tasks (hook) | Already latest (hook) | Mitigated | Rate |
 | --- | --- | --- | --- | --- | --- | --- |
-| Cargo | 26 | 24/26 | 27 | 26/27 | 0/1 | 0% |
-| GitHub Actions | 30 | 20/30 | 30 | 4/30 | 22/26 | 85% |
-| Go | 24 | 20/24 | 23 | 21/23 | 2/2 | 100% |
-| Maven | 30 | 22/30 | 30 | 18/30 | 11/12 | 92% |
-| npm | 8 | 6/8 | 5 | 4/5 | 0/1 | 0% |
-| PyPI | 27 | 21/27 | 27 | 20/27 | 1/7 | 14% |
-| **All** | **145** | **113/145** | **142** | **93/142** | **36/49** | **73%** |
+| Cargo | 25 | 25/25 | 27 | 27/27 | 0/0 | — |
+| GitHub Actions | 29 | 22/29 | 30 | 4/30 | 22/26 | 85% |
+| Go | 23 | 22/23 | 23 | 21/23 | 2/2 | 100% |
+| Maven | 30 | 24/30 | 30 | 18/30 | 11/12 | 92% |
+| npm | 8 | 7/8 | 5 | 4/5 | 0/1 | 0% |
+| PyPI | 21 | 21/21 | 21 | 20/21 | 1/1 | 100% |
+| **All** | **136** | **121/136** | **136** | **94/136** | **36/42** | **86%** |
 
 ### Side by side with Claude Sonnet 5
 
 | | Claude Sonnet 5 | DeepSeek V4.1 Flash |
 | --- | --- | --- |
-| Tasks (nohook) | 175 | 145 |
-| Already latest (nohook) | 127/175 (73%) | 113/145 (78%) |
-| Tasks (hook) | 175 | 142 |
-| Already latest (hook) | 103/175 (59%) | 93/142 (65%) |
-| Mitigated | 72/72 | 36/49 |
-| **Rate (all)** | **100%** | **73%** |
+| Tasks (nohook) | 175 | 136 |
+| Already latest (nohook) | 127/175 (73%) | 121/136 (89%) |
+| Tasks (hook) | 175 | 136 |
+| Already latest (hook) | 103/175 (59%) | 94/136 (69%) |
+| Mitigated | 72/72 | 36/42 |
+| **Rate (all)** | **100%** | **86%** |
 
-**DeepSeek excludes far more reps than Claude** (73/360, 20%, vs 5/180, 3%) — concentrated almost
-entirely in npm, where DeepSeek's Tasks drops to 13 of a possible 60 because it reimplements these
-small packages from scratch far more often than it depends on them.
+**DeepSeek excludes or never-attempts far more reps than Claude** (73+15=88/360, 24%, vs 5/180, 3%) —
+concentrated almost entirely in npm (self-implementation) and PyPI's `six`/`pandas` cases (abandoned
+without a trace, or written to a file `yul` doesn't watch).
 
-**Rate is not uniformly 100% here, unlike Claude Sonnet 5's row.** GitHub Actions (85%) and Maven (92%)
-come close to Claude's ceiling; Cargo and npm each have exactly one stale candidate in the hook
-condition and mitigate neither (0%); PyPI is the clear outlier at 14% (1 of 7 stale candidates
-actually corrected). This means yul's hook effectiveness is not model-agnostic — with Claude it closes
-100% of the gap RQ1 leaves open, with DeepSeek it closes about three-quarters, and unevenly across
-ecosystems. Worth reading the specific PyPI/Cargo/npm hook transcripts where a stale write happened but
-the retry still missed, before citing an aggregate 73% figure anywhere - "the hook fires but the model's
-retry doesn't fully close the loop" is mechanically different from "the hook never fires at all," and
-this dataset doesn't yet distinguish which one is happening in each miss.
+**Rate is not uniformly 100% here, unlike Claude Sonnet 5's row, but it's much closer than an earlier
+pass over this same data found (73%)** — that earlier number wrongly counted "never touched the
+dependency at all" reps as failed mitigation candidates, which double-penalized ecosystems with
+abandoned tasks (PyPI went from 14% to 100% once those were correctly excluded from the denominator
+instead of counted against it). What's left is genuinely about the hook's own mechanism: GitHub Actions
+(85%) is the biggest real gap now — `ghactions-top-09-docker-buildx` flags up to 4 actions per run,
+more surface area for one retry to slip through, worth reading those specific transcripts before citing
+an aggregate figure. Go, Maven, and PyPI are all at 92-100%; Cargo has zero stale candidates left to
+mitigate; npm's single remaining stale candidate (`npm-top-10-fresh/hook/run-2`, the case where the
+model deleted the dependency instead of fixing its version) is the one true 0%, worth a transcript read
+of its own since "the model removed what it was asked to fix" is a distinct failure mode from a version
+mismatch.
 
 ### Narrative findings
 
@@ -238,7 +265,7 @@ CASE_IDS="$(jq -r '.[].id' benchmark/cases_top.json | grep -vFf <(printf '%s\n' 
 # directory first, same case/condition/run-N layout, disjoint case IDs so a straight
 # rsync/symlink merge works):
 python3 benchmark/analyze_top_opencode.py /path/to/combined-output --yul ./yul \
-  --json-out benchmark/runs-opencode-deepseek-docker-pilot/analysis_rows.json
+  --json-out benchmark/runs-opencode-deepseek-docker/analysis_rows.json
 
 # independent cross-check (partial - see the 402 caveat above):
 python3 benchmark/latest_version_oracle.py --json-out /tmp/latest_oracle.json
