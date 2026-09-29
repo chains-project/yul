@@ -1,19 +1,21 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
-// Initialization needs runtime computation (building a lookup table),
-// so it can't be a `const`/`static` literal.
-static CONFIG: LazyLock<HashMap<&'static str, u32>> = LazyLock::new(|| {
-    let mut m = HashMap::new();
-    for (i, name) in ["alpha", "beta", "gamma"].iter().enumerate() {
-        m.insert(*name, (i as u32 + 1) * 10);
-    }
-    m
-});
+lazy_static! {
+    /// Built at first access from environment/host state, so it can't be a `const`.
+    static ref CONFIG: HashMap<String, String> = {
+        let mut m = HashMap::new();
+        m.insert("hostname".to_string(), hostname());
+        m.insert("pid".to_string(), std::process::id().to_string());
+        m
+    };
+}
+
+fn hostname() -> String {
+    std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string())
+}
 
 fn main() {
-    for (name, value) in [("alpha", 10), ("beta", 20), ("gamma", 30)] {
-        println!("{name} = {}", CONFIG[&name]);
-        debug_assert_eq!(CONFIG[&name], value);
-    }
+    println!("hostname = {}", CONFIG["hostname"]);
+    println!("pid = {}", CONFIG["pid"]);
 }

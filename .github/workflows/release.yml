@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -60,12 +61,21 @@ jobs:
           sed -i "s/\"version\": *\"${current}\"/\"version\": \"${next}\"/" .claude-plugin/plugin.json
           grep -q "\"version\": \"${next}\"" .claude-plugin/plugin.json
 
+          sed -i "0,/\"version\": *\"${current}\"/s//\"version\": \"${next}\"/" opencode-yul/package.json
+          grep -q "\"version\": \"${next}\"" opencode-yul/package.json
+
+          sed -i "s/const YUL_VERSION = \"${current}\"/const YUL_VERSION = \"${next}\"/" opencode-yul/src/index.ts
+          grep -q "const YUL_VERSION = \"${next}\"" opencode-yul/src/index.ts
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .claude-plugin/plugin.json
+          git add .claude-plugin/plugin.json opencode-yul/package.json opencode-yul/src/index.ts
           git commit -m "Release v${next}"
           git tag "v${next}"
           git push origin main "v${next}"
+
+          echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -74,3 +84,35 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish opencode-yul to npm
+        working-directory: opencode-yul
+        run: |
+          npm --version # trusted publishing (OIDC) needs npm >=11.5.1
+          npm ci
+          npm publish --provenance
+
+      - name: Roll back incomplete release
+        if: failure() && steps.bump.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          tag="${{ steps.bump.outputs.tag }}"
+          sha="${{ steps.bump.outputs.sha }}"
+
+          echo "goreleaser and/or npm publish failed after ${tag} was tagged and pushed; rolling back" >&2
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes --cleanup-tag
+          else
+            git push origin --delete "$tag" || true
+          fi
+
+          git revert --no-edit "$sha"
+          git push origin main

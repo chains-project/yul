@@ -79,6 +79,19 @@ func TestLooksLikeManifestWrite(t *testing.T) {
 		{"mv onto manifest", `mv /tmp/new.mod go.mod`, true},
 		{"github actions workflow redirect", `cat > .github/workflows/ci.yml << 'EOF'`, true},
 		{"quoted path redirect", `printf '%s' "$content" > "requirements.txt"`, true},
+		{"redirect target is the manifest despite trailing stderr redirect", `cat > pom.xml << 'EOF'
+<project/>
+EOF
+` + "true", true},
+		{"sed -i with trailing pipe to unrelated command", `sed -i 's/1.0/2.0/' package.json | cat`, true},
+		{"append redirect with terminator", `echo pinned >> Cargo.toml; echo done`, true},
+		{"heredoc write to manifest in a scratch dir", `cd /tmp/x && cat > go.mod <<'EOF'
+module tmp
+EOF`, true},
+		{"mv with multiple sources including the manifest", `mv a.txt pom.xml src .`, true},
+		{"redirect target with a relative directory prefix", `cat > node_modules/pkg-a/package.json <<'EOF'
+{}
+EOF`, true},
 
 		{"plain read", `cat requirements.txt`, false},
 		{"grep manifest", `grep react package.json`, false},
@@ -88,12 +101,65 @@ func TestLooksLikeManifestWrite(t *testing.T) {
 		{"unrelated file redirect", `echo hi > notes.txt`, false},
 		{"mkdir unrelated", `mkdir -p .github/workflows`, false},
 		{"ls workflows dir", `ls -la .github/workflows/`, false},
+		{"read with stderr to /dev/null", `cat Cargo.toml 2>/dev/null`, false},
+		{"read with stderr to /dev/null, compound", `ls -la && cat go.mod 2>/dev/null; go version`, false},
+		{"unrelated redirect elsewhere, manifest read in same clause", `npm init -y >/dev/null && cat package.json`, false},
+		{"manifest named in different clause than the write", `cat > .gitignore << 'EOF'
+ignored
+EOF
+git add pyproject.toml .gitignore`, false},
+		{"manifest mentioned in a URL, no local write", `curl -s "https://example.com/spring-boot/pom.xml" | grep version`, false},
+		{"manifest mentioned inside a string literal, unrelated redirect", `python3 -c "print('pyproject.toml')" > /tmp/out.log`, false},
+		{"find pattern for manifest name, not a write", `find . -iname "go.mod" 2>/dev/null`, false},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := looksLikeManifestWrite(test.cmd); got != test.want {
 				t.Errorf("looksLikeManifestWrite(%q) = %v, want %v", test.cmd, got, test.want)
+			}
+		})
+	}
+}
+
+func TestParsePkgManagerPin(t *testing.T) {
+	tests := []struct {
+		testName   string
+		cmd        string
+		wantScheme string
+		wantName   string
+		wantVer    string
+		wantOK     bool
+	}{
+		{"go get exact version", `go get github.com/davecgh/go-spew@v1.1.0`, "golang", "github.com/davecgh/go-spew", "v1.1.0", true},
+		{"npm install exact version", `npm install react@18.2.0`, "npm", "react", "18.2.0", true},
+		{"npm add exact version", `npm add lodash@4.17.20`, "npm", "lodash", "4.17.20", true},
+		{"npm scoped package exact version", `npm install @vue/core@3.2.1`, "npm", "@vue/core", "3.2.1", true},
+		{"yarn add exact version", `yarn add lodash@4.17.20`, "npm", "lodash", "4.17.20", true},
+		{"pip install exact version", `pip install requests==2.28.0`, "pypi", "requests", "2.28.0", true},
+		{"pip3 install exact version", `pip3 install requests==2.28.0`, "pypi", "requests", "2.28.0", true},
+		{"poetry add exact version", `poetry add requests==2.28.0`, "pypi", "requests", "2.28.0", true},
+		{"uv add exact version", `uv add requests==2.28.0`, "pypi", "requests", "2.28.0", true},
+		{"cargo add exact version", `cargo add serde@1.0.150`, "cargo", "serde", "1.0.150", true},
+
+		{"go get no version", `go get github.com/davecgh/go-spew`, "", "", "", false},
+		{"go get latest", `go get github.com/davecgh/go-spew@latest`, "", "", "", false},
+		{"npm install no version", `npm install react`, "", "", "", false},
+		{"npm install caret range", `npm install react@^18.2.0`, "", "", "", false},
+		{"npm install tilde range", `npm install react@~18.2.0`, "", "", "", false},
+		{"pip install no version", `pip install requests`, "", "", "", false},
+		{"pip install range", `pip install requests>=2.28.0`, "", "", "", false},
+		{"cargo add no version", `cargo add serde`, "", "", "", false},
+		{"unrelated at-sign in path", `cat notes@2.txt`, "", "", "", false},
+		{"different clause has the pin", `go get github.com/foo/bar; echo done@v1.0.0`, "", "", "", false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			scheme, name, version, ok := parsePkgManagerPin(test.cmd)
+			if ok != test.wantOK || scheme != test.wantScheme || name != test.wantName || version != test.wantVer {
+				t.Errorf("parsePkgManagerPin(%q) = (%q, %q, %q, %v), want (%q, %q, %q, %v)",
+					test.cmd, scheme, name, version, ok, test.wantScheme, test.wantName, test.wantVer, test.wantOK)
 			}
 		})
 	}

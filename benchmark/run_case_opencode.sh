@@ -168,6 +168,15 @@ jq -s '
 
 # When .manifest listed several candidate paths, use whichever one the
 # model actually wrote.
+#
+# Build/dependency dirs to skip when falling back to a recursive search
+# below - they can contain a same-named manifest (a vendored crate's
+# Cargo.toml, a venv's pyproject.toml, ...) that isn't the one the model wrote.
+PRUNE_EXPR=( -path "*/target/*" -o -path "*/node_modules/*" -o -path "*/.git/*" \
+  -o -path "*/dist/*" -o -path "*/build/*" -o -path "*/venv/*" -o -path "*/.venv/*" \
+  -o -path "*/__pycache__/*" -o -path "*/site-packages/*" -o -path "*/.tox/*" \
+  -o -path "*/vendor/*" -o -path "*/.m2/*" -o -path "*/.gradle/*" -o -path "*/.cargo/*" )
+
 FOUND_MANIFEST=""
 shopt -s nullglob
 while IFS= read -r candidate; do
@@ -180,6 +189,19 @@ while IFS= read -r candidate; do
   elif [ -f "$candidate" ]; then
     FOUND_MANIFEST="$candidate"
     break
+  else
+    # Not at the expected top-level path - for a "fresh" case, the model
+    # may have scaffolded the project into a subdirectory of its own
+    # naming (e.g. `cargo new <name>` instead of `cargo init` in place).
+    # Fall back to a recursive search for the same filename, skipping
+    # build/dep dirs.
+    base="$(basename "$candidate")"
+    nested=$(find . \( "${PRUNE_EXPR[@]}" \) -prune -o -type f -name "$base" -print 2>/dev/null \
+      | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
+    if [ -n "$nested" ]; then
+      FOUND_MANIFEST="$nested"
+      break
+    fi
   fi
 done < <(echo "$C" | jq -r 'if (.manifest|type)=="array" then .manifest[] else .manifest end')
 shopt -u nullglob

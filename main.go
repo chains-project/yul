@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/git-pkgs/purl"
+
 	"github.com/chains-project/yul/pkg/cargo"
 	"github.com/chains-project/yul/pkg/githubactions"
 	"github.com/chains-project/yul/pkg/golang"
@@ -19,6 +22,8 @@ import (
 	"github.com/chains-project/yul/pkg/pypi"
 	"github.com/chains-project/yul/pkg/scan"
 	"github.com/chains-project/yul/pkg/util/manifestchecker"
+	"github.com/chains-project/yul/pkg/util/mismatch"
+	"github.com/chains-project/yul/pkg/util/pins"
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
@@ -32,7 +37,7 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
-		githubactions.Checker{Resolver: res, Sha: githubactions.GitHubShaResolver{}},
+		githubactions.Checker{Resolver: res, Sha: githubactions.EcosystemsShaResolver{}},
 		golang.Checker{Resolver: res},
 		cargo.Checker{Resolver: res},
 	}
@@ -76,31 +81,107 @@ type hookInput struct {
 	} `json:"tool_input"`
 }
 
-// manifestRE matches a known manifest name in a shell command, mirroring
-// pkg/*'s Filename() values. RE2 has no lookahead, so the boundary is a
-// capturing alternative instead of a real (?=...).
-var manifestRE = regexp.MustCompile(`(^|[/\\ '"=])(pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)([/\\ '"]|$)`)
+const manifestNamesRE = `(?:pom\.xml|requirements\.txt|pyproject\.toml|package\.json|go\.mod|Cargo\.toml|\.github/workflows/[^\s'"]+\.ya?ml)`
 
-// writeConstructRE matches shell constructs that mutate a file's content,
-// other than `>`/`>>` (handled by redirectRE below since RE2 can't express
-// the JS version's negative lookahead excluding `>&` fd-duplication).
-var writeConstructRE = regexp.MustCompile(`\btee\b|\bsed\s+-i|\bperl\s+-i|\bdd\s+of=|\bcp\s|\bmv\s`)
+// clause bounds the gap between a write construct's keyword (e.g. `tee`)
+// and the manifest name that must be its own target argument, so e.g.
+// `tee notes.txt; cat package.json` doesn't match: the `;` before
+// package.json stops the gap, since tee's real target is notes.txt, not the
+// manifest.
+const clause = `[^;&|\n]`
 
-// redirectRE matches a `>`/`>>` that writes file content, excluding fd
-// duplication like `2>&1`.
-var redirectRE = regexp.MustCompile(`>>?[^&]|>>?$`)
+// writeConstructToManifestRE matches shell constructs that mutate a file's
+// content, other than `>`/`>>` (handled by redirectToManifestRE), where the
+// manifest name is the construct's own target argument.
+var writeConstructToManifestRE = regexp.MustCompile(
+	`\btee\b` + clause + `*` + manifestNamesRE +
+		`|\b(?:sed|perl)\s+-i\b` + clause + `*` + manifestNamesRE +
+		`|\bdd\b` + clause + `*?\bof=['"]?(?:[^\s'"]*/)?` + manifestNamesRE +
+		`|\b(?:cp|mv)\s+` + clause + `*` + manifestNamesRE,
+)
+
+// redirectToManifestRE matches a `>`/`>>` whose target is a known manifest
+// name, e.g. `cat > pom.xml <<EOF`, `echo "foo==1.0" >> requirements.txt`.
+// Excludes fd duplication like `2>&1` and unrelated redirects like `2>/dev/null`
+// by requiring the manifest name immediately after the operator, rather
+// than just matching any `>` present elsewhere in cmd.
+var redirectToManifestRE = regexp.MustCompile(`>>?\s*['"]?(?:[^\s'"]*/)?` + manifestNamesRE + `['"]?(\s|;|&|\||$)`)
 
 // looksLikeManifestWrite reports whether cmd looks like it rewrites a known
-// manifest's content directly, bypassing the Write/Edit tools yul's
-// PreToolUse hook actually inspects.
+// manifest's content directly, bypassing the Write/Edit path runHook checks.
 func looksLikeManifestWrite(cmd string) bool {
-	return manifestRE.MatchString(cmd) && (writeConstructRE.MatchString(cmd) || redirectRE.MatchString(cmd))
+	return writeConstructToManifestRE.MatchString(cmd) || redirectToManifestRE.MatchString(cmd)
 }
 
-// runHook is a PreToolUse hook for Write, Edit, and Bash. Write/Edit get a
-// real version check (exit 2 if a changed pin is outdated); Bash gets a
-// coarse "looks like it rewrites a manifest" block, since yul can't
-// simulate arbitrary shell to know what content would land.
+// pkgManagerPinPatterns matches a package manager's own CLI syntax for
+// pinning a dependency to an exact version, e.g. `go get mod@v1.2.3`,
+// `npm install pkg@1.2.3`, `pip install pkg==1.2.3`, `cargo add crate@1.2.3`
+// - these write the manifest just as much as a redirect does, but don't
+// match looksLikeManifestWrite's direct-write patterns at all.
+var pkgManagerPinPatterns = []struct {
+	re     *regexp.Regexp
+	scheme string
+}{
+	{regexp.MustCompile(`\bgo\s+get\s+` + clause + `*?(?P<name>[\w.\-/]+)@(?P<version>v\d[\w.\-+]*)`), "golang"},
+	{regexp.MustCompile(`\b(?:npm|pnpm|yarn)\s+(?:install|add|i)\b` + clause + `*?(?P<name>@[\w.\-]+/[\w.\-]+|[\w.\-]+)@(?P<version>\d[\w.\-+]*)`), "npm"},
+	{regexp.MustCompile(`\bcargo\s+add\b` + clause + `*?(?P<name>[\w.\-]+)@(?P<version>\d[\w.\-+]*)`), "cargo"},
+	{regexp.MustCompile(`\b(?:pip3?|poetry|uv)\s+(?:install|add)\b` + clause + `*?(?P<name>[\w.\-]+)==(?P<version>\d[\w.\-+]*)`), "pypi"},
+}
+
+func parsePkgManagerPin(cmd string) (scheme, name, version string, ok bool) {
+	for _, p := range pkgManagerPinPatterns {
+		m := p.re.FindStringSubmatch(cmd)
+		if m == nil {
+			continue
+		}
+		for i, group := range p.re.SubexpNames() {
+			switch group {
+			case "name":
+				name = m[i]
+			case "version":
+				version = m[i]
+			}
+		}
+		return p.scheme, name, version, true
+	}
+	return "", "", "", false
+}
+
+// checkPkgManagerPin resolves name's latest released version under scheme
+// and, if pinnedVersion is older, blocks (exit 2) with the same "outdated
+// dependencies" message the Write/Edit path prints - so Claude retries with
+// the correct version instead of pinning it via bash and never finding out.
+// It exits 0 (fails open) if the purl can't be built or the resolver can't
+// find a latest version, same as the Write/Edit path's own resolver errors.
+func checkPkgManagerPin(scheme, name, pinnedVersion string) {
+	res, err := resolver.NewEnrichmentResolver()
+	if err != nil {
+		return // fail open: a resolver construction error shouldn't block the command
+	}
+
+	// The resolver's response keys purls without a version component (see
+	// pins.Diff / EnrichmentResolver.LatestVersions), same as every other
+	// checker's manifest-parsed PURLs - so this must match, not carry
+	// pinnedVersion.
+	purlStr := purl.BuildPURLString(scheme, name, "", "")
+	if purlStr == "" {
+		return
+	}
+
+	pin := pins.Pin{Name: name, Version: pinnedVersion, PURL: purlStr}
+	mismatches, err := pins.Diff(context.Background(), nil, map[string]pins.Pin{name: pin}, scheme, res, pins.NoRangeSupport, nil)
+	if err != nil || len(mismatches) == 0 {
+		return // fail open on a resolver error; nothing to flag if it's already latest
+	}
+
+	fmt.Fprintln(os.Stderr, "outdated dependency pinned via package manager CLI, use this version instead:")
+	for _, m := range mismatches {
+		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", m.Name, m.Current, m.Latest)
+	}
+	os.Exit(2)
+}
+
+// runHook is a PreToolUse hook for the Write, Edit, and Bash tools.
 func runHook() {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -118,6 +199,9 @@ func runHook() {
 		if looksLikeManifestWrite(in.ToolInput.Command) {
 			fmt.Fprintln(os.Stderr, "yul: use the Write or Edit tool to modify dependency manifests, not bash (bash writes bypass the outdated-dependency check)")
 			os.Exit(2)
+		}
+		if scheme, name, pinnedVersion, ok := parsePkgManagerPin(in.ToolInput.Command); ok {
+			checkPkgManagerPin(scheme, name, pinnedVersion)
 		}
 		os.Exit(0)
 	}
@@ -157,7 +241,9 @@ func runHook() {
 		after = strings.Replace(before, in.ToolInput.OldString, in.ToolInput.NewString, count)
 	}
 
-	mismatches, err := checker.Check(before, after)
+	hasLockfile := manifestchecker.HasLockfile(filepath.Dir(in.ToolInput.FilePath), checker)
+
+	mismatches, err := checker.Check(before, after, hasLockfile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook: %v\n", err)
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
@@ -167,17 +253,43 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+	var outdated, ranges []mismatch.Mismatch
 	for _, m := range mismatches {
-		name := m.Name
-		if m.Namespace != "" {
-			name = m.Namespace + ":" + m.Name
+		if m.Range {
+			ranges = append(ranges, m)
+		} else {
+			outdated = append(outdated, m)
 		}
-		latest := m.Latest
-		if m.Suggested != "" {
-			latest = m.Suggested
+	}
+
+	if len(outdated) > 0 {
+		fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
+		for _, m := range outdated {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			latest := m.Latest
+			if m.Suggested != "" {
+				latest = m.Suggested
+			}
+			fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
 		}
-		fmt.Fprintf(os.Stderr, "  %s  %s -> %s\n", name, m.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintln(os.Stderr, "these pinned ranges need attention:")
+		for _, m := range ranges {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			if m.Suggested != "" {
+				fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> widen to %s\n", name, m.Current, m.Latest, m.Suggested)
+			}
+			if m.NoLockfile {
+				fmt.Fprintf(os.Stderr, "  %s: no lockfile found next to this manifest -> run your package manager's install to generate one\n", name)
+			}
+		}
 	}
 	os.Exit(2)
 }
@@ -294,19 +406,47 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		os.Exit(0)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "yul scanned this project's manifests (as of %s) and found %d pinned dependencies older than the latest release:\n",
-		scannedAt.Format("2006-01-02"), len(findings))
+	var outdated, ranges []scan.Finding
 	for _, f := range findings {
-		name := f.Name
-		if f.Namespace != "" {
-			name = f.Namespace + ":" + f.Name
+		if f.Range {
+			ranges = append(ranges, f)
+		} else {
+			outdated = append(outdated, f)
 		}
-		latest := f.Latest
-		if f.Suggested != "" {
-			latest = f.Suggested
+	}
+
+	var b strings.Builder
+	b.WriteString("yul scanned this project's manifests")
+	fmt.Fprintf(&b, " (as of %s)", scannedAt.Format("2006-01-02"))
+	b.WriteString(" and found:\n")
+	if len(outdated) > 0 {
+		fmt.Fprintf(&b, "%d pinned dependencies older than the latest release:\n", len(outdated))
+		for _, f := range outdated {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			latest := f.Latest
+			if f.Suggested != "" {
+				latest = f.Suggested
+			}
+			fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
 		}
-		fmt.Fprintf(&b, "  %s: %s  %s -> %s\n", f.File, name, f.Current, latest)
+	}
+	if len(ranges) > 0 {
+		fmt.Fprintf(&b, "%d pinned ranges that need attention:\n", len(ranges))
+		for _, f := range ranges {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			if f.Suggested != "" {
+				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> widen to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
+			}
+			if f.NoLockfile {
+				fmt.Fprintf(&b, "  %s: %s: no lockfile found next to this manifest\n", f.File, name)
+			}
+		}
 	}
 	b.WriteString("Ask the user whether they'd like these updated before making any other changes to these files.")
 

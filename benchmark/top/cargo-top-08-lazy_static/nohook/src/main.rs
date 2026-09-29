@@ -1,22 +1,16 @@
-use std::collections::HashMap;
-use std::env;
-
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 
 lazy_static! {
-    // Requires runtime work (reading env vars, hashing, etc.) so it can't be a `const`/`static` literal.
-    static ref CONFIG: HashMap<String, String> = {
+    static ref CONFIG: HashMap<&'static str, String> = {
         let mut m = HashMap::new();
-        for (key, value) in env::vars() {
-            m.insert(key, value);
-        }
-        m.entry("APP_NAME".to_string())
-            .or_insert_with(|| "lazy_static_demo".to_string());
+        m.insert("started_at", format!("{:?}", std::time::SystemTime::now()));
+        m.insert("pid", std::process::id().to_string());
         m
     };
 }
 
 fn main() {
-    println!("APP_NAME = {}", CONFIG.get("APP_NAME").unwrap());
-    println!("Loaded {} environment entries into CONFIG", CONFIG.len());
+    println!("pid: {}", CONFIG["pid"]);
+    println!("started_at: {}", CONFIG["started_at"]);
 }

@@ -15,13 +15,31 @@ import (
 	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
-// Pin is an exactly-pinned dependency extracted from a manifest, along with
-// the PURL to resolve its latest version through.
+// NoRangeSupport is passed as Diff's hasLockfile argument by a checker that
+// never produces a range Pin at all (Maven, go.mod), so Diff's lockfile
+// check - which only ever looks at range pins - can never fire regardless
+// of what's passed. Named instead of a bare literal so a reader of the
+// call site doesn't mistake it for "a lockfile was verified present" - it
+// says nothing about whether one actually exists, which for some of these
+// ecosystems (e.g. go.sum) it may well.
+const NoRangeSupport = true
+
+// NoLockfileConvention is passed as Diff's hasLockfile argument by a
+// checker whose ecosystem does produce range pins but has no lockfile
+// convention of its own to check for (requirements.txt is typically the
+// compiled/pinned output already), so its ranges are deliberately never
+// flagged for a missing lockfile.
+const NoLockfileConvention = true
+
+// Pin is a dependency extracted from a manifest, pinned to either a single
+// exact version or a version range, along with the PURL to resolve its
+// latest version through.
 type Pin struct {
-	Namespace string // e.g. Maven groupId; empty for npm/pypi
+	Namespace string // e.g. Maven groupId; empty for npm/pypi/cargo
 	Name      string
-	Version   string
+	Version   string // the exact version, or the range exactly as written (e.g. "^4.0.0") when Range is true
 	PURL      string
+	Range     bool // true when Version is a version range rather than a single exact version
 }
 
 // ExactVersion reports whether spec pins a package to exactly one version
@@ -61,12 +79,95 @@ func ExactVersion(spec, scheme string, requireOperator bool) (string, bool) {
 	return version, true
 }
 
-// Diff reports pins in after that are new or whose version changed from
-// before, and whose pinned version is older than the latest release res
-// knows about (compared under scheme's ordering rules). Pins left
-// untouched by the write are ignored even if outdated. Moving a declaration
-// to a different logical location counts as a change.
-func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver) ([]mismatch.Mismatch, error) {
+// IsRange reports whether spec is a version range under scheme rather than
+// a single exact version or a non-version reference like a dist-tag.
+//
+// requireOperator matches ExactVersion's flag. A bare version under Poetry
+// or Cargo is itself a range (their implicit-caret default), not an exact
+// pin.
+func IsRange(spec, scheme string, requireOperator bool) bool {
+	spec, _, _ = strings.Cut(spec, ";") // drop a trailing PEP 508 environment marker
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return false
+	}
+
+	hasOperator := strings.ContainsRune("=<>!~^", rune(spec[0]))
+	if requireOperator && !hasOperator && vers.ValidWithScheme(spec, scheme) {
+		return true // bare version literal under an implicit-caret default
+	}
+
+	r, err := vers.ParseNative(spec, scheme)
+	if err != nil {
+		return false // not a version constraint at all
+	}
+	version, ok := r.ExactVersion()
+	if !ok {
+		return true // genuine range
+	}
+
+	// An unrecognized operator (e.g. Poetry's caret under the pypi scheme)
+	// parses as a fake "exact version" instead of erroring out. Treat it
+	// as a range only if it actually had an operator prefix.
+	return hasOperator && !vers.ValidWithScheme(version, scheme)
+}
+
+// IsPoetryStyle reports whether spec uses Poetry's range syntax - an
+// explicit "^"/"~" operator, or a bare version (Poetry's implicit-caret
+// default) - as opposed to PEP 440's explicit operators ("==", ">=", "<",
+// "!=", "~="), which requirements.txt and PEP 621 pyproject tables use.
+// Only meaningful for specs already known to be ranges under the pypi
+// scheme; callers check IsRange first.
+func IsPoetryStyle(spec string) bool {
+	if spec == "" {
+		return false
+	}
+	switch {
+	case spec[0] == '^':
+		return true
+	case spec[0] == '~' && !strings.HasPrefix(spec, "~="):
+		return true
+	case !strings.ContainsRune("=<>!~^", rune(spec[0])):
+		return true // bare version: Poetry's implicit-caret default
+	}
+	return false
+}
+
+// satisfiesRange reports whether latest satisfies spec under scheme.
+//
+// Poetry's caret and tilde operators aren't understood by vers's pypi
+// scheme, so those specs are rewritten to equivalent npm syntax first,
+// since Poetry's caret/tilde semantics match npm's. A "~=" spec is left
+// alone since that's PEP 440's own operator, already handled correctly.
+func satisfiesRange(latest, spec, scheme string) bool {
+	if scheme == "pypi" && spec == "" {
+		return false
+	}
+	checkScheme, checkSpec := scheme, spec
+	if scheme == "pypi" && IsPoetryStyle(spec) {
+		checkScheme = "npm"
+		if spec[0] != '^' && spec[0] != '~' {
+			checkSpec = "^" + spec // Poetry's implicit-caret default
+		}
+	}
+	ok, err := vers.Satisfies(latest, checkSpec, checkScheme)
+	return err == nil && ok
+}
+
+// Diff reports pins in after that are new or changed from before and need
+// attention: an exact pin older than the latest release res knows about
+// (compared under scheme's ordering rules); a range that excludes the
+// latest release, recommending a replacement range that includes it; or a
+// range that already allows latest but has no lockfile alongside the
+// manifest (hasLockfile), so its actually-installed version isn't pinned
+// anywhere. Pins left untouched by the write are ignored even if outdated.
+// Moving a declaration to a different logical location counts as a
+// change.
+//
+// format renders a range's original spec and the latest version into a
+// replacement range for a range mismatch's Mismatch.Suggested; it may be
+// nil for an ecosystem that never produces range pins.
+func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res resolver.Resolver, hasLockfile bool, format func(spec, latest string) string) ([]mismatch.Mismatch, error) {
 	var changed []Pin
 	for location, pin := range after {
 		if prior, ok := before[location]; ok && prior == pin {
@@ -93,6 +194,23 @@ func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res 
 		latestVersion, ok := latest[pin.PURL]
 		if !ok {
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
+		}
+		if pin.Range {
+			m := mismatch.Mismatch{
+				Namespace:  pin.Namespace,
+				Name:       pin.Name,
+				Current:    pin.Version,
+				Latest:     latestVersion,
+				Range:      true,
+				NoLockfile: !hasLockfile,
+			}
+			if !satisfiesRange(latestVersion, pin.Version, scheme) {
+				m.Suggested = format(pin.Version, latestVersion)
+			}
+			if m.Suggested != "" || m.NoLockfile {
+				mismatches = append(mismatches, m)
+			}
+			continue
 		}
 		if vers.CompareWithScheme(pin.Version, latestVersion, scheme) < 0 {
 			mismatches = append(mismatches, mismatch.Mismatch{

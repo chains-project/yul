@@ -3,6 +3,8 @@ package npm
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/mismatch"
 )
 
 // fakeResolver resolves latest versions from a fixed PURL->version map, so
@@ -55,6 +57,7 @@ func TestParsePackageJSONPins(t *testing.T) {
 		"dependencies/alias":            "8.0.0",
 		"dependencies/prerelease":       "2.0.0-rc.1",
 		"dependencies/build":            "3.0.0+metadata",
+		"dependencies/range":            "^4.0.0",
 		"devDependencies/development":   "5.0.0",
 		"optionalDependencies/optional": "6.0.0",
 		"peerDependencies/peer":         "7.0.0",
@@ -69,6 +72,9 @@ func TestParsePackageJSONPins(t *testing.T) {
 	}
 	if pin := got["dependencies/alias"]; pin.Name != "@scope/actual" || pin.PURL != "pkg:npm/%40scope/actual" {
 		t.Errorf("alias pin = %#v, want canonical target package", pin)
+	}
+	if pin := got["dependencies/range"]; !pin.Range {
+		t.Errorf("range pin = %#v, want Range == true", pin)
 	}
 }
 
@@ -86,24 +92,35 @@ func TestParsePackageJSONPinsEmptyAndInvalid(t *testing.T) {
 	}
 }
 
-func TestCheckPackageJSONOnlyChecksChangedExactPins(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{"pkg:npm/added": "2.0.0"}}
+func TestCheckPackageJSONOnlyChecksChangedExactPinsAndRanges(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/added": "2.0.0",
+		"pkg:npm/range": "3.0.0",
+	}}
 
 	before := `{"dependencies":{"existing":"1.0.0"}}`
 	after := `{"dependencies":{"existing":"1.0.0","added":"1.0.0","range":"^1.0.0"}}`
 
-	got, err := CheckPackageJSON(before, after, res)
+	got, err := CheckPackageJSON(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckPackageJSON() error = %v", err)
 	}
 	if res.lookups != 1 {
 		t.Fatalf("CheckPackageJSON() made %d resolver lookups, want 1", res.lookups)
 	}
-	if len(got) != 1 {
-		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 1: %#v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("CheckPackageJSON() returned %d mismatches, want 2: %#v", len(got), got)
 	}
-	if got[0].Name != "added" || got[0].Current != "1.0.0" || got[0].Latest != "2.0.0" {
-		t.Fatalf("CheckPackageJSON() mismatch = %#v", got[0])
+
+	byName := make(map[string]mismatch.Mismatch, len(got))
+	for _, m := range got {
+		byName[m.Name] = m
+	}
+	if m := byName["added"]; m.Current != "1.0.0" || m.Latest != "2.0.0" || m.Range {
+		t.Fatalf("CheckPackageJSON() added mismatch = %#v", m)
+	}
+	if m := byName["range"]; m.Current != "^1.0.0" || m.Latest != "3.0.0" || m.Suggested != "^3.0.0" || !m.Range {
+		t.Fatalf("CheckPackageJSON() range mismatch = %#v", m)
 	}
 }
 
@@ -113,11 +130,26 @@ func TestCheckPackageJSONScopedPackage(t *testing.T) {
 	before := `{}`
 	after := `{"dependencies":{"@scope/pkg":"1.0.0"}}`
 
-	got, err := CheckPackageJSON(before, after, res)
+	got, err := CheckPackageJSON(before, after, res, true)
 	if err != nil {
 		t.Fatalf("CheckPackageJSON() error = %v", err)
 	}
 	if len(got) != 1 || got[0].Name != "@scope/pkg" {
 		t.Fatalf("CheckPackageJSON() = %#v, want one mismatch for @scope/pkg", got)
+	}
+}
+
+func TestCheckPackageJSONFlagsRangeWithNoLockfile(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/range": "1.5.0"}}
+
+	before := `{}`
+	after := `{"dependencies":{"range":"^1.0.0"}}`
+
+	got, err := CheckPackageJSON(before, after, res, false)
+	if err != nil {
+		t.Fatalf("CheckPackageJSON() error = %v", err)
+	}
+	if len(got) != 1 || !got[0].Range || !got[0].NoLockfile {
+		t.Fatalf("CheckPackageJSON() = %#v, want a lockfile-only mismatch since the range already allows latest", got)
 	}
 }

@@ -1,40 +1,35 @@
 use cfg_if::cfg_if;
 
-/// Returns a short label identifying the target platform this crate was built for.
-pub fn platform_name() -> &'static str {
-    cfg_if! {
-        if #[cfg(target_os = "windows")] {
+pub fn add(left: u64, right: u64) -> u64 {
+    left + right
+}
+
+cfg_if! {
+    if #[cfg(target_os = "windows")] {
+        pub fn platform_name() -> &'static str {
             "windows"
-        } else if #[cfg(target_os = "macos")] {
+        }
+    } else if #[cfg(target_os = "macos")] {
+        pub fn platform_name() -> &'static str {
             "macos"
-        } else if #[cfg(target_os = "linux")] {
+        }
+    } else if #[cfg(target_os = "linux")] {
+        pub fn platform_name() -> &'static str {
             "linux"
-        } else if #[cfg(target_family = "wasm")] {
-            "wasm"
-        } else {
+        }
+    } else {
+        pub fn platform_name() -> &'static str {
             "unknown"
         }
     }
 }
 
 cfg_if! {
-    if #[cfg(unix)] {
-        pub fn path_separator() -> char {
-            '/'
-        }
-    } else if #[cfg(windows)] {
-        pub fn path_separator() -> char {
-            '\\'
-        }
+    if #[cfg(target_pointer_width = "64")] {
+        pub type Word = u64;
     } else {
-        pub fn path_separator() -> char {
-            '/'
-        }
+        pub type Word = u32;
     }
-}
-
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
 }
 
 #[cfg(test)]

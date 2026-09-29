@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Runs one benchmark case under one condition (hook|nohook).
-# Usage: run_case.sh <cases.json> <case_id> <hook|nohook> <output_dir>
+# Usage: run_case.sh <cases.json> <case_id> <hook|nohook> <output_dir> [rep]
+# [rep] is a repetition index (e.g. 01, 02, ...); when given, the run is
+# written to <output_dir>/<case_id>/<condition>/rep<rep> instead of
+# <output_dir>/<case_id>/<condition>, so repeats don't clobber each other.
 set -euo pipefail
 
 CASES_JSON="$1"
 CASE_ID="$2"
 CONDITION="$3"   # hook | nohook
 OUT_DIR="$4"
+REP="${5:-0}"    # "0" means no repeat subdirectory (single-run mode)
 YUL_BIN="/home/aman/Desktop/chains/ai-bump/yul"
 
 case_json() {
@@ -28,7 +32,11 @@ TYPE=$(echo "$C" | jq -r '.type')
 PROMPT=$(echo "$C" | jq -r '.prompt')
 SEED=$(echo "$C" | jq -r '.seed // empty')
 
-WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION"
+if [ "$REP" = "0" ]; then
+  WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION"
+else
+  WORKDIR="$OUT_DIR/$CASE_ID/$CONDITION/rep$REP"
+fi
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR/.claude"
 
@@ -43,7 +51,7 @@ if [ "$CONDITION" = "hook" ]; then
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|Bash",
         "hooks": [
           {
             "type": "command",
@@ -72,6 +80,7 @@ git config user.email "benchmark@example.com"
 git config user.name "benchmark"
 
 claude -p "$PROMPT" \
+  --model sonnet \
   --permission-mode bypassPermissions \
   --setting-sources project \
   --output-format stream-json \
@@ -83,6 +92,15 @@ claude -p "$PROMPT" \
 # actually wrote (the case leaves the choice of manifest file - or, for a
 # glob candidate like ".github/workflows/*.yml", the choice of filename too
 # - up to it).
+#
+# Build/dependency dirs to skip when falling back to a recursive search
+# below - they can contain a same-named manifest (a vendored crate's
+# Cargo.toml, a venv's pyproject.toml, ...) that isn't the one Claude wrote.
+PRUNE_EXPR=( -path "*/target/*" -o -path "*/node_modules/*" -o -path "*/.git/*" \
+  -o -path "*/dist/*" -o -path "*/build/*" -o -path "*/venv/*" -o -path "*/.venv/*" \
+  -o -path "*/__pycache__/*" -o -path "*/site-packages/*" -o -path "*/.tox/*" \
+  -o -path "*/vendor/*" -o -path "*/.m2/*" -o -path "*/.gradle/*" -o -path "*/.cargo/*" )
+
 FOUND_MANIFEST=""
 shopt -s nullglob
 while IFS= read -r candidate; do
@@ -95,6 +113,18 @@ while IFS= read -r candidate; do
   elif [ -f "$candidate" ]; then
     FOUND_MANIFEST="$candidate"
     break
+  else
+    # Not at the expected top-level path - for a "fresh" case, Claude may
+    # have scaffolded the project into a subdirectory of its own naming
+    # (e.g. `cargo new <name>` instead of `cargo init` in place). Fall back
+    # to a recursive search for the same filename, skipping build/dep dirs.
+    base="$(basename "$candidate")"
+    nested=$(find . \( "${PRUNE_EXPR[@]}" \) -prune -o -type f -name "$base" -print 2>/dev/null \
+      | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
+    if [ -n "$nested" ]; then
+      FOUND_MANIFEST="$nested"
+      break
+    fi
   fi
 done < <(echo "$C" | jq -r 'if (.manifest|type)=="array" then .manifest[] else .manifest end')
 shopt -u nullglob
