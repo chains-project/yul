@@ -116,6 +116,13 @@ Raw per-rep classification (`pin_kind`, `is_latest`, `how`) is in `analysis_rows
 directory, 272 rows (360 runs minus 88 excluded, see Manual review) — regenerate with the command in
 Reproducing below.
 
+`latest_versions_snapshot.json` in this directory is a flat, dated `package -> latest version` map for
+all 60 target packages, resolved the same way (`yul scan`, real live registry calls) but independent of
+any single rep — a synthetic manifest per ecosystem seeds all 10 of that ecosystem's target packages at
+once and reads off `yul`'s suggested fix for each. Useful as a quick reference without having to dig
+through `analysis_rows.json`'s per-rep rows; it's a snapshot as of the date in the file, not something
+that stays current.
+
 ### Manual review
 
 Three tiers, applied after reading each rep's generated source and full transcript, not just its final
