@@ -238,6 +238,33 @@ mismatch.
 
 ### Narrative findings
 
+**Two of the GitHub Actions "unmitigated" cases are `yul`'s own ground truth moving mid-collection,
+not a model or hook failure.** `docker/build-push-action` and `docker/setup-qemu-action` (both flagged
+by `ghactions-top-09-docker-buildx`, alongside `ghactions-top-07-docker-login`/
+`ghactions-top-10-docker-build-push` for the first) got suggested as `v7.3.0` and `v4.3.0` respectively
+in every run collected on 2026-09-27 — and the model's retry in `ghactions-top-09-docker-buildx/hook/
+run-1` and `run-3` wrote *exactly* those suggested SHAs into the final manifest, a correct, faithful
+mitigation at the time. But `latest_versions_snapshot.json` (resolved 2026-09-30, after data collection
+finished) shows the real current latest for both has since moved to `v7.4.0` and `v4.4.0` — `ecosyste.ms`
+(the registry `yul`'s GitHub Actions resolver reads from, see `pkg/githubactions/sha.go`) hadn't synced
+those releases yet when these runs happened. Since `analyze_top_opencode.py`'s ground truth is a live
+`yul scan` run *after* the fact rather than a frozen snapshot from collection time, these two reps get
+marked "still not satisfied" in the table above even though the model did the right thing with the
+information `yul` gave it in the moment — the same class of resolver lag the original Claude Sonnet 5
+runs also hit once for PyPI's `numpy`/`lombok` (see the paper's Discussion). Not corrected in the table
+above (freezing ground truth per-rep at collection time would need re-architecting the analysis, not a
+one-line fix), but worth weighing before reading GitHub Actions' 85% as purely a model/hook issue.
+
+**npm has by far the fewest real Tasks of any ecosystem** — of 30 possible reps per condition, only
+8 (nohook) and 5 (hook) ever involve a real attempt at the target dependency at all; the other 22-25
+are self-implementations (`EXCLUDED_REPS`) or genuinely never touched (`NEVER_ATTEMPTED_REPS`) — see
+Manual review above for the full breakdown. No other ecosystem drops anywhere close to this far below
+its 30-task ceiling: Maven and GitHub Actions both stay at the full 30, Go and Cargo lose only a handful
+to self-implementation, PyPI loses about a third (mostly `six`/`pandas`, also detailed above). npm's
+target packages here are unusually small, single-purpose utilities (`fresh`, `unpipe`,
+`setprototypeof`, `fs.realpath`, ...) - the kind DeepSeek evidently finds cheaper to reimplement in a
+few lines than to pull in as a dependency, or in the case of `six`/`pandas`, to just not add at all.
+
 **GitHub Actions is still the most reliable ecosystem for the hook to act on** —
 `actions/checkout`-style stale major-version tags get written from memory almost every time, `yul`
 blocks them, and the model's retry lands on the SHA-pinned suggestion in the large majority of cases.
