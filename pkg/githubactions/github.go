@@ -15,6 +15,7 @@ import (
 
 	"github.com/chains-project/yul/pkg/util/resolver"
 	"github.com/git-pkgs/purl"
+	"github.com/git-pkgs/vers"
 )
 
 const githubAPI = "https://api.github.com"
@@ -48,9 +49,8 @@ type GitHubResolver struct {
 	// Client is the HTTP client to use; nil means http.DefaultClient.
 	Client *http.Client
 
-	// baseURL and token override githubAPI and githubToken for tests.
-	baseURL string
-	token   func() string
+	// token overrides githubToken for tests.
+	token func() string
 }
 
 func (r *GitHubResolver) LatestVersions(ctx context.Context, purls []string) (map[string]string, error) {
@@ -116,34 +116,45 @@ func (r *GitHubResolver) ResolveSHA(ctx context.Context, repo, tag string) (stri
 	return strings.TrimSpace(string(sha)), nil
 }
 
-// latestRelease returns the tag of the release GitHub marks as latest
-// (never a draft or pre-release) in the repo p's action lives in.
+// latestRelease returns the highest version-like tag among the recent
+// releases (never drafts or pre-releases) of the repo p's action lives in.
+// It doesn't use releases/latest, since a repo can mark a release that
+// isn't the action's at all as latest (github/codeql-action marks its
+// codeql-bundle-v2.x releases).
+// e.g. https://api.github.com/repos/actions/checkout/releases?per_page=100
 func (r *GitHubResolver) latestRelease(ctx context.Context, token, p string) (string, error) {
 	parsed, err := purl.Parse(p)
 	if err != nil {
 		return "", err
 	}
-	resp, err := r.get(ctx, token, "/repos/"+repoOf(parsed.FullName())+"/releases/latest", "application/vnd.github+json")
+	resp, err := r.get(ctx, token, "/repos/"+repoOf(parsed.FullName())+"/releases?per_page=100", "application/vnd.github+json")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	var release struct {
-		TagName string `json:"tag_name"`
+	var releases []struct {
+		TagName    string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return "", err
 	}
-	return release.TagName, nil
+	var latest string
+	for _, release := range releases {
+		if release.Draft || release.Prerelease || !looksLikeVersion(release.TagName) {
+			continue
+		}
+		if latest == "" || vers.Compare(release.TagName, latest) > 0 {
+			latest = release.TagName
+		}
+	}
+	return latest, nil
 }
 
 func (r *GitHubResolver) get(ctx context.Context, token, path, accept string) (*http.Response, error) {
-	base := r.baseURL
-	if base == "" {
-		base = githubAPI
-	}
 	ctx, cancel := context.WithTimeout(ctx, defaultShaTimeout)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubAPI+path, nil)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -165,7 +176,7 @@ func (r *GitHubResolver) get(ctx context.Context, token, path, accept string) (*
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		cancel()
-		return nil, fmt.Errorf("fetching %s: unexpected status %d", base+path, resp.StatusCode)
+		return nil, fmt.Errorf("fetching %s: unexpected status %d", githubAPI+path, resp.StatusCode)
 	}
 	resp.Body = cancelOnClose{resp.Body, cancel}
 	return resp, nil

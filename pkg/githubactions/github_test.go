@@ -2,11 +2,10 @@ package githubactions
 
 import (
 	"context"
-	"maps"
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
+
+	"github.com/git-pkgs/vers"
 )
 
 type fallbackStub struct {
@@ -28,60 +27,64 @@ func (shaStub) ResolveSHA(context.Context, string, string) (string, error) {
 	return "fallbacksha", nil
 }
 
-func newGitHubServer(t *testing.T) *httptest.Server {
+// liveToken skips t unless a GitHub token is available: without one,
+// GitHubResolver never calls GitHub, and GitHub only allows 60
+// unauthenticated requests an hour anyway.
+func liveToken(t *testing.T) func() string {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer tok" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		switch r.URL.Path {
-		case "/repos/github/codeql-action/releases/latest":
-			w.Write([]byte(`{"tag_name":"v4.31.0"}`))
-		case "/repos/actions/checkout/commits/v7.0.1":
-			if r.Header.Get("Accept") != "application/vnd.github.sha" {
-				http.Error(w, "bad accept", http.StatusBadRequest)
-				return
-			}
-			w.Write([]byte("3d3c42e5aac5ba805825da76410c181273ba90b1"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	token := githubToken()
+	if token == "" {
+		t.Skip("no GitHub token (GITHUB_TOKEN, GH_TOKEN, or gh auth token)")
+	}
+	return func() string { return token }
 }
 
+// TestGitHubResolverLatestVersions queries GitHub's API. The latest
+// release moves, so it's only checked to be at least one already
+// released.
 func TestGitHubResolverLatestVersions(t *testing.T) {
-	srv := newGitHubServer(t)
-	defer srv.Close()
-
 	fallback := &fallbackStub{}
-	r := &GitHubResolver{Fallback: fallback, baseURL: srv.URL, token: func() string { return "tok" }}
+	r := &GitHubResolver{Fallback: fallback, token: liveToken(t)}
 
 	got, err := r.LatestVersions(context.Background(), []string{
+		"pkg:githubactions/actions/checkout",
 		"pkg:githubactions/github/codeql-action/init",
-		"pkg:githubactions/someone/tags-only",
+		"pkg:githubactions/chains-project/yul-test-repo-that-does-not-exist",
 		"pkg:npm/react",
 	})
 	if err != nil {
 		t.Fatalf("LatestVersions() error = %v", err)
 	}
-	want := map[string]string{
-		"pkg:githubactions/github/codeql-action/init": "v4.31.0",
-		"pkg:githubactions/someone/tags-only":         "v0.0.1",
-		"pkg:npm/react":                               "v0.0.1",
+
+	for purl, atLeast := range map[string]string{
+		"pkg:githubactions/actions/checkout":          "v4.0.0",
+		"pkg:githubactions/github/codeql-action/init": "v3.0.0",
+	} {
+		if v := got[purl]; vers.Compare(v, atLeast) < 0 {
+			t.Errorf("%s: latest %q is older than %q", purl, v, atLeast)
+		}
 	}
-	if !maps.Equal(got, want) {
-		t.Errorf("LatestVersions() = %v, want %v", got, want)
-	}
+
 	slices.Sort(fallback.got)
-	if want := []string{"pkg:githubactions/someone/tags-only", "pkg:npm/react"}; !slices.Equal(fallback.got, want) {
+	if want := []string{"pkg:githubactions/chains-project/yul-test-repo-that-does-not-exist", "pkg:npm/react"}; !slices.Equal(fallback.got, want) {
 		t.Errorf("fallback got %v, want the repo without a release and the non-action purl", fallback.got)
+	}
+}
+
+func TestGitHubResolverResolveSHA(t *testing.T) {
+	r := &GitHubResolver{token: liveToken(t)}
+	sha, err := r.ResolveSHA(context.Background(), "actions/checkout", "v4.0.0")
+	if err != nil {
+		t.Fatalf("ResolveSHA() error = %v", err)
+	}
+	if sha != "1e31de5234b9f8995739874a8ce0492dc87873e2" {
+		t.Errorf("ResolveSHA() = %q", sha)
 	}
 }
 
 func TestGitHubResolverWithoutTokenUsesFallback(t *testing.T) {
 	fallback := &fallbackStub{}
-	r := &GitHubResolver{Fallback: fallback, ShaFallback: shaStub{}, baseURL: "http://unused.invalid", token: func() string { return "" }}
+	r := &GitHubResolver{Fallback: fallback, ShaFallback: shaStub{}, token: func() string { return "" }}
 
 	got, err := r.LatestVersions(context.Background(), []string{"pkg:githubactions/actions/checkout"})
 	if err != nil {
@@ -94,19 +97,5 @@ func TestGitHubResolverWithoutTokenUsesFallback(t *testing.T) {
 	sha, err := r.ResolveSHA(context.Background(), "actions/checkout", "v7.0.1")
 	if err != nil || sha != "fallbacksha" {
 		t.Errorf("ResolveSHA() = %q, %v, want fallback's answer", sha, err)
-	}
-}
-
-func TestGitHubResolverResolveSHA(t *testing.T) {
-	srv := newGitHubServer(t)
-	defer srv.Close()
-
-	r := &GitHubResolver{baseURL: srv.URL, token: func() string { return "tok" }}
-	sha, err := r.ResolveSHA(context.Background(), "actions/checkout", "v7.0.1")
-	if err != nil {
-		t.Fatalf("ResolveSHA() error = %v", err)
-	}
-	if sha != "3d3c42e5aac5ba805825da76410c181273ba90b1" {
-		t.Errorf("ResolveSHA() = %q", sha)
 	}
 }
