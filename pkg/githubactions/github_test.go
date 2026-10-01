@@ -2,7 +2,10 @@ package githubactions
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/git-pkgs/vers"
@@ -97,5 +100,31 @@ func TestGitHubResolverWithoutTokenUsesFallback(t *testing.T) {
 	sha, err := r.ResolveSHA(context.Background(), "actions/checkout", "v7.0.1")
 	if err != nil || sha != "fallbacksha" {
 		t.Errorf("ResolveSHA() = %q, %v, want fallback's answer", sha, err)
+	}
+}
+
+type rejectingTransport struct{}
+
+func (rejectingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+}
+
+// A token GitHub rejects (e.g. a stale GH_TOKEN) must behave like no token.
+func TestGitHubResolverRejectedTokenUsesFallback(t *testing.T) {
+	r := &GitHubResolver{
+		Fallback:    &fallbackStub{},
+		ShaFallback: shaStub{},
+		Client:      &http.Client{Transport: rejectingTransport{}},
+		token:       func() string { return "stale" },
+	}
+
+	sha, err := r.ResolveSHA(context.Background(), "actions/checkout", "v7.0.1")
+	if err != nil || sha != "fallbacksha" {
+		t.Errorf("ResolveSHA() = %q, %v, want fallback's answer", sha, err)
+	}
+
+	got, err := r.LatestVersions(context.Background(), []string{"pkg:githubactions/actions/checkout"})
+	if err != nil || got["pkg:githubactions/actions/checkout"] != "v0.0.1" {
+		t.Errorf("LatestVersions() = %v, %v, want fallback's answer", got, err)
 	}
 }

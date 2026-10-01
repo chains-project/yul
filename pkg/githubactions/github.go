@@ -104,6 +104,16 @@ func (r *GitHubResolver) ResolveSHA(ctx context.Context, repo, tag string) (stri
 		return r.ShaFallback.ResolveSHA(ctx, repo, tag)
 	}
 
+	// A rejected token (e.g. a stale GH_TOKEN) must not disable pinning, so
+	// any failure here defers to the fallback just like having no token.
+	sha, err := r.githubSHA(ctx, token, repo, tag)
+	if err != nil && r.ShaFallback != nil {
+		return r.ShaFallback.ResolveSHA(ctx, repo, tag)
+	}
+	return sha, err
+}
+
+func (r *GitHubResolver) githubSHA(ctx context.Context, token, repo, tag string) (string, error) {
 	resp, err := r.get(ctx, token, "/repos/"+repo+"/commits/"+url.PathEscape(tag), "application/vnd.github.sha")
 	if err != nil {
 		return "", err
