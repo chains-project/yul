@@ -58,6 +58,7 @@ package githubactions
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -200,7 +201,8 @@ func parseWorkflowPins(content string) (map[string]actionPin, error) {
 // CheckWorkflow compares workflow content before and after a Write and
 // reports any version-pinned action reference that is newly added or
 // whose pinned ref was just changed, and is older than the latest
-// release res knows about. References the write didn't touch, or that
+// release res knows about, or is a mutable tag (not a commit SHA) that
+// shaRes can resolve to one. References the write didn't touch, or that
 // aren't pinned to something version-shaped, are left alone.
 func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolver) ([]mismatch.Mismatch, error) {
 	beforePins, err := parseWorkflowPins(before)
@@ -239,24 +241,31 @@ func CheckWorkflow(before, after string, res resolver.Resolver, shaRes ShaResolv
 		if !ok {
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.name)
 		}
-		if vers.Compare(pin.version, latestVersion) < 0 {
-			mismatches = append(mismatches, mismatch.Mismatch{
-				Name:    pin.name,
-				Current: pin.version,
-				Latest:  latestVersion,
-			})
+		outdated := vers.Compare(pin.version, latestVersion) < 0
+		// A current tag pin is still mutable, so it's reported too, but
+		// only when there's a SHA to suggest instead.
+		mutable := pin.ref == pin.version && shaRes != nil
+		if !outdated && !mutable {
+			continue
 		}
-	}
 
-	if shaRes != nil {
-		for i := range mismatches {
-			sha, err := shaRes.ResolveSHA(context.Background(), repoOf(mismatches[i].Name), mismatches[i].Latest)
-			if err != nil {
-				continue // fail open: report the plain tag instead
+		tag := pin.version
+		if outdated {
+			tag = latestVersion
+		}
+		m := mismatch.Mismatch{Name: pin.name, Current: pin.version, Latest: tag}
+		if shaRes != nil {
+			sha, err := shaRes.ResolveSHA(context.Background(), repoOf(pin.name), tag)
+			if err == nil {
+				m.Suggested = fmt.Sprintf("%s # %s", sha, tag)
+			} else {
+				fmt.Fprintf(os.Stderr, "hook: resolving SHA for %s@%s: %v\n", pin.name, tag, err)
+				if !outdated {
+					continue // fail open: nothing to suggest for an up-to-date pin
+				}
 			}
-			mismatches[i].Suggested = fmt.Sprintf("%s # %s", sha, mismatches[i].Latest)
 		}
+		mismatches = append(mismatches, m)
 	}
-
 	return mismatches, nil
 }
