@@ -350,6 +350,34 @@ func TestCheckWorkflowSuggestsShaPin(t *testing.T) {
 	}
 }
 
+func TestCheckWorkflowSuggestsShaForCurrentTagPin(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
+	sha := &mockShaResolver{sha: map[string]string{
+		"actions/checkout@" + latestActionVersion: "3d3c42e5aac5ba805825da76410c181273ba90b1",
+	}}
+
+	after := "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@" + latestActionVersion + "\n"
+
+	got, err := CheckWorkflow("", after, res, sha)
+	if err != nil {
+		t.Fatalf("CheckWorkflow() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CheckWorkflow() = %#v, want 1 mismatch for a current tag pin", got)
+	}
+	want := "3d3c42e5aac5ba805825da76410c181273ba90b1 # " + latestActionVersion
+	if got[0].Suggested != want {
+		t.Errorf("CheckWorkflow() Suggested = %q, want %q", got[0].Suggested, want)
+	}
+
+	// With no SHA to suggest, a current tag pin passes.
+	failing := &mockShaResolver{err: fmt.Errorf("network error")}
+	got, err = CheckWorkflow("", after, res, failing)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("CheckWorkflow() = %#v, %v, want no mismatches when the SHA lookup fails", got, err)
+	}
+}
+
 func TestCheckWorkflowShaLookupFailsOpen(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{checkoutActionPURL: latestActionVersion}}
 	sha := &mockShaResolver{err: fmt.Errorf("network error")}
