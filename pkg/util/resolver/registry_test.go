@@ -2,11 +2,10 @@ package resolver
 
 import (
 	"context"
-	"maps"
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
+
+	"github.com/git-pkgs/vers"
 )
 
 type fallbackStub struct {
@@ -22,60 +21,54 @@ func (f *fallbackStub) LatestVersions(_ context.Context, purls []string) (map[st
 	return latest, nil
 }
 
+// TestRegistryResolverLatestVersions queries the real registries. Latest
+// versions move, so each package is only checked for a stable version at
+// least as new as one already released. Each was picked because its
+// registry also lists something a naive lookup would get wrong: a beta
+// dist-tag (npm), a post-release (PyPI), a 1.0.0 alpha (Cargo), an
+// uppercase module path (Go), and milestones (Maven).
 func TestRegistryResolverLatestVersions(t *testing.T) {
-	responses := map[string]string{
-		"/npm/-/package/@vitejs%2Fplugin-react/dist-tags": `{"beta":"7.0.0-beta.1","latest":"6.1.1"}`,
-		"/pypi/pypi/python-dateutil/json":                 `{"info":{"version":"2.9.0.post0"}}`,
-		"/cargo/api/v1/crates/libc":                       `{"crate":{"max_version":"1.0.0-alpha.4","max_stable_version":"0.2.189"}}`,
-		"/golang/github.com/!burnt!sushi/toml/@latest":    `{"Version":"v1.6.0"}`,
-		"/maven/org/springframework/boot/spring-boot-starter-web/maven-metadata.xml": `<metadata><versioning>
-			<release>4.2.0-M2</release>
-			<versions><version>3.5.9</version><version>4.1.1</version><version>4.2.0-M2</version><version>4.0.12</version></versions>
-		</versioning></metadata>`,
+	tests := []struct {
+		purl, scheme, atLeast string
+	}{
+		{"pkg:npm/%40vitejs/plugin-react", "npm", "4.0.0"},
+		{"pkg:pypi/python-dateutil", "pypi", "2.9.0.post0"},
+		{"pkg:cargo/libc", "cargo", "0.2.150"},
+		{"pkg:golang/github.com/BurntSushi/toml", "golang", "v1.3.0"},
+		{"pkg:maven/org.springframework.boot/spring-boot-starter-web", "maven", "3.0.0"},
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, ok := responses[r.URL.EscapedPath()]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write([]byte(body))
-	}))
-	defer srv.Close()
 
 	fallback := &fallbackStub{}
-	r := &RegistryResolver{Fallback: fallback, baseURLs: map[string]string{}}
-	for typ := range registries {
-		r.baseURLs[typ] = srv.URL + "/" + typ
-	}
+	r := &RegistryResolver{Fallback: fallback}
 
-	got, err := r.LatestVersions(context.Background(), []string{
-		"pkg:npm/%40vitejs/plugin-react",
-		"pkg:pypi/python-dateutil",
-		"pkg:cargo/libc",
-		"pkg:golang/github.com/BurntSushi/toml",
-		"pkg:maven/org.springframework.boot/spring-boot-starter-web",
-		"pkg:npm/unknown-package",
+	purls := []string{
+		"pkg:npm/yul-test-package-that-does-not-exist",
 		"pkg:githubactions/actions/checkout",
-	})
+	}
+	for _, test := range tests {
+		purls = append(purls, test.purl)
+	}
+	got, err := r.LatestVersions(context.Background(), purls)
 	if err != nil {
 		t.Fatalf("LatestVersions() error = %v", err)
 	}
 
-	want := map[string]string{
-		"pkg:npm/%40vitejs/plugin-react":                             "6.1.1",
-		"pkg:pypi/python-dateutil":                                   "2.9.0.post0",
-		"pkg:cargo/libc":                                             "0.2.189",
-		"pkg:golang/github.com/BurntSushi/toml":                      "v1.6.0",
-		"pkg:maven/org.springframework.boot/spring-boot-starter-web": "4.1.1",
-		"pkg:npm/unknown-package":                                    "v1.0.0",
-		"pkg:githubactions/actions/checkout":                         "v1.0.0",
+	for _, test := range tests {
+		v, ok := got[test.purl]
+		if !ok {
+			t.Errorf("%s: no latest version", test.purl)
+			continue
+		}
+		if !vers.IsStableWithScheme(v, test.scheme) {
+			t.Errorf("%s: latest %q is not a stable version", test.purl, v)
+		}
+		if vers.CompareWithScheme(v, test.atLeast, test.scheme) < 0 {
+			t.Errorf("%s: latest %q is older than %q", test.purl, v, test.atLeast)
+		}
 	}
-	if !maps.Equal(got, want) {
-		t.Errorf("LatestVersions() = %v, want %v", got, want)
-	}
+
 	slices.Sort(fallback.got)
-	if want := []string{"pkg:githubactions/actions/checkout", "pkg:npm/unknown-package"}; !slices.Equal(fallback.got, want) {
+	if want := []string{"pkg:githubactions/actions/checkout", "pkg:npm/yul-test-package-that-does-not-exist"}; !slices.Equal(fallback.got, want) {
 		t.Errorf("fallback got %v, want %v", fallback.got, want)
 	}
 }

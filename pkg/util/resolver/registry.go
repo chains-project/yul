@@ -32,13 +32,15 @@ type registry struct {
 
 // registries maps a purl type to its registry. Each uses whatever the
 // registry itself publishes as its latest stable release, so yul agrees
-// with what a user sees on the registry's own site.
+// with what a user sees on the registry's own site. Maven reads
+// maven-metadata.xml from Maven Central rather than search.maven.org's
+// search API, which returned unreliable results.
 var registries = map[string]registry{
-	"npm":    {"https://registry.npmjs.org", npmLatest},
-	"pypi":   {"https://pypi.org", pypiLatest},
-	"cargo":  {"https://crates.io", cargoLatest},
-	"golang": {"https://proxy.golang.org", goLatest},
-	"maven":  {"https://repo1.maven.org/maven2", mavenLatest},
+	"npm":    {"https://registry.npmjs.org", npmLatest},       // e.g. https://registry.npmjs.org/-/package/react/dist-tags
+	"pypi":   {"https://pypi.org", pypiLatest},                // e.g. https://pypi.org/pypi/requests/json
+	"cargo":  {"https://crates.io", cargoLatest},              // e.g. https://crates.io/api/v1/crates/serde
+	"golang": {"https://proxy.golang.org", goLatest},          // e.g. https://proxy.golang.org/github.com/!burnt!sushi/toml/@latest
+	"maven":  {"https://repo1.maven.org/maven2", mavenLatest}, // e.g. https://repo1.maven.org/maven2/org/slf4j/slf4j-api/maven-metadata.xml
 }
 
 // RegistryResolver resolves latest versions by querying each package's
@@ -51,9 +53,6 @@ type RegistryResolver struct {
 
 	// Client is the HTTP client to use; nil means http.DefaultClient.
 	Client *http.Client
-
-	// baseURLs overrides registries' base URLs by purl type, for tests.
-	baseURLs map[string]string
 }
 
 func (r *RegistryResolver) LatestVersions(ctx context.Context, purls []string) (map[string]string, error) {
@@ -82,14 +81,10 @@ func (r *RegistryResolver) LatestVersions(ctx context.Context, purls []string) (
 			fallback = append(fallback, p)
 			continue
 		}
-		baseURL := reg.baseURL
-		if override, ok := r.baseURLs[parsed.Type]; ok {
-			baseURL = override
-		}
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			v, err := reg.latest(fetchCtx, client, baseURL, fullName(p, parsed))
+			v, err := reg.latest(fetchCtx, client, reg.baseURL, fullName(p, parsed))
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil || v == "" {
@@ -158,6 +153,7 @@ func getJSON(ctx context.Context, c *http.Client, reqURL string, v any) error {
 
 // npmLatest reads the "latest" dist-tag, which is what npm install resolves
 // to. The dist-tags endpoint is a few bytes, unlike the full packument.
+// e.g. https://registry.npmjs.org/-/package/@vitejs%2Fplugin-react/dist-tags
 func npmLatest(ctx context.Context, c *http.Client, baseURL, name string) (string, error) {
 	var tags map[string]string
 	// A scoped name's "/" must be encoded: @scope%2Fpkg.
@@ -167,6 +163,7 @@ func npmLatest(ctx context.Context, c *http.Client, baseURL, name string) (strin
 
 // pypiLatest reads info.version, PyPI's own latest stable release (post-
 // releases count; pre-releases don't).
+// e.g. https://pypi.org/pypi/requests/json
 func pypiLatest(ctx context.Context, c *http.Client, baseURL, name string) (string, error) {
 	var doc struct {
 		Info struct {
@@ -179,6 +176,7 @@ func pypiLatest(ctx context.Context, c *http.Client, baseURL, name string) (stri
 
 // cargoLatest reads max_stable_version, the highest non-pre-release,
 // non-yanked version.
+// e.g. https://crates.io/api/v1/crates/serde
 func cargoLatest(ctx context.Context, c *http.Client, baseURL, name string) (string, error) {
 	var doc struct {
 		Crate struct {
@@ -191,6 +189,7 @@ func cargoLatest(ctx context.Context, c *http.Client, baseURL, name string) (str
 
 // goLatest reads the module proxy's @latest, which is what `go get
 // module@latest` resolves to.
+// e.g. https://proxy.golang.org/github.com/!burnt!sushi/toml/@latest
 func goLatest(ctx context.Context, c *http.Client, baseURL, name string) (string, error) {
 	var doc struct {
 		Version string `json:"Version"`
@@ -216,6 +215,7 @@ func escapeModulePath(path string) string {
 // mavenLatest picks the highest stable version listed in
 // maven-metadata.xml. Its <release> element isn't used: it's just the last
 // version deployed, which can be a milestone or a backport.
+// e.g. https://repo1.maven.org/maven2/org/slf4j/slf4j-api/maven-metadata.xml
 func mavenLatest(ctx context.Context, c *http.Client, baseURL, name string) (string, error) {
 	group, artifact, ok := strings.Cut(name, ":")
 	if !ok {
@@ -235,6 +235,7 @@ func mavenLatest(ctx context.Context, c *http.Client, baseURL, name string) (str
 	}
 	var latest string
 	for _, v := range doc.Versions {
+		// Skips alpha, beta, milestone (M1), rc/cr, and SNAPSHOT versions.
 		if !vers.IsStableWithScheme(v, "maven") {
 			continue
 		}
