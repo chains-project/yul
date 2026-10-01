@@ -1,0 +1,197 @@
+package githubactions
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+
+	"github.com/chains-project/yul/pkg/util/resolver"
+	"github.com/git-pkgs/purl"
+)
+
+const githubAPI = "https://api.github.com"
+
+// githubToken finds a token for GitHub's API in GITHUB_TOKEN, GH_TOKEN, or
+// `gh auth token`, looked up once per process and only when first needed.
+var githubToken = sync.OnceValue(func() string {
+	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if t := os.Getenv(k); t != "" {
+			return t
+		}
+	}
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+})
+
+// GitHubResolver resolves an action's latest release, and the commit SHA
+// that release's tag points to, straight from GitHub's API. GitHub allows
+// only 60 unauthenticated requests an hour, so without a token it defers
+// to Fallback / ShaFallback (ecosyste.ms) instead; Fallback also covers
+// any repo whose latest release lookup fails, e.g. one that only pushes
+// tags and never publishes a release, and any purl that isn't a GitHub
+// Action at all.
+type GitHubResolver struct {
+	Fallback    resolver.Resolver
+	ShaFallback ShaResolver
+
+	// Client is the HTTP client to use; nil means http.DefaultClient.
+	Client *http.Client
+
+	// baseURL and token override githubAPI and githubToken for tests.
+	baseURL string
+	token   func() string
+}
+
+func (r *GitHubResolver) LatestVersions(ctx context.Context, purls []string) (map[string]string, error) {
+	token := r.getToken()
+	if token == "" {
+		return r.fallback(ctx, purls)
+	}
+
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		latest   = make(map[string]string, len(purls))
+		fallback []string
+	)
+	for _, p := range purls {
+		if !strings.HasPrefix(p, "pkg:githubactions/") {
+			fallback = append(fallback, p)
+			continue
+		}
+		wg.Go(func() {
+			tag, err := r.latestRelease(ctx, token, p)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil || tag == "" {
+				fallback = append(fallback, p)
+				return
+			}
+			latest[p] = tag
+		})
+	}
+	wg.Wait()
+
+	if len(fallback) > 0 {
+		got, err := r.fallback(ctx, fallback)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(latest, got)
+	}
+	return latest, nil
+}
+
+// ResolveSHA returns the commit SHA tag points to in repo, dereferencing
+// annotated tags.
+func (r *GitHubResolver) ResolveSHA(ctx context.Context, repo, tag string) (string, error) {
+	token := r.getToken()
+	if token == "" {
+		if r.ShaFallback == nil {
+			return "", fmt.Errorf("no GitHub token and no fallback SHA resolver")
+		}
+		return r.ShaFallback.ResolveSHA(ctx, repo, tag)
+	}
+
+	resp, err := r.get(ctx, token, "/repos/"+repo+"/commits/"+url.PathEscape(tag), "application/vnd.github.sha")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	sha, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(sha)), nil
+}
+
+// latestRelease returns the tag of the release GitHub marks as latest
+// (never a draft or pre-release) in the repo p's action lives in.
+func (r *GitHubResolver) latestRelease(ctx context.Context, token, p string) (string, error) {
+	parsed, err := purl.Parse(p)
+	if err != nil {
+		return "", err
+	}
+	resp, err := r.get(ctx, token, "/repos/"+repoOf(parsed.FullName())+"/releases/latest", "application/vnd.github+json")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", err
+	}
+	return release.TagName, nil
+}
+
+func (r *GitHubResolver) get(ctx context.Context, token, path, accept string) (*http.Response, error) {
+	base := r.baseURL
+	if base == "" {
+		base = githubAPI
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaultShaTimeout)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "yul")
+	req.Header.Set("Accept", accept)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	client := r.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		cancel()
+		return nil, fmt.Errorf("fetching %s: unexpected status %d", base+path, resp.StatusCode)
+	}
+	resp.Body = cancelOnClose{resp.Body, cancel}
+	return resp, nil
+}
+
+// cancelOnClose releases a request's timeout once its body is read.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c cancelOnClose) Close() error {
+	defer c.cancel()
+	return c.ReadCloser.Close()
+}
+
+func (r *GitHubResolver) getToken() string {
+	if r.token != nil {
+		return r.token()
+	}
+	return githubToken()
+}
+
+func (r *GitHubResolver) fallback(ctx context.Context, purls []string) (map[string]string, error) {
+	if r.Fallback == nil {
+		return map[string]string{}, nil
+	}
+	return r.Fallback.LatestVersions(ctx, purls)
+}

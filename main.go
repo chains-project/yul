@@ -37,10 +37,22 @@ func newCheckers(res resolver.Resolver) []manifestchecker.ManifestChecker {
 		pypi.RequirementsChecker{Resolver: res},
 		pypi.PyprojectChecker{Resolver: res},
 		npm.Checker{Resolver: res},
-		githubactions.Checker{Resolver: res, Sha: githubactions.EcosystemsShaResolver{}},
+		githubactions.Checker{Resolver: res, Sha: &githubactions.GitHubResolver{ShaFallback: githubactions.EcosystemsShaResolver{}}},
 		golang.Checker{Resolver: res},
 		cargo.Checker{Resolver: res},
 	}
+}
+
+// newResolver builds the resolver the checkers share: package ecosystems
+// are looked up directly against their registries, and GitHub Actions
+// through GitHub's API; ecosyste.ms covers failed registry lookups and
+// Actions without a GitHub token.
+func newResolver() (resolver.Resolver, error) {
+	ecosystems, err := resolver.NewEnrichmentResolver()
+	if err != nil {
+		return nil, err
+	}
+	return &resolver.RegistryResolver{Fallback: &githubactions.GitHubResolver{Fallback: ecosystems}}, nil
 }
 
 // checkerFor finds the checker that owns path, the file as passed to the
@@ -154,7 +166,7 @@ func parsePkgManagerPin(cmd string) (scheme, name, version string, ok bool) {
 // It exits 0 (fails open) if the purl can't be built or the resolver can't
 // find a latest version, same as the Write/Edit path's own resolver errors.
 func checkPkgManagerPin(scheme, name, pinnedVersion string) {
-	res, err := resolver.NewEnrichmentResolver()
+	res, err := newResolver()
 	if err != nil {
 		return // fail open: a resolver construction error shouldn't block the command
 	}
@@ -210,7 +222,7 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	res, err := resolver.NewEnrichmentResolver()
+	res, err := newResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hook: creating resolver: %v\n", err)
 		os.Exit(0) // fail open: a resolver construction error shouldn't block the write
@@ -367,7 +379,7 @@ func runScan(args []string) {
 		return
 	}
 
-	res, err := resolver.NewEnrichmentResolver()
+	res, err := newResolver()
 	if err != nil {
 		os.Exit(0) // fail open: don't add context, don't block startup
 	}
