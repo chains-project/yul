@@ -12,7 +12,7 @@ COPY --from=maven:3 /usr/share/maven /usr/share/maven
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo JAVA_HOME=/opt/java/openjdk \
     PATH=/usr/local/cargo/bin:/usr/local/go/bin:/opt/java/openjdk/bin:/usr/share/maven/bin:$PATH
-RUN apt-get update && apt-get install -y --no-install-recommends python3-pip python3-venv gh \
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip python3-venv python-is-python3 gh \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
