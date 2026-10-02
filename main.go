@@ -265,8 +265,27 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	var outdated, ranges []mismatch.Mismatch
+	// A missing lockfile alone never blocks - the package manager may need
+	// the manifest written first to generate one - so a range that allows
+	// latest only gets a nudge. Outdated pins and ranges that exclude latest
+	// still block.
+	var blocking []mismatch.Mismatch
 	for _, m := range mismatches {
+		if !m.Range || m.Suggested != "" {
+			blocking = append(blocking, m)
+		}
+	}
+
+	if len(blocking) == 0 { // only ranges with no lockfile are left
+		json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{
+			"hookEventName":     "PreToolUse",
+			"additionalContext": "yul: no lockfile next to the manifest. Suggestion to generate one to pin down the exact version.",
+		}})
+		os.Exit(0)
+	}
+
+	var outdated, ranges []mismatch.Mismatch
+	for _, m := range blocking {
 		if m.Range {
 			ranges = append(ranges, m)
 		} else {
@@ -295,12 +314,7 @@ func runHook() {
 			if m.Namespace != "" {
 				name = m.Namespace + ":" + m.Name
 			}
-			if m.Suggested != "" {
-				fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> widen to %s\n", name, m.Current, m.Latest, m.Suggested)
-			}
-			if m.NoLockfile {
-				fmt.Fprintf(os.Stderr, "  %s: no lockfile found next to this manifest -> run your package manager's install to generate one\n", name)
-			}
+			fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> update range to %s\n", name, m.Current, m.Latest, m.Suggested)
 		}
 	}
 	os.Exit(2)
@@ -453,7 +467,7 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 				name = f.Namespace + ":" + f.Name
 			}
 			if f.Suggested != "" {
-				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> widen to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
+				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> update range to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
 			}
 			if f.NoLockfile {
 				fmt.Fprintf(&b, "  %s: %s: no lockfile found next to this manifest\n", f.File, name)
