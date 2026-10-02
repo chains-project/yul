@@ -261,12 +261,33 @@ func runHook() {
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
 	}
 
-	if len(mismatches) == 0 {
+	// A missing lockfile alone never blocks - the package manager may need
+	// the manifest written first to generate one - so a range that allows
+	// latest only gets a nudge. Outdated pins and ranges that exclude latest
+	// still block.
+	var blocking []mismatch.Mismatch
+	var nudge strings.Builder
+	for _, m := range mismatches {
+		if m.NoLockfile {
+			fmt.Fprintf(&nudge, "  %s  %s\n", m.Name, m.Current)
+		}
+		if !m.Range || m.Suggested != "" {
+			blocking = append(blocking, m)
+		}
+	}
+
+	if len(blocking) == 0 {
+		if nudge.Len() > 0 {
+			json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{
+				"hookEventName":     "PreToolUse",
+				"additionalContext": "yul: no lockfile next to this manifest for these ranges:\n" + nudge.String() + "Once it's written, run your package manager's install to generate one.",
+			}})
+		}
 		os.Exit(0)
 	}
 
 	var outdated, ranges []mismatch.Mismatch
-	for _, m := range mismatches {
+	for _, m := range blocking {
 		if m.Range {
 			ranges = append(ranges, m)
 		} else {
@@ -295,12 +316,7 @@ func runHook() {
 			if m.Namespace != "" {
 				name = m.Namespace + ":" + m.Name
 			}
-			if m.Suggested != "" {
-				fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> widen to %s\n", name, m.Current, m.Latest, m.Suggested)
-			}
-			if m.NoLockfile {
-				fmt.Fprintf(os.Stderr, "  %s: no lockfile found next to this manifest -> run your package manager's install to generate one\n", name)
-			}
+			fmt.Fprintf(os.Stderr, "  %s  %s does not allow latest %s -> update range to %s\n", name, m.Current, m.Latest, m.Suggested)
 		}
 	}
 	os.Exit(2)
@@ -453,7 +469,7 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 				name = f.Namespace + ":" + f.Name
 			}
 			if f.Suggested != "" {
-				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> widen to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
+				fmt.Fprintf(&b, "  %s: %s  %s does not allow latest %s -> update range to %s\n", f.File, name, f.Current, f.Latest, f.Suggested)
 			}
 			if f.NoLockfile {
 				fmt.Fprintf(&b, "  %s: %s: no lockfile found next to this manifest\n", f.File, name)
