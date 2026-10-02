@@ -266,10 +266,10 @@ func runHook() {
 	// latest only gets a nudge. Outdated pins and ranges that exclude latest
 	// still block.
 	var blocking []mismatch.Mismatch
-	var nudge strings.Builder
+	unlocked := false
 	for _, m := range mismatches {
 		if m.NoLockfile {
-			fmt.Fprintf(&nudge, "  %s  %s\n", m.Name, m.Current)
+			unlocked = true
 		}
 		if !m.Range || m.Suggested != "" {
 			blocking = append(blocking, m)
@@ -277,10 +277,10 @@ func runHook() {
 	}
 
 	if len(blocking) == 0 {
-		if nudge.Len() > 0 {
+		if unlocked {
 			json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{
 				"hookEventName":     "PreToolUse",
-				"additionalContext": "yul: no lockfile next to this manifest for these ranges:\n" + nudge.String() + "Once it's written, run your package manager's install to generate one.",
+				"additionalContext": "yul: no lockfile next to this manifest. Suggestion to generate one to pin down the exact version.",
 			}})
 		}
 		os.Exit(0)
