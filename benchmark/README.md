@@ -8,6 +8,17 @@ claude -p "$PROMPT" --permission-mode bypassPermissions \
   --no-session-persistence > transcript.jsonl 2> stderr.log
 ```
 
+`claude` runs inside a throwaway Docker container that only sees the case's
+work directory (mounted at `/work`) and the `yul` binary, so it can't wander
+into the host filesystem. Build the image and provide a token first:
+
+```
+docker build -t yul-bench benchmark/
+export CLAUDE_CODE_OAUTH_TOKEN=...   # from `claude setup-token`
+```
+
+Set `BENCH_IMAGE` to use a different image tag.
+
 Two files come out of each run:
 
 - `transcript.jsonl` - the full turn-by-turn record of the session (every

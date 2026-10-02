@@ -11,7 +11,8 @@ CASE_ID="$2"
 CONDITION="$3"   # hook | nohook
 OUT_DIR="$4"
 REP="${5:-0}"    # "0" means no repeat subdirectory (single-run mode)
-YUL_BIN="/home/aman/Desktop/chains/ai-bump/yul"
+YUL_BIN="/home/aman/Desktop/chains/ai-bump/yul"  # host path; mounted at /usr/local/bin/yul in the container
+IMAGE="${BENCH_IMAGE:-yul-bench}"  # docker build -t yul-bench benchmark/
 
 case_json() {
   jq -c --arg id "$CASE_ID" '.[] | select(.id == $id)' "$CASES_JSON"
@@ -55,7 +56,7 @@ if [ "$CONDITION" = "hook" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "$YUL_BIN",
+            "command": "/usr/local/bin/yul",
             "timeout": 30
           }
         ]
@@ -79,7 +80,12 @@ git init -q
 git config user.email "benchmark@example.com"
 git config user.name "benchmark"
 
-claude -p "$PROMPT" \
+# Run claude in a throwaway container with only WORKDIR (and the yul binary)
+# visible. Auth comes from CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`).
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+  -e CLAUDE_CODE_OAUTH_TOKEN \
+  -v "$PWD:/work" -v "$YUL_BIN:/usr/local/bin/yul:ro" -w /work "$IMAGE" \
+  claude -p "$PROMPT" \
   --model sonnet \
   --permission-mode bypassPermissions \
   --setting-sources project \
