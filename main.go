@@ -279,7 +279,7 @@ func runHook() {
 	if len(blocking) == 0 { // only ranges with no lockfile are left
 		json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{
 			"hookEventName":     "PreToolUse",
-			"additionalContext": "yul: no lockfile next to this manifest. Suggestion to generate one to pin down the exact version.",
+			"additionalContext": "yul: no lockfile next to the manifest. Suggestion to generate one to pin down the exact version.",
 		}})
 		os.Exit(0)
 	}
