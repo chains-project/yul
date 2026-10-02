@@ -261,28 +261,26 @@ func runHook() {
 		os.Exit(0) // fail open: a resolver/network error shouldn't block the write
 	}
 
+	if len(mismatches) == 0 {
+		os.Exit(0)
+	}
+
 	// A missing lockfile alone never blocks - the package manager may need
 	// the manifest written first to generate one - so a range that allows
 	// latest only gets a nudge. Outdated pins and ranges that exclude latest
 	// still block.
 	var blocking []mismatch.Mismatch
-	unlocked := false
 	for _, m := range mismatches {
-		if m.NoLockfile {
-			unlocked = true
-		}
 		if !m.Range || m.Suggested != "" {
 			blocking = append(blocking, m)
 		}
 	}
 
-	if len(blocking) == 0 {
-		if unlocked {
-			json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{
-				"hookEventName":     "PreToolUse",
-				"additionalContext": "yul: no lockfile next to this manifest. Suggestion to generate one to pin down the exact version.",
-			}})
-		}
+	if len(blocking) == 0 { // only ranges with no lockfile are left
+		json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]string{
+			"hookEventName":     "PreToolUse",
+			"additionalContext": "yul: no lockfile next to this manifest. Suggestion to generate one to pin down the exact version.",
+		}})
 		os.Exit(0)
 	}
 
