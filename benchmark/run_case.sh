@@ -86,7 +86,7 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
   -e CLAUDE_CODE_OAUTH_TOKEN \
   -v "$PWD:/work" -v "$YUL_BIN:/usr/local/bin/yul:ro" -w /work "$IMAGE" \
   claude -p "$PROMPT" \
-  --model sonnet \
+  --model opus \
   --permission-mode bypassPermissions \
   --setting-sources project \
   --output-format stream-json \
