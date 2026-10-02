@@ -15,7 +15,12 @@ into the host filesystem. Build the image and provide a token first:
 ```
 docker build -t yul-bench benchmark/
 export CLAUDE_CODE_OAUTH_TOKEN=...   # from `claude setup-token`
+export GITHUB_TOKEN=...              # optional, for yul's GitHub Actions lookups
 ```
+
+`GITHUB_TOKEN` is readable by Claude inside the container, so use a
+fine-grained token with no extra permissions (public read access is all
+yul needs).
 
 Set `BENCH_IMAGE` to use a different image tag.
 
