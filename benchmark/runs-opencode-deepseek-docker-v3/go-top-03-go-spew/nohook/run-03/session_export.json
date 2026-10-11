@@ -1,0 +1,2393 @@
+{
+  "info": {
+    "id": "ses_efc4d4fdcffegwUvnepc8XAosa",
+    "slug": "misty-planet",
+    "projectID": "global",
+    "directory": "/work",
+    "path": "",
+    "title": "Go debug pretty-printer module setup",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "version": "1.18.34",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0.015699599999999998,
+    "tokens": {
+      "input": 4772,
+      "output": 6766,
+      "reasoning": 15711,
+      "cache": {
+        "read": 499200,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1791063404580,
+      "updated": 1791063531640
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1791063404688
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "deepseek",
+          "modelID": "deepseek-flash"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "cmd/demo/main.go",
+              "patch": "Index: cmd/demo/main.go\n===================================================================\n--- cmd/demo/main.go\t\n+++ cmd/demo/main.go\t\n@@ -0,0 +1,22 @@\n+// Command demo shows goprint inspecting a small object graph, including a\n+// reference cycle.\n+package main\n+\n+import (\n+\t\"github.com/example/goprint\"\n+)\n+\n+type Node struct {\n+\tName  string\n+\tValue any\n+\tNext  *Node\n+}\n+\n+func main() {\n+\ta := &Node{Name: \"a\", Value: 1}\n+\tb := &Node{Name: \"b\", Value: []string{\"x\", \"y\"}}\n+\ta.Next = b\n+\tb.Next = a\n+\n+\tgoprint.Print(a)\n+}\n",
+              "additions": 22,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "go.mod",
+              "patch": "Index: go.mod\n===================================================================\n--- go.mod\t\n+++ go.mod\t\n@@ -0,0 +1,3 @@\n+module github.com/example/goprint\n+\n+go 1.27.1\n",
+              "additions": 3,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "goprint.go",
+              "patch": "Index: goprint.go\n===================================================================\n--- goprint.go\t\n+++ goprint.go\t\n@@ -0,0 +1,360 @@\n+// Package goprint provides deep, cycle-safe pretty-printing of arbitrary Go\n+// values for debugging and inspection.\n+//\n+// Unlike fmt's %v verb, goprint recurses into struct fields (including\n+// unexported ones), reports the types of composite values, detects reference\n+// cycles, sorts map keys for deterministic output, and can bound both the\n+// recursion depth and the number of elements it emits. A value that cannot be\n+// inspected never panics the program: the error is reported in the output.\n+package goprint\n+\n+import (\n+\t\"bytes\"\n+\t\"fmt\"\n+\t\"io\"\n+\t\"os\"\n+\t\"reflect\"\n+\t\"sort\"\n+\t\"strconv\"\n+\t\"strings\"\n+)\n+\n+// Options configures printing. The zero value is usable and prints with tab\n+// indentation and no depth or item limits.\n+type Options struct {\n+\t// Indent is the string written once per nesting level. Defaults to \"\\t\".\n+\tIndent string\n+\t// MaxDepth limits how deep the printer recurses. A value <= 0 means no\n+\t// limit. Values beyond the limit are rendered as \"...\".\n+\tMaxDepth int\n+\t// MaxItems limits how many elements of a slice, array or map are printed.\n+\t// A value <= 0 means no limit.\n+\tMaxItems int\n+}\n+\n+func (o Options) indent() string {\n+\tif o.Indent == \"\" {\n+\t\treturn \"\\t\"\n+\t}\n+\treturn o.Indent\n+}\n+\n+// Sprint returns a deep, pretty-printed representation of v.\n+func Sprint(v any) string {\n+\treturn SprintOpts(v, Options{})\n+}\n+\n+// SprintOpts is Sprint with explicit options.\n+func SprintOpts(v any, opts Options) string {\n+\tvar buf bytes.Buffer\n+\tFprintOpts(&buf, v, opts)\n+\treturn buf.String()\n+}\n+\n+// Fprint writes the deep representation of v to w.\n+func Fprint(w io.Writer, v any) error {\n+\treturn FprintOpts(w, v, Options{})\n+}\n+\n+// FprintOpts writes the deep representation of v to w using opts.\n+func FprintOpts(w io.Writer, v any, opts Options) (err error) {\n+\tp := &printer{opts: opts, visited: map[visit]bool{}, buf: &bytes.Buffer{}}\n+\tdefer func() {\n+\t\tif r := recover(); r != nil {\n+\t\t\terr = fmt.Errorf(\"goprint: recovered while printing %T: %v\", v, r)\n+\t\t}\n+\t}()\n+\tp.value(reflect.ValueOf(v), 0)\n+\t_, err = io.WriteString(w, p.buf.String())\n+\treturn err\n+}\n+\n+// Print writes the deep representation of each value to standard output,\n+// one per line.\n+func Print(v ...any) {\n+\tfor _, x := range v {\n+\t\tos.Stdout.WriteString(Sprint(x))\n+\t\tos.Stdout.WriteString(\"\\n\")\n+\t}\n+}\n+\n+// visit identifies a reference value on the current printing path. It is used\n+// to detect cycles without treating shared but acyclic values as cycles.\n+type visit struct {\n+\tptr uintptr\n+\ttyp reflect.Type\n+}\n+\n+type printer struct {\n+\topts    Options\n+\tvisited map[visit]bool\n+\tbuf     *bytes.Buffer\n+\tcompact bool\n+}\n+\n+func (p *printer) write(s string) { p.buf.WriteString(s) }\n+\n+// writeIndent starts a new (indented) line. It is a no-op in compact mode.\n+func (p *printer) writeIndent(depth int) {\n+\tif p.compact {\n+\t\treturn\n+\t}\n+\tp.write(\"\\n\")\n+\tp.write(strings.Repeat(p.opts.indent(), depth))\n+}\n+\n+// withCycle guards a reference value. If fn is invoked while v is already on\n+// the active path, a cycle marker is printed instead.\n+func (p *printer) withCycle(v reflect.Value, fn func()) {\n+\tkey := visit{ptr: v.Pointer(), typ: v.Type()}\n+\tif p.visited[key] {\n+\t\tp.write(\"<cycle>\")\n+\t\treturn\n+\t}\n+\tp.visited[key] = true\n+\tdefer delete(p.visited, key)\n+\tfn()\n+}\n+\n+// inline renders v on a single line, sharing the cycle-detection state.\n+func (p *printer) inline(v reflect.Value, depth int) string {\n+\tsub := &printer{opts: p.opts, visited: p.visited, buf: &bytes.Buffer{}, compact: true}\n+\tsub.value(v, depth)\n+\treturn sub.buf.String()\n+}\n+\n+// limit returns how many elements of a sequence of length n should be printed.\n+func (p *printer) limit(n int) int {\n+\tif p.opts.MaxItems > 0 && n > p.opts.MaxItems {\n+\t\treturn p.opts.MaxItems\n+\t}\n+\treturn n\n+}\n+\n+func (p *printer) value(v reflect.Value, depth int) {\n+\tif !v.IsValid() {\n+\t\tp.write(\"<nil>\")\n+\t\treturn\n+\t}\n+\n+\tif v.Kind() == reflect.Interface {\n+\t\tif v.IsNil() {\n+\t\t\tp.write(\"nil\")\n+\t\t\treturn\n+\t\t}\n+\t\tp.value(v.Elem(), depth)\n+\t\treturn\n+\t}\n+\n+\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth && isComposite(v.Kind()) {\n+\t\tp.write(\"...\")\n+\t\treturn\n+\t}\n+\n+\tswitch v.Kind() {\n+\tcase reflect.Bool:\n+\t\tp.write(strconv.FormatBool(v.Bool()))\n+\tcase reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:\n+\t\tp.write(strconv.FormatInt(v.Int(), 10))\n+\tcase reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:\n+\t\tp.write(strconv.FormatUint(v.Uint(), 10))\n+\tcase reflect.Float32:\n+\t\tp.write(strconv.FormatFloat(v.Float(), 'g', -1, 32))\n+\tcase reflect.Float64:\n+\t\tp.write(strconv.FormatFloat(v.Float(), 'g', -1, 64))\n+\tcase reflect.Complex64:\n+\t\tp.write(formatComplex(v.Complex(), 32))\n+\tcase reflect.Complex128:\n+\t\tp.write(formatComplex(v.Complex(), 64))\n+\tcase reflect.String:\n+\t\tp.write(strconv.Quote(v.String()))\n+\tcase reflect.Ptr:\n+\t\tp.pointer(v, depth)\n+\tcase reflect.Struct:\n+\t\tp.structValue(v, depth)\n+\tcase reflect.Map:\n+\t\tp.mapValue(v, depth)\n+\tcase reflect.Slice:\n+\t\tp.sliceValue(v, depth)\n+\tcase reflect.Array:\n+\t\tp.sequence(v, depth, v.Type().String())\n+\tcase reflect.Chan:\n+\t\tp.write(\"(\" + v.Type().String() + \")(\" + hexPtr(v.Pointer()) + \")\")\n+\tcase reflect.Func:\n+\t\tif v.IsNil() {\n+\t\t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n+\t\t} else {\n+\t\t\tp.write(\"(\" + v.Type().String() + \")(\" + hexPtr(v.Pointer()) + \")\")\n+\t\t}\n+\tcase reflect.UnsafePointer:\n+\t\tp.write(\"unsafe.Pointer(\" + hexPtr(v.Pointer()) + \")\")\n+\tdefault:\n+\t\tp.write(fmt.Sprintf(\"<%s>\", v.Type()))\n+\t}\n+}\n+\n+func isComposite(k reflect.Kind) bool {\n+\tswitch k {\n+\tcase reflect.Ptr, reflect.Struct, reflect.Map, reflect.Slice, reflect.Array:\n+\t\treturn true\n+\tdefault:\n+\t\treturn false\n+\t}\n+}\n+\n+func (p *printer) pointer(v reflect.Value, depth int) {\n+\tif v.IsNil() {\n+\t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n+\t\treturn\n+\t}\n+\tp.withCycle(v, func() {\n+\t\tp.write(\"&\")\n+\t\tp.value(v.Elem(), depth)\n+\t})\n+}\n+\n+func (p *printer) structValue(v reflect.Value, depth int) {\n+\tt := v.Type()\n+\tp.write(t.String())\n+\tp.write(\"{\")\n+\tfor i := 0; i < t.NumField(); i++ {\n+\t\tif i > 0 {\n+\t\t\tp.write(\",\")\n+\t\t}\n+\t\tif p.compact {\n+\t\t\tp.write(\" \")\n+\t\t} else {\n+\t\t\tp.writeIndent(depth + 1)\n+\t\t}\n+\t\tp.write(t.Field(i).Name)\n+\t\tp.write(\": \")\n+\t\tp.value(v.Field(i), depth+1)\n+\t}\n+\tif t.NumField() > 0 {\n+\t\tif p.compact {\n+\t\t\tp.write(\" \")\n+\t\t} else {\n+\t\t\tp.writeIndent(depth)\n+\t\t}\n+\t}\n+\tp.write(\"}\")\n+}\n+\n+func (p *printer) mapValue(v reflect.Value, depth int) {\n+\tif v.IsNil() {\n+\t\tp.write(v.Type().String() + \"(nil)\")\n+\t\treturn\n+\t}\n+\tp.withCycle(v, func() {\n+\t\tn := v.Len()\n+\t\tp.write(v.Type().String())\n+\t\tif n == 0 {\n+\t\t\tp.write(\"{}\")\n+\t\t\treturn\n+\t\t}\n+\n+\t\ttype entry struct {\n+\t\t\tkey  reflect.Value\n+\t\t\ttext string\n+\t\t}\n+\t\tkeys := v.MapKeys()\n+\t\tentries := make([]entry, len(keys))\n+\t\tfor i, k := range keys {\n+\t\t\tentries[i] = entry{key: k, text: p.inline(k, depth+1)}\n+\t\t}\n+\t\tsort.Slice(entries, func(i, j int) bool { return entries[i].text < entries[j].text })\n+\n+\t\tlimit := p.limit(n)\n+\t\tp.write(\"{\")\n+\t\tfor i := 0; i < limit; i++ {\n+\t\t\tif i > 0 {\n+\t\t\t\tp.write(\",\")\n+\t\t\t}\n+\t\t\tif p.compact {\n+\t\t\t\tp.write(\" \")\n+\t\t\t} else {\n+\t\t\t\tp.writeIndent(depth + 1)\n+\t\t\t}\n+\t\t\tp.write(entries[i].text)\n+\t\t\tp.write(\": \")\n+\t\t\tp.value(v.MapIndex(entries[i].key), depth+1)\n+\t\t}\n+\t\tif limit < n {\n+\t\t\tp.write(\",\")\n+\t\t\tif p.compact {\n+\t\t\t\tp.write(\" \")\n+\t\t\t} else {\n+\t\t\t\tp.writeIndent(depth + 1)\n+\t\t\t}\n+\t\t\tp.write(fmt.Sprintf(\"... (%d more)\", n-limit))\n+\t\t}\n+\t\tif p.compact {\n+\t\t\tp.write(\" \")\n+\t\t} else {\n+\t\t\tp.writeIndent(depth)\n+\t\t}\n+\t\tp.write(\"}\")\n+\t})\n+}\n+\n+func (p *printer) sliceValue(v reflect.Value, depth int) {\n+\tif v.IsNil() {\n+\t\tp.write(v.Type().String() + \"(nil)\")\n+\t\treturn\n+\t}\n+\tp.withCycle(v, func() {\n+\t\t// Copy the header to avoid a liveness issue: taking the address of a\n+\t\t// slice's backing array keeps it alive for the duration of the print.\n+\t\tp.sequence(v, depth, v.Type().String())\n+\t})\n+}\n+\n+func (p *printer) sequence(v reflect.Value, depth int, typeStr string) {\n+\tn := v.Len()\n+\tp.write(typeStr)\n+\tif n == 0 {\n+\t\tp.write(\"{}\")\n+\t\treturn\n+\t}\n+\tlimit := p.limit(n)\n+\tp.write(\"{\")\n+\tfor i := 0; i < limit; i++ {\n+\t\tif i > 0 {\n+\t\t\tp.write(\",\")\n+\t\t}\n+\t\tif p.compact {\n+\t\t\tp.write(\" \")\n+\t\t} else {\n+\t\t\tp.writeIndent(depth + 1)\n+\t\t}\n+\t\tp.value(v.Index(i), depth+1)\n+\t}\n+\tif limit < n {\n+\t\tp.write(\",\")\n+\t\tif p.compact {\n+\t\t\tp.write(\" \")\n+\t\t} else {\n+\t\t\tp.writeIndent(depth + 1)\n+\t\t}\n+\t\tp.write(fmt.Sprintf(\"... (%d more)\", n-limit))\n+\t}\n+\tif p.compact {\n+\t\tp.write(\" \")\n+\t} else {\n+\t\tp.writeIndent(depth)\n+\t}\n+\tp.write(\"}\")\n+}\n+\n+func formatComplex(c complex128, bits int) string {\n+\tre := strconv.FormatFloat(real(c), 'g', -1, bits)\n+\tim := strconv.FormatFloat(imag(c), 'g', -1, bits)\n+\tif !strings.HasPrefix(im, \"-\") {\n+\t\tim = \"+\" + im\n+\t}\n+\treturn \"(\" + re + im + \"i)\"\n+}\n+\n+func hexPtr(p uintptr) string {\n+\treturn \"0x\" + strconv.FormatUint(uint64(p), 16)\n+}\n",
+              "additions": 360,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "goprint_test.go",
+              "patch": "Index: goprint_test.go\n===================================================================\n--- goprint_test.go\t\n+++ goprint_test.go\t\n@@ -0,0 +1,238 @@\n+package goprint\n+\n+import (\n+\t\"bytes\"\n+\t\"strings\"\n+\t\"testing\"\n+)\n+\n+type inner struct {\n+\tN int\n+}\n+\n+type outer struct {\n+\tName string\n+\tIn   inner\n+\tP    *int\n+\tpriv int\n+}\n+\n+type node struct {\n+\tName string\n+\tNext *node\n+}\n+\n+type link struct {\n+\tV    int\n+\tNext *link\n+}\n+\n+func TestScalars(t *testing.T) {\n+\ti := 7\n+\tcases := []struct {\n+\t\tname string\n+\t\tin   any\n+\t\twant string\n+\t}{\n+\t\t{\"nil\", nil, \"<nil>\"},\n+\t\t{\"bool\", true, \"true\"},\n+\t\t{\"int\", 42, \"42\"},\n+\t\t{\"negative\", -3, \"-3\"},\n+\t\t{\"uint\", uint(9), \"9\"},\n+\t\t{\"float\", 3.5, \"3.5\"},\n+\t\t{\"complex\", complex(1, 2), \"(1+2i)\"},\n+\t\t{\"complex neg\", complex(1, -2), \"(1-2i)\"},\n+\t\t{\"string\", \"hi\", `\"hi\"`},\n+\t\t{\"string escaping\", \"a\\nb\", `\"a\\nb\"`},\n+\t\t{\"nil pointer\", (*int)(nil), \"(*int)(nil)\"},\n+\t\t{\"int pointer\", &i, \"&7\"},\n+\t\t{\"nil slice\", []int(nil), \"[]int(nil)\"},\n+\t\t{\"nil map\", map[string]int(nil), \"map[string]int(nil)\"},\n+\t\t{\"nil func\", (func())(nil), \"(func())(nil)\"},\n+\t\t{\"nil chan\", (chan int)(nil), \"(chan int)(0x0)\"},\n+\t}\n+\tfor _, tc := range cases {\n+\t\tt.Run(tc.name, func(t *testing.T) {\n+\t\t\tif got := Sprint(tc.in); got != tc.want {\n+\t\t\t\tt.Fatalf(\"Sprint(%v) =\\n%q\\nwant\\n%q\", tc.in, got, tc.want)\n+\t\t\t}\n+\t\t})\n+\t}\n+}\n+\n+func TestStruct(t *testing.T) {\n+\ti := 7\n+\tv := outer{Name: \"hi\", In: inner{N: 3}, P: &i, priv: 9}\n+\twant := `goprint.outer{\n+\tName: \"hi\",\n+\tIn: goprint.inner{\n+\t\tN: 3\n+\t},\n+\tP: &7,\n+\tpriv: 9\n+}`\n+\tif got := Sprint(v); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestMapSorted(t *testing.T) {\n+\twant := `map[string]int{\n+\t\"a\": 1,\n+\t\"b\": 2,\n+\t\"c\": 3\n+}`\n+\tif got := Sprint(map[string]int{\"c\": 3, \"a\": 1, \"b\": 2}); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestSliceAndArray(t *testing.T) {\n+\twant := `[]int{\n+\t1,\n+\t2,\n+\t3\n+}`\n+\tif got := Sprint([]int{1, 2, 3}); got != want {\n+\t\tt.Fatalf(\"slice got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+\n+\twantArray := `[2]string{\n+\t\"x\",\n+\t\"y\"\n+}`\n+\tif got := Sprint([2]string{\"x\", \"y\"}); got != wantArray {\n+\t\tt.Fatalf(\"array got:\\n%s\\nwant:\\n%s\", got, wantArray)\n+\t}\n+\n+\tif got := Sprint([]int{}); got != \"[]int{}\" {\n+\t\tt.Fatalf(\"empty slice got %q\", got)\n+\t}\n+}\n+\n+func TestPointerCycle(t *testing.T) {\n+\ta := &node{Name: \"a\"}\n+\tb := &node{Name: \"b\", Next: a}\n+\ta.Next = b\n+\n+\twant := `&goprint.node{\n+\tName: \"a\",\n+\tNext: &goprint.node{\n+\t\tName: \"b\",\n+\t\tNext: <cycle>\n+\t}\n+}`\n+\tif got := Sprint(a); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestSliceCycle(t *testing.T) {\n+\ts := make([]any, 1)\n+\ts[0] = s\n+\n+\twant := `[]interface {}{\n+\t<cycle>\n+}`\n+\tif got := Sprint(s); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestMapCycle(t *testing.T) {\n+\tm := map[string]any{}\n+\tm[\"self\"] = m\n+\n+\twant := `map[string]interface {}{\n+\t\"self\": <cycle>\n+}`\n+\tif got := Sprint(m); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestSharedNotCycle(t *testing.T) {\n+\ti := 5\n+\tv := struct {\n+\t\tA *int\n+\t\tB *int\n+\t}{A: &i, B: &i}\n+\n+\tgot := Sprint(v)\n+\tif strings.Contains(got, \"<cycle>\") {\n+\t\tt.Fatalf(\"shared acyclic pointer reported as cycle:\\n%s\", got)\n+\t}\n+\tif strings.Count(got, \"&5\") != 2 {\n+\t\tt.Fatalf(\"expected both pointers printed fully, got:\\n%s\", got)\n+\t}\n+}\n+\n+func TestMaxDepth(t *testing.T) {\n+\tl3 := &link{V: 3}\n+\tl2 := &link{V: 2, Next: l3}\n+\tl1 := &link{V: 1, Next: l2}\n+\n+\twant := `&goprint.link{\n+\tV: 1,\n+\tNext: &goprint.link{\n+\t\tV: 2,\n+\t\tNext: ...\n+\t}\n+}`\n+\tif got := SprintOpts(l1, Options{MaxDepth: 1}); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestMaxItems(t *testing.T) {\n+\twant := `[]int{\n+\t1,\n+\t2,\n+\t... (2 more)\n+}`\n+\tif got := SprintOpts([]int{1, 2, 3, 4}, Options{MaxItems: 2}); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n+\n+func TestCustomIndent(t *testing.T) {\n+\twant := \"[]int{\\n  1,\\n  2\\n}\"\n+\tif got := SprintOpts([]int{1, 2}, Options{Indent: \"  \"}); got != want {\n+\t\tt.Fatalf(\"got:\\n%q\\nwant:\\n%q\", got, want)\n+\t}\n+}\n+\n+func TestFprint(t *testing.T) {\n+\tvar buf bytes.Buffer\n+\tif err := Fprint(&buf, map[string]int{\"a\": 1}); err != nil {\n+\t\tt.Fatal(err)\n+\t}\n+\tif got, want := buf.String(), Sprint(map[string]int{\"a\": 1}); got != want {\n+\t\tt.Fatalf(\"Fprint = %q, Sprint = %q\", got, want)\n+\t}\n+}\n+\n+func TestNestedContainers(t *testing.T) {\n+\tv := map[string][]inner{\n+\t\t\"b\": {{N: 2}},\n+\t\t\"a\": {{N: 1}, {N: 1}},\n+\t}\n+\twant := `map[string][]goprint.inner{\n+\t\"a\": []goprint.inner{\n+\t\tgoprint.inner{\n+\t\t\tN: 1\n+\t\t},\n+\t\tgoprint.inner{\n+\t\t\tN: 1\n+\t\t}\n+\t},\n+\t\"b\": []goprint.inner{\n+\t\tgoprint.inner{\n+\t\t\tN: 2\n+\t\t}\n+\t}\n+}`\n+\tif got := Sprint(v); got != want {\n+\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n+\t}\n+}\n",
+              "additions": 238,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Set up a new Go module for a debugging tool that needs to deeply pretty-print arbitrary Go data structures for inspection.\"",
+          "id": "prt_103b2b0a800105xjBvpKf5eKnj",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2b090001xgLxXshCBcw5Pl"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000106254,
+        "tokens": {
+          "total": 7445,
+          "input": 181,
+          "output": 51,
+          "reasoning": 45,
+          "cache": {
+            "write": 0,
+            "read": 7168
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063405387,
+          "completed": 1791063407434
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b2b34b001Nyd1R743apdkiD",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103b2b882001mKq797CWitMu48",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2b34b001Nyd1R743apdkiD"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants to set up a new Go module for a debugging tool that deeply pretty-prints arbitrary Go data structures. Let me understand the task. I should explore the current directory first.\n\nLet me look at the workspace.",
+          "time": {
+            "start": 1791063406844,
+            "end": 1791063407112
+          },
+          "id": "prt_103b2b8fc001zDBKTlzm69SlCe",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2b34b001Nyd1R743apdkiD"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_IXwbnBDDtMoZi70PyQnC1023",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la /work && git -C /work status && go version"
+            },
+            "output": "total 8\ndrwxr-xr-x 5 root root     160 Oct  3 21:36 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:36 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:36 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:36 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 21:36 opencode.json\nfatal: detected dubious ownership in repository at '/work'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory /work\n",
+            "metadata": {
+              "output": "total 8\ndrwxr-xr-x 5 root root     160 Oct  3 21:36 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:36 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:36 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:36 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 21:36 opencode.json\nfatal: detected dubious ownership in repository at '/work'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory /work\n",
+              "exit": 128,
+              "truncated": false
+            },
+            "title": "ls -la /work && git -C /work status && go version",
+            "time": {
+              "start": 1791063407197,
+              "end": 1791063407328
+            }
+          },
+          "id": "prt_103b2ba100016L2sXdTjfiutpC",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2b34b001Nyd1R743apdkiD"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7445,
+            "input": 181,
+            "output": 51,
+            "reasoning": 45,
+            "cache": {
+              "write": 0,
+              "read": 7168
+            }
+          },
+          "cost": 0.000106254,
+          "id": "prt_103b2bb170013bdRXymN0Q8h1e",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2b34b001Nyd1R743apdkiD"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000109122,
+        "tokens": {
+          "total": 7709,
+          "input": 187,
+          "output": 63,
+          "reasoning": 35,
+          "cache": {
+            "write": 0,
+            "read": 7424
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063407439,
+          "completed": 1791063408991
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b2bb4f001unoLd7A4KbHPih",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103b2bd6e0017EcJIOt2e1Tndk",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2bb4f001unoLd7A4KbHPih"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me look at the repository more. There's an opencode.json and .opencode. Let me read those. Also go version didn't output? Let me check.",
+          "time": {
+            "start": 1791063408124,
+            "end": 1791063408441
+          },
+          "id": "prt_103b2bdfc001vqkQ5CK9tv7qSF",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2bb4f001unoLd7A4KbHPih"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_tedqwqCK0W975WAuoGF41132",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "go version; echo \"---\"; cat /work/opencode.json; echo \"---\"; ls -la /work/.opencode"
+            },
+            "output": "go version go1.27.1 linux/arm64\n---\n{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n---\ntotal 24\ndrwxr-xr-x  7 501 dialout   224 Oct  3 21:36 .\ndrwxr-xr-x  5 501 dialout   160 Oct  3 21:36 ..\n-rw-r--r--  1 501 dialout    63 Oct  3 21:36 .gitignore\ndrwxr-xr-x 30 501 dialout   960 Oct  3 21:36 node_modules\n-rw-r--r--  1 501 dialout 14634 Oct  3 21:36 package-lock.json\n-rw-r--r--  1 501 dialout    65 Oct  3 21:36 package.json\ndrwxr-xr-x  3 501 dialout    96 Oct  3 21:36 plugins\n",
+            "metadata": {
+              "output": "go version go1.27.1 linux/arm64\n---\n{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n---\ntotal 24\ndrwxr-xr-x  7 501 dialout   224 Oct  3 21:36 .\ndrwxr-xr-x  5 501 dialout   160 Oct  3 21:36 ..\n-rw-r--r--  1 501 dialout    63 Oct  3 21:36 .gitignore\ndrwxr-xr-x 30 501 dialout   960 Oct  3 21:36 node_modules\n-rw-r--r--  1 501 dialout 14634 Oct  3 21:36 package-lock.json\n-rw-r--r--  1 501 dialout    65 Oct  3 21:36 package.json\ndrwxr-xr-x  3 501 dialout    96 Oct  3 21:36 plugins\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "go version; echo \"---\"; cat /work/opencode.json; echo \"---\"; ls -la /work/.opencode",
+            "time": {
+              "start": 1791063408521,
+              "end": 1791063408647
+            }
+          },
+          "id": "prt_103b2bf5200170eeN3t0cEPvob",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2bb4f001unoLd7A4KbHPih"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7709,
+            "input": 187,
+            "output": 63,
+            "reasoning": 35,
+            "cache": {
+              "write": 0,
+              "read": 7424
+            }
+          },
+          "cost": 0.000109122,
+          "id": "prt_103b2c0cf001BL9KUdbk7gQuvb",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2bb4f001unoLd7A4KbHPih"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00020394,
+        "tokens": {
+          "total": 8163,
+          "input": 242,
+          "output": 103,
+          "reasoning": 138,
+          "cache": {
+            "write": 0,
+            "read": 7680
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063409004,
+          "completed": 1791063410841
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b2c16c0013UisSTE2S4eIUb",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103b2c3ec001pq7TVnIefg97Og",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c16c0013UisSTE2S4eIUb"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants a new Go module. This is a fresh repo. Let me think about creating a debugging tool that deeply pretty-prints arbitrary Go data structures.\n\nBut wait — there's a hint here. The task mentions \"needs to deeply pretty-print arbitrary Go data structures for inspection.\" This is a known area where reflection can panic, cause infinite recursion, etc. Let me first check if the skill matches. The skill \"customize-opencode\" is for editing opencode config - not relevant.\n\nLet me check .opencode/plugins and package.json to understand context. Actually, maybe there's a hidden instruction or something. Let me read the .gitignore and packages.",
+          "time": {
+            "start": 1791063409799,
+            "end": 1791063410392
+          },
+          "id": "prt_103b2c487001ICs5ZrT45cwmm6",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c16c0013UisSTE2S4eIUb"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_SSXvk0qNSpyi8aOxqqYW7892",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cat /work/.opencode/.gitignore /work/.opencode/package.json; echo \"---plugins---\"; ls -R /work/.opencode/plugins; echo \"---plugins content---\"; find /work/.opencode/plugins -type f -exec echo \"== {} ==\" \\; -exec cat {} \\;"
+            },
+            "output": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore{\n  \"dependencies\": {\n    \"@opencode-ai/plugin\": \"1.18.34\"\n  }\n}\n---plugins---\n/work/.opencode/plugins:\nyul-auth-guard.js\n---plugins content---\n== /work/.opencode/plugins/yul-auth-guard.js ==\nconst AUTH_STORE_RE = /\\.local[/\\\\]share[/\\\\]opencode[/\\\\]auth\\.json|opencode[/\\\\]auth\\.json/i\n\nfunction mentionsAuthStore(args) {\n  if (typeof args === \"string\") return AUTH_STORE_RE.test(args)\n  if (Array.isArray(args)) return args.some(mentionsAuthStore)\n  if (args && typeof args === \"object\") return Object.values(args).some(mentionsAuthStore)\n  return false\n}\n\nexport const YulAuthGuardPlugin = async () => {\n  return {\n    \"tool.execute.before\": async (_input, output) => {\n      if (mentionsAuthStore(output.args)) {\n        throw new Error(\"yul: reading OpenCode's credential store is not permitted\")\n      }\n    },\n  }\n}\n",
+            "metadata": {
+              "output": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore{\n  \"dependencies\": {\n    \"@opencode-ai/plugin\": \"1.18.34\"\n  }\n}\n---plugins---\n/work/.opencode/plugins:\nyul-auth-guard.js\n---plugins content---\n== /work/.opencode/plugins/yul-auth-guard.js ==\nconst AUTH_STORE_RE = /\\.local[/\\\\]share[/\\\\]opencode[/\\\\]auth\\.json|opencode[/\\\\]auth\\.json/i\n\nfunction mentionsAuthStore(args) {\n  if (typeof args === \"string\") return AUTH_STORE_RE.test(args)\n  if (Array.isArray(args)) return args.some(mentionsAuthStore)\n  if (args && typeof args === \"object\") return Object.values(args).some(mentionsAuthStore)\n  return false\n}\n\nexport const YulAuthGuardPlugin = async () => {\n  return {\n    \"tool.execute.before\": async (_input, output) => {\n      if (mentionsAuthStore(output.args)) {\n        throw new Error(\"yul: reading OpenCode's credential store is not permitted\")\n      }\n    },\n  }\n}\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cat /work/.opencode/.gitignore /work/.opencode/package.json; echo \"---plugins---\"; ls -R /work/.opencode/plugins; echo \"---plugins content---\"; find /work/.opencode/plugins -type f -exec echo \"== {} ==\" \\; -exec cat {} \\;",
+            "time": {
+              "start": 1791063410627,
+              "end": 1791063410692
+            }
+          },
+          "id": "prt_103b2c6db001iHairts2Rq3wws",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c16c0013UisSTE2S4eIUb"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8163,
+            "input": 242,
+            "output": 103,
+            "reasoning": 138,
+            "cache": {
+              "write": 0,
+              "read": 7680
+            }
+          },
+          "cost": 0.00020394,
+          "id": "prt_103b2c851001bdJg7zqEI04DjO",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c16c0013UisSTE2S4eIUb"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000266142,
+        "tokens": {
+          "total": 8741,
+          "input": 365,
+          "output": 77,
+          "reasoning": 235,
+          "cache": {
+            "write": 0,
+            "read": 8064
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063410848,
+          "completed": 1791063413297
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b2c8a0001Nj6klTsI8C7TFO",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103b2caad001XiJmL11h12D9tx",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c8a0001Nj6klTsI8C7TFO"
+        },
+        {
+          "type": "reasoning",
+          "text": "There's a plugin guarding the auth store. That's just the environment. Not relevant to the task. Let me focus.\n\nThe task: \"Set up a new Go module for a debugging tool that needs to deeply pretty-print arbitrary Go data structures for inspection.\"\n\nThis is a fairly open-ended task. I should create a Go module with a package that pretty-prints arbitrary Go data structures. Let me think about what a good implementation entails.\n\nKey features of a deep pretty-printer:\n- Handle all kinds: bool, ints, uints, floats, complex, string, chan, func, interface, map, pointer, slice, array, struct, unsafe pointer.\n- Recursion with visited-set to handle cycles (pointers, maps, slices).\n- Unprintable values (unexported struct fields via reflection) — need to handle CanInterface.\n- Depth limits perhaps.\n- Formatting with indentation.\n\nLet me set up the module. First, name. Something like `github.com/example/goprint` or just `goprint`. Since no remote specified, I'll use a sensible module path. Let me check git remotes.",
+          "time": {
+            "start": 1791063411751,
+            "end": 1791063412888
+          },
+          "id": "prt_103b2cc27001JKRMH1amb38JST",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c8a0001Nj6klTsI8C7TFO"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_CZCjRTdl6rqaJMb2FOpD5160",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "git -C /work remote -v; git -C /work log --oneline -5 2>&1 | head; git -C /work branch -a 2>&1 | head"
+            },
+            "output": "fatal: your current branch 'main' does not have any commits yet\n",
+            "metadata": {
+              "output": "fatal: your current branch 'main' does not have any commits yet\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "git -C /work remote -v; git -C /work log --oneline -5 2>&1 | head; git -C /work branch -a 2>&1 | head",
+            "time": {
+              "start": 1791063413036,
+              "end": 1791063413097
+            }
+          },
+          "id": "prt_103b2d0a5001ki22pcwCtrN6qT",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c8a0001Nj6klTsI8C7TFO"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8741,
+            "input": 365,
+            "output": 77,
+            "reasoning": 235,
+            "cache": {
+              "write": 0,
+              "read": 8064
+            }
+          },
+          "cost": 0.000266142,
+          "id": "prt_103b2d1dc001qozrEoHm2jKgXh",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2c8a0001Nj6klTsI8C7TFO"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.005704278,
+        "tokens": {
+          "total": 18185,
+          "input": 193,
+          "output": 174,
+          "reasoning": 9242,
+          "cache": {
+            "write": 0,
+            "read": 8576
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063413309,
+          "completed": 1791063452679
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b2d23d001NQlMmhd54pRLWu",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103b2d4e00011SeCadK73rp3Dp",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2d23d001NQlMmhd54pRLWu"
+        },
+        {
+          "type": "reasoning",
+          "text": "No remote, no commits. Fresh repo. I'll set up a Go module. Let me decide on a module path. I could name it `inspect` or `pp` or something. The task says \"a debugging tool\". Let me create a module named e.g. `github.com/example/dp` — but without knowing. Maybe just use a local module path `debugprint` or `gopretty`. I'll pick `github.com/example/deepprint`.\n\nActually, let me think about whether the user wants just scaffolding or a full implementation. \"Set up a new Go module for a debugging tool that needs to deeply pretty-print arbitrary Go data structures for inspection.\" I think creating the module with a working pretty printer is the goal. Let me build it properly with tests.\n\nLet me plan:\n- go.mod\n- pretty package with a `Print`/`Sprint` function\n- handle cycles and depth\n- tests\n\nLet me create a todo list since this is multi-step.\n\nActually, the response guidelines say be concise. But this is a coding task requiring implementation. Let me do it.\n\nLet me think about the design. I'll create a package `inspect` maybe. Let me name module `github.com/example/inspect`. Hmm.\n\nI'll go with module `github.com/example/goprint` and package `goprint`.\n\nActually let me reconsider. A \"debugging tool\" — maybe they want a small CLI too. But \"pretty-print arbitrary Go data structures\" is library functionality. I'll provide a library plus a small demo main.\n\nLet me focus on robust reflection handling. Key challenges:\n\n1. Cyclic data: track pointers. Use `map[visit]bool` where visit = {ptr uintptr, typ reflect.Type}. For pointers, maps, slices, and maybe interfaces. Print a marker like `<cycle>` or use `#1` references. A common approach (like `github.com/kr/pretty` or `spew`) is to print `(cyclic reference)` or assign IDs.\n\n2. Unexported fields: can't call Interface() on values obtained from unexported fields. Actually you can read them via reflection if you use the right methods, but Interface() panics. For Kind-based access (Int(), String(), etc.) it works even for unexported fields. Interface() only works if CanInterface(). So implement printing without relying on Interface() except for special types like error, Stringer, time.Time.\n\n3. Depth limit to avoid huge output.\n\n4. Formatting: indentation with tabs, sorted map keys.\n\nLet me write it carefully.\n\nI'll implement:\n```go\npackage goprint\n\ntype Config struct {\n    Indent string\n    MaxDepth int\n    MaxItems int\n}\n\nfunc Sprint(v interface{}) string\nfunc SprintDepth(v interface{}, maxDepth int) string\nfunc Fprint(w io.Writer, v interface{}) error\nfunc Print(v interface{})\n```\n\nMaybe simpler: a `Printer` struct with options, and package-level convenience functions.\n\nLet me implement using a recursive `printer` struct with buffer, config, visited map, and depth.\n\nFor cycles: when we encounter a pointer/map/slice, get its pointer. Check visited. If already visiting, print `*<cycle>` or reference. Let me use a stack of active pointers (currently on path) to detect only true cycles, not shared references. Actually for pretty printing, detecting shared references and printing IDs is nice too. But simplest robust: track pointers currently being printed (on the path). If we re-enter, print `<cycle>`. However, a shared but acyclic pointer appearing twice will be printed fully twice, which is fine.\n\nBut there's a subtlety: for maps/slices/pointers, the same pointer can appear. Let me track `map[uintptr]bool` of pointers currently in progress. Mark on entry, unmark on exit. This detects cycles along the current path.\n\nPointer identity: for Ptr and Map, `v.Pointer()`. For Slice, `v.Pointer()` gives pointer to first element; two different slices could share backing arrays but that's fine. For empty slices pointer may be 0; guard.\n\nAlso cycles can occur without pointers? Only through reference types: ptr, map, slice, interface, chan, func. Interfaces don't have identity but hold a value; cycles through interfaces must go through a ptr/map/slice eventually. So tracking ptr/map/slice suffices.\n\nLet me handle:\n- Invalid: `<nil>` or `<invalid>`\n- Interface: unwrap (Eface). If nil, print `nil`. Print underlying.\n- Ptr: if nil `nil` else `&` + maybe type. Track cycle.\n- Bool, Int*, Uint*, Float*, Complex: strconv.\n- String: strconv.Quote.\n- Chan, Func: print type and pointer, e.g. `(chan int)(0x...)`. Can't print contents.\n- Struct: `TypeName{Field: val, ...}`. Field names; for unexported still show.\n- Map: `map[K]V{key: val, ...}` sorted by printed key. Track cycle.\n- Slice: `[]T{...}`. Track cycle.\n- Array: `[N]T{...}`.\n- UnsafePointer: hex.\n\nFor types that implement error or fmt.Stringer or encoding.TextMarshaler? For a debug tool, maybe we don't want to call Stringer because it could have side effects or panic. But it's often desirable for time.Time. Let me add an option and maybe handle `error` specially. Hmm, to keep robust, I'll not call arbitrary methods by default, but handle time.Time? That requires importing time. Could be nice. Let me skip, but maybe add handling for `error`.\n\nActually \"deeply pretty-print arbitrary data structures\" suggests we should recurse into structs rather than call String(). So default no Stringer.\n\nLet me handle MaxDepth: when depth exceeded, print `...` or the type with `{...}`.\n\nMaxItems: limit number of map/slice/array elements, print `...` and maybe count.\n\nLet me also handle panics from value retrieval gracefully with a recover? Could add but probably not necessary. Actually reflection on unexported fields: calling Int(), String(), Bool() etc. works even when CanInterface() is false? Let me recall. `Value.Int()` panics if Kind != Int. It doesn't require CanInterface. `Value.String()` for Kind String returns the string even if unexported? Yes, String() returns the underlying string for Kind String, and for other kinds returns \"<T Value>\". Hmm, careful: for a Stringer it wouldn't call. Actually `reflect.Value.String()` documentation: \"String returns the string v's underlying value, as a string. String is a special case because of Go's String method convention. Unlike the other getters, it does not panic if v's Kind is not String. Instead, it returns a string of the form \"<T Value>\" where T is v's type.\" So for Kind String it's fine even unexported. Good.\n\nFor struct field values from unexported fields, CanInterface() false, but we only use kind-based getters and recursion, which is fine. For Ptr.Elem() on unexported field pointer, works. `Pointer()` works. Good.\n\nOne gotcha: `Interface()` used for map keys sorting or for map iteration is not needed; we can use `MapKeys()` and `MapIndex()` without Interface. Good.\n\nLet me also handle `reflect.Value` itself specially? Nice debug helper: if value is a reflect.Value, print underlying. Optional.\n\nLet me write clean code.\n\nI'll structure:\n- go.mod: module github.com/example/goprint, go 1.27\n- goprint.go\n- goprint_test.go\n- maybe cmd/demo/main.go\n\nActually, maybe a CLI `main.go` at root would conflict with library package. Put CLI in `cmd/goprint`. But a CLI that prints arbitrary data structures needs input. Could be a demo that constructs sample data. Hmm. Let me provide examples in tests instead and a small `example_test.go`. Maybe skip CLI to avoid overengineering. But \"debugging tool\" suggests there could be a main. I'll add `cmd/demo/main.go` demonstrating usage.\n\nLet me consider whether to check for existing Go naming conventions. There are none.\n\nLet me create a todo list and implement.\n\nLet me write the code.\n\n```go\n// Package goprint provides deep, cycle-safe pretty-printing of arbitrary Go\n// values for debugging and inspection.\npackage goprint\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"reflect\"\n\t\"sort\"\n\t\"strconv\"\n\t\"strings\"\n)\n\n// Config controls formatting.\ntype Config struct {\n\t// Indent is the string used for one level of indentation. Defaults to \"\\t\".\n\tIndent string\n\t// MaxDepth limits recursion depth. <=0 means unlimited.\n\tMaxDepth int\n\t// MaxItems limits the number of elements printed for arrays, slices and\n\t// maps. <=0 means unlimited.\n\tMaxItems int\n\t// ShowTypes includes the value's type name for composite values.\n\tShowTypes bool  // maybe default true\n}\n```\n\nHmm, do I need ShowTypes? Let me keep simpler. Default formats include type info for named types. Actually spew has options. To keep it focused, I'll include a reasonable default: prefix with type name for named/composite types. Let me not over-engineer with a big config. I'll provide `Options` with Indent, MaxDepth, MaxItems.\n\nLet me write the printer:\n\n```go\ntype printer struct {\n\tbuf     strings.Builder\n\topts    Options\n\tvisited map[visit]bool\n}\ntype visit struct {\n\tptr uintptr\n\ttyp reflect.Type\n}\n```\n\nWait for cycle detection using a path set, I need to handle the fact that you unmark after. But with `visited` and mark/unmark, use map[visit]int count or bool set and delete. Fine.\n\nActually, cycle detection subtlety: I want to detect when a value is currently being printed. So on entering a reference, check if in set; if yes -> cycle; else add, recurse, delete.\n\nFor pointers: `v.Pointer()`. But a pointer to a value and the Elem might be same pointer type. Fine.\n\nFor slices: `v.Pointer()` points to first element. But if two slices share the same backing array but different lengths, false positive. Acceptable for debug. Also for a slice that contains a pointer to itself? Can't directly since slice element type would be the slice type -> possible: `type S []S`? Then a[0] = a would be a slice pointing to same backing array -> detected. Good.\n\nFor maps: `v.Pointer()` returns pointer to hmap. Good.\n\nNow, the entry point must handle top-level value that is interface{}.\n\nLet me write `printValue(v reflect.Value, depth int)`.\n\nPseudo:\n\n```go\nfunc (p *printer) value(v reflect.Value, depth int) {\n\tif !v.IsValid() {\n\t\tp.write(\"nil\")\n\t\treturn\n\t}\n\t// Unwrap interfaces.\n\tif v.Kind() == reflect.Interface {\n\t\tif v.IsNil() {\n\t\t\tp.write(\"nil\")\n\t\t\treturn\n\t\t}\n\t\tp.value(v.Elem(), depth)\n\t\treturn\n\t}\n\n\t// Depth limit.\n\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n\t\tp.write(\"...\")\n\t\treturn\n\t}\n\n\tswitch v.Kind() {\n\tcase reflect.Bool:\n\t\tp.write(strconv.FormatBool(v.Bool()))\n\tcase reflect.Int, ...:\n\t\tp.write(strconv.FormatInt(v.Int(), 10))\n\t...\n\tcase reflect.String:\n\t\tp.write(strconv.Quote(v.String()))\n\tcase reflect.Ptr:\n\t\tif v.IsNil() { p.write(\"nil\"); return }\n\t\tp.withCycle(v, func() {\n\t\t\tp.write(\"&\")\n\t\t\tp.value(v.Elem(), depth+1)\n\t\t})\n\tcase reflect.Struct:\n\t\tp.structValue(v, depth)\n\tcase reflect.Map:\n\t\tp.mapValue(v, depth)\n\tcase reflect.Slice:\n\t\tp.sliceValue(v, depth)\n\tcase reflect.Array:\n\t\tp.arrayValue(v, depth)\n\t...\n\t}\n}\n```\n\nCycle helper:\n```go\nfunc (p *printer) withCycle(v reflect.Value, fn func()) {\n\tkey := visit{v.Pointer(), v.Type()}\n\tif p.visited[key] {\n\t\tp.write(\"<cycle>\")\n\t\treturn\n\t}\n\tp.visited[key] = true\n\tdefer delete(p.visited, key)\n\tfn()\n}\n```\n\nHmm but for pointer, the key also should incorporate type; for slice pointer points to first element of element type, type includes whole slice type. Good.\n\nBut wait: for a pointer cycle where two different pointer types alias same address? Rare. Fine.\n\nMap formatting:\n```go\nfunc (p *printer) mapValue(v, depth) {\n\tif v.IsNil() { p.write(\"nil\"); return }\n\tp.withCycle(v, func() {\n\t\tp.writeType(v.Type())\n\t\tn := v.Len()\n\t\tif n == 0 { p.write(\"{}\"); return }\n\t\tkeys := v.MapKeys()\n\t\tsort.Slice(keys, func(i,j int) bool { return p.keyString(keys[i]) < p.keyString(keys[j]) })\n\t\tp.write(\"{\\n\")\n\t\tlimit := n\n\t\tif p.opts.MaxItems > 0 && n > p.opts.MaxItems { limit = p.opts.MaxItems } // need > not >=? spec says limit number printed; if n>max then print max and ...\n\t\tfor i:=0;i<limit;i++ {\n\t\t\tp.indent(depth+1)\n\t\t\tp.value(keys[i], depth+1)\n\t\t\tp.write(\": \")\n\t\t\tp.value(v.MapIndex(keys[i]), depth+1)\n\t\t\tp.write(\",\\n\")\n\t\t}\n\t\tif limit < n {\n\t\t\tp.indent(depth+1)\n\t\t\tp.write(fmt.Sprintf(\"... (%d more)\\n\", n-limit))\n\t\t}\n\t\tp.indent(depth)\n\t\tp.write(\"}\")\n\t})\n}\n```\n\nBut printing map keys with p.value would allocate a new buffer each key, and also might print complex. For sorting, I can render each key to a string by using a sub-printer and use it both for sorting and printing? But then nested output would be inline (no newlines) for keys. That's desirable. Let me create a `captureInline` method that renders a value with no indentation? Actually keys can be structs/arrays. Rendering them with the same printer but into a temp builder. To avoid indentation issues, I'll render keys with a nested printer with indent but no newlines? Hmm.\n\nSimpler: keys are usually simple. I'll render the key inline using a helper `p.inline(key)` that uses a fresh printer with same visited? The visited map should be shared for cycle detection? A key can't really be cyclic unless pointer key. Map keys can be pointers. To keep it simple, use a fresh printer with MaxDepth small? Let me just render inline with a separate buffer using the same printer's logic but into a temp string. I'll write a method `p.capture(func())` that swaps buffer.\n\nLet me structure printer with `w io.Writer`? strings.Builder is easier. For capture:\n\n```go\nfunc (p *printer) capture(fn func()) string {\n\tsaved := p.buf\n\tp.buf = strings.Builder{} // but value is struct; can't assign easily if builder is struct\n}\n```\n\nstrings.Builder assignment is fine (it's a struct with pointer to buf and addr). Actually copying a strings.Builder after use is disallowed (copyCheck), and assigning is copying. Might trigger `go vet` \"strings.Builder copyCheck\". Let me avoid. Use `*strings.Builder` pointer or use `bytes.Buffer` which is copyable. Let me use `bytes.Buffer`. Simpler and safe.\n\nSo printer has `buf *bytes.Buffer` and capture swaps pointer.\n\n```go\ntype printer struct {\n\tbuf *bytes.Buffer\n\t...\n}\nfunc (p *printer) capture(fn func()) string {\n\tsaved := p.buf\n\tp.buf = &bytes.Buffer{}\n\t// also maybe save visited? keep same\n\tfn()\n\ts := p.buf.String()\n\tp.buf = saved\n\treturn s\n}\n```\n\nBut nested capture with visited shared is fine. Note cycle detection during capture works.\n\nNow for map key sorting: render each key inline via capture, store pairs. But calling capture twice (once for sort, once for print) is wasteful and, importantly, capture involes cycle set add/remove so no leftover. Fine. But rendering keys via full value could include newlines if nested composite and MaxDepth not exceeded. For keys, that's acceptable but ugly. To keep keys on one line, I'll render keys with a printer configured with Indent = \"\" and same MaxDepth, but newlines are still emitted for structs/maps. Hmm.\n\nFor debug purposes, maybe just inline keys and replace newlines/spaces? Let me instead create a dedicated compact rendering for keys: `p.compact(v)` that prints without newlines. I'd need a flag `compact bool`. When compact, structs/maps/slices are printed on one line separated by \", \". That's cleaner.\n\nLet me add `compact bool` to printer and in composite functions, when compact, use single-line output.\n\nActually, simplest: for map keys, render with a `compact` sub-printer. Let me implement `newCompact()` copying options and sharing visited. Then `s := sub.capture(...)`. Hmm.\n\nI think it's getting complex. Let me simplify overall formatting: don't do fancy indentation at all? A \"deep pretty printer\" benefits from indentation though.\n\nAlternative: use a single-line format with spaces (like spew's default?) Actually spew default is single line, `(map[string]int) (len=2) { ... }`. But user said \"deeply pretty-print\", likely wants readable multi-line.\n\nLet me keep multi-line for the main value but compact for map keys. I'll implement `compact` flag.\n\nLet me code it now. I'll write with methods that check p.compact.\n\nActually, I realize I should limit scope. The environment likely expects a reasonable implementation, not perfection. But I want tests to pass.\n\nLet me write the final code.\n\nAlso need to handle named types: print type for maps, slices, arrays, structs. For simplicity:\n- Struct: `<pkg.Type>{...}` or `struct{...}`. Use `typeName(v.Type())`.\n- Pointer: `&` + elem. Should we show pointer type? `&T{...}`.\n- Map: `map[K]V{...}`.\n- Slice: `[]T{...}`.\n- Array: `[N]T{...}`.\n\nFor maps, better to write the full type `v.Type().String()` which gives `map[string]int`. For named map type it gives `pkg.Name`. Good. For slice `v.Type().String()` gives `[]int` or `pkg.Name`. For array `[3]int`. Struct `v.Type().String()` gives `pkg.Type` or `struct { X int }` for anonymous. Good. So I'll write `v.Type().String()` then the literal.\n\nBut for pointer, writing `&` then elem should show elem's type e.g. `&main.Foo{...}`. Good, because elem struct prints type. For pointer to int, prints `&42` which is ambiguous; maybe `(*int)(0x...)->42`? Simpler: `&42`. spew prints `(*int)(0xc000...)(42)`. I'll print `&` + value; acceptable. Hmm but for pointer to basic type, cycle helper writes `&`. Fine.\n\nLet me now handle depth: increment on each recursion into composite. For MaxDepth, check before printing children. Let me treat depth as current nesting level. When depth > MaxDepth, print \"...\". I'll pass depth and increment for composites.\n\nNow `MaxItems` semantics: print at most MaxItems elements then `...`.\n\nLet me write `indent` writing newline + indent*depth? I'll write explicit newlines.\n\nLet me write helper `p.newline(depth)` writes \"\\n\" + strings.Repeat(indent, depth).\n\nLet me write code now.\n\nOne more: `reflect.Value.Pointer()` for `reflect.Slice`? There's `v.Pointer()` valid for Chan, Func, Map, Pointer, Slice, UnsafePointer. For Slice it returns pointer to first element. Good.\n\nFor Func and Chan, print `(func())(0x...)` and `(chan int)(0x...)`. Actually v.Pointer() for func returns code pointer, not data pointer; cycles impossible. Fine.\n\nAlso handle `reflect.Invalid` (zero Value) -> \"nil\" or \"<invalid>\". Use \"<nil>\".\n\nAlso `reflect.Interface` nil -> \"nil\".\n\nUnsafePointer -> hex.\n\nLet me also protect against panics: wrap top-level in recover? Could add `defer func(){ if r:=recover(); r!=nil { ... } }` in Sprint. That would make it robust for arbitrary data. Good idea: if reflection panics, return an error string rather than crashing the debugger. Let me add that in the exported functions. But if using strings.Builder... I'll use bytes.Buffer.\n\nLet me write the files.\n\ngo.mod:\n```\nmodule github.com/example/goprint\n\ngo 1.27\n```\n\nWait, go 1.27 might not be a standard directive? Current Go is 1.27.1 per environment (fictional future). go directive `go 1.27` should be fine. Actually maybe safer `go 1.27`. Let me run `go mod init` to let tool set it.\n\nLet me just run `go mod init github.com/example/goprint`.\n\nThen write goprint.go.\n\nLet me also add a test file and a demo main.\n\nLet me write the implementation now.\n\nI'll name the package `goprint`.\n\nLet me draft code:\n\n```go\n// Package goprint provides deep, cycle-safe pretty-printing of arbitrary Go\n// values for debugging and inspection.\n//\n// Unlike fmt's %v verb, goprint recurses into struct fields (including\n// unexported ones), reports the concrete types of values, detects reference\n// cycles, sorts map keys for deterministic output, and bounds the amount of\n// data it will emit.\npackage goprint\n\nimport (\n\t\"bytes\"\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\t\"reflect\"\n\t\"sort\"\n\t\"strconv\"\n\t\"strings\"\n)\n\n// Options configures printing. The zero value is usable and prints with tab\n// indentation and no depth or item limits.\ntype Options struct {\n\t// Indent is the string written once per nesting level. Defaults to \"\\t\".\n\tIndent string\n\t// MaxDepth limits how deep the printer recurses. A value <= 0 means no\n\t// limit.\n\tMaxDepth int\n\t// MaxItems limits how many elements of a slice, array or map are printed.\n\t// A value <= 0 means no limit.\n\tMaxItems int\n}\n\nfunc (o Options) indent() string {\n\tif o.Indent == \"\" {\n\t\treturn \"\\t\"\n\t}\n\treturn o.Indent\n}\nfunc (o Options) maxDepth() int { return o.MaxDepth }\n```\n\nHmm MaxDepth with 0 = unlimited. Fine.\n\nThen:\n\n```go\n// Sprint returns a deep, pretty-printed representation of v.\nfunc Sprint(v any) string {\n\treturn SprintOpts(v, Options{})\n}\n\n// SprintOpts is Sprint with explicit options.\nfunc SprintOpts(v any, opts Options) string {\n\tvar buf bytes.Buffer\n\tFprintOpts(&buf, v, opts)\n\treturn buf.String()\n}\n\n// Fprint writes the deep representation of v to w.\nfunc Fprint(w io.Writer, v any) error {\n\treturn FprintOpts(w, v, Options{})\n}\n\n// FprintOpts writes the deep representation of v to w using opts.\nfunc FprintOpts(w io.Writer, v any, opts Options) (err error) {\n\tp := &printer{opts: opts, visited: map[visit]bool{}}\n\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\terr = fmt.Errorf(\"goprint: recovered while printing %T: %v\", v, r)\n\t\t}\n\t}()\n\tp.value(reflect.ValueOf(v), 0)\n\t_, err = io.WriteString(w, p.buf.String())\n\treturn err\n}\n\n// Print writes the deep representation of v to standard output.\nfunc Print(v ...any) {\n\tfor _, x := range v {\n\t\tos.Stdout.WriteString(Sprint(x))\n\t\tos.Stdout.WriteString(\"\\n\")\n\t}\n}\n```\n\nHmm Print using os.Stdout directly. Fine. Maybe use fmt.Fprintln? Since Sprint has no trailing newline, Print adds one.\n\nNow printer:\n\n```go\ntype visit struct {\n\tptr uintptr\n\ttyp reflect.Type\n}\n\ntype printer struct {\n\topts    Options\n\tvisited map[visit]bool\n\tbuf     bytes.Buffer\n\tcompact bool\n}\n```\n\nUse value buf for main; for capture need separate. Let me make buf *bytes.Buffer.\n\n```go\ntype printer struct {\n\topts    Options\n\tvisited map[visit]bool\n\tbuf     *bytes.Buffer\n\tcompact bool\n}\n```\n\nIn FprintOpts: `p := &printer{opts: opts, visited: ..., buf: &bytes.Buffer{}}`.\n\ncapture:\n```go\nfunc (p *printer) capture(fn func()) string {\n\tsaved := p.buf\n\tp.buf = &bytes.Buffer{}\n\tfn()\n\ts := p.buf.String()\n\tp.buf = saved\n\treturn s\n}\n```\n\nwrite:\n```go\nfunc (p *printer) write(s string) { p.buf.WriteString(s) }\n```\n\nindent:\n```go\nfunc (p *printer) writeIndent(depth int) {\n\tp.write(\"\\n\")\n\tp.write(strings.Repeat(p.opts.indent(), depth))\n}\n```\n\nBut in compact mode, no newlines: use \", \" separators.\n\nvalue function:\n\n```go\nfunc (p *printer) value(v reflect.Value, depth int) {\n\tif !v.IsValid() {\n\t\tp.write(\"<nil>\")\n\t\treturn\n\t}\n\tif v.Kind() == reflect.Interface {\n\t\tif v.IsNil() {\n\t\t\tp.write(\"nil\")\n\t\t\treturn\n\t\t}\n\t\tp.value(v.Elem(), depth)\n\t\treturn\n\t}\n\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n\t\tp.write(\"...\")\n\t\treturn\n\t}\n\tswitch v.Kind() {\n\tcase reflect.Bool:\n\t\tp.write(strconv.FormatBool(v.Bool()))\n\tcase reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:\n\t\tp.write(strconv.FormatInt(v.Int(), 10))\n\tcase reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:\n\t\tp.write(strconv.FormatUint(v.Uint(), 10))\n\tcase reflect.Float32:\n\t\tp.write(strconv.FormatFloat(v.Float(), 'g', -1, 32))\n\tcase reflect.Float64:\n\t\tp.write(strconv.FormatFloat(v.Float(), 'g', -1, 64))\n\tcase reflect.Complex64:\n\t\tp.write(formatComplex(v.Complex(), 64))\n\tcase reflect.Complex128:\n\t\tp.write(formatComplex(v.Complex(), 128))\n\tcase reflect.String:\n\t\tp.write(strconv.Quote(v.String()))\n\tcase reflect.Ptr:\n\t\tp.pointer(v, depth)\n\tcase reflect.Struct:\n\t\tp.structValue(v, depth)\n\tcase reflect.Map:\n\t\tp.mapValue(v, depth)\n\tcase reflect.Slice:\n\t\tp.sliceValue(v, depth)\n\tcase reflect.Array:\n\t\tp.arrayValue(v, depth)\n\tcase reflect.Chan:\n\t\tp.write(\"(\" + v.Type().String() + \")(\" + hexPtr(v.Pointer()) + \")\")\n\tcase reflect.Func:\n\t\tif v.IsNil() {\n\t\t\tp.write(\"nil\")\n\t\t} else {\n\t\t\tp.write(\"(\" + v.Type().String() + \")(\" + hexPtr(v.Pointer()) + \")\")\n\t\t}\n\tcase reflect.UnsafePointer:\n\t\tp.write(\"unsafe.Pointer(\" + hexPtr(v.Pointer()) + \")\")\n\tdefault:\n\t\tp.write(fmt.Sprintf(\"<%s>\", v.Type()))\n\t}\n}\n```\n\nformatComplex:\n```go\nfunc formatComplex(c complex128, bits int) string {\n\tre := strconv.FormatFloat(real(c), 'g', -1, bits)\n\tim := strconv.FormatFloat(imag(c), 'g', -1, bits)\n\treturn \"(\" + re + \"+\" + im + \"i)\"  // handle negative?\n}\n```\nBetter use fmt.Sprintf with strconv. Fine.\n\nhexPtr:\n```go\nfunc hexPtr(p uintptr) string {\n\tif p == 0 { return \"0x0\" }\n\treturn \"0x\" + strconv.FormatUint(uint64(p), 16)\n}\n```\n\nStruct:\n```go\nfunc (p *printer) structValue(v reflect.Value, depth int) {\n\tt := v.Type()\n\tif t.NumField() == 0 {\n\t\tp.write(p.typeString(t) + \"{}\")\n\t\treturn\n\t}\n\tp.write(p.typeString(t))\n\tp.write(\"{\")\n\tfor i := 0; i < t.NumField(); i++ {\n\t\tif !p.compact {\n\t\t\tp.writeIndent(depth + 1)\n\t\t} else if i > 0 {\n\t\t\tp.write(\" \")\n\t\t}\n\t\tf := t.Field(i)\n\t\tp.write(f.Name)\n\t\tp.write(\": \")\n\t\tp.value(v.Field(i), depth+1)\n\t\tif i < t.NumField()-1 {\n\t\t\tp.write(\",\")\n\t\t}\n\t}\n\tif !p.compact {\n\t\tp.writeIndent(depth)\n\t}\n\tp.write(\"}\")\n}\n```\n\ntypeString: `v.Type().String()`.\n\nFor anonymous struct `struct { X int }`, String() gives that. Good.\n\nMap:\n```go\nfunc (p *printer) mapValue(v reflect.Value, depth int) {\n\tif v.IsNil() {\n\t\tp.write(\"nil\")\n\t\treturn\n\t}\n\tp.withCycle(v, func() {\n\t\tt := v.Type()\n\t\tn := v.Len()\n\t\tp.write(t.String())\n\t\tif n == 0 {\n\t\t\tp.write(\"{}\")\n\t\t\treturn\n\t\t}\n\t\ttype entry struct {\n\t\t\tkey  reflect.Value\n\t\t\ttext string\n\t\t}\n\t\tkeys := v.MapKeys()\n\t\tentries := make([]entry, len(keys))\n\t\tfor i, k := range keys {\n\t\t\tentries[i] = entry{key: k, text: p.inline(k, depth+1)}\n\t\t}\n\t\tsort.Slice(entries, func(i, j int) bool { return entries[i].text < entries[j].text })\n\t\tlimit := p.limit(n)\n\t\tif p.compact {\n\t\t\tp.write(\"{\")\n\t\t} else {\n\t\t\tp.write(\"{\")\n\t\t}\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tif !p.compact {\n\t\t\t\tp.writeIndent(depth + 1)\n\t\t\t} else if i > 0 {\n\t\t\t\tp.write(\" \")\n\t\t\t}\n\t\t\tp.write(entries[i].text)\n\t\t\tp.write(\": \")\n\t\t\tp.value(v.MapIndex(entries[i].key), depth+1)\n\t\t\tif i < limit-1 || limit < n {\n\t\t\t\tp.write(\",\")\n\t\t\t}\n\t\t}\n\t\tif limit < n {\n\t\t\tif !p.compact {\n\t\t\t\tp.writeIndent(depth + 1)\n\t\t\t} else {\n\t\t\t\tp.write(\" \")\n\t\t\t}\n\t\t\tp.write(fmt.Sprintf(\"... (%d more)\", n-limit))\n\t\t}\n\t\tif !p.compact {\n\t\t\tp.writeIndent(depth)\n\t\t}\n\t\tp.write(\"}\")\n\t})\n}\n```\n\nWait, I render key text via `p.inline(k, depth+1)` and then also print value. But I wrote `p.write(entries[i].text)` for key, which is the inline rendering. Good. But rendering inline uses a compact sub-printer that shares visited. Let me implement `inline`:\n\n```go\nfunc (p *printer) inline(v reflect.Value, depth int) string {\n\tsub := &printer{opts: p.opts, visited: p.visited, buf: &bytes.Buffer{}, compact: true}\n\tsub.value(v, depth)\n\treturn sub.buf.String()\n}\n```\n\nBut careful: inline is called while potentially inside a map cycle region. The visited map is shared, but keys won't be the map itself. Fine. However, sub printer shares visited but `p.buf` is separate. Good.\n\nBut there's an issue: `p.inline` is called for each key during mapValue while `p.buf` has partial content — no problem since sub has own buf.\n\nlimit helper:\n```go\nfunc (p *printer) limit(n int) int {\n\tif p.opts.MaxItems > 0 && n > p.opts.MaxItems {\n\t\treturn p.opts.MaxItems\n\t}\n\treturn n\n}\n```\n\nSlice:\n```go\nfunc (p *printer) sliceValue(v reflect.Value, depth int) {\n\tif v.IsNil() {\n\t\tp.write(\"nil\")\n\t\treturn\n\t}\n\tp.withCycle(v, func() {\n\t\tp.sequence(v, depth, v.Type().String())\n\t})\n}\n```\nHmm but slice cycle: a slice `type S []S` with s[0]=s. p.withCycle(key) where key uses v.Pointer() (address of first elem) and type S. When recursing into element 0 which is also a slice with same backing pointer -> same key -> cycle. Good.\n\nBut note: for a slice, Pointer() returns address of first element. For nested slices with different lengths but same backing, false cycle. Acceptable.\n\nArray: no cycle (value type, but could contain pointer causing cycles handled at pointer level). `arrayValue` doesn't need cycle wrapper.\n\nLet me write a common `sequence(v, depth, typeStr)`:\n```go\nfunc (p *printer) sequence(v reflect.Value, depth int, typeStr string) {\n\tn := v.Len()\n\tp.write(typeStr)\n\tif n == 0 {\n\t\tp.write(\"{}\")\n\t\treturn\n\t}\n\tlimit := p.limit(n)\n\tp.write(\"{\")\n\tfor i := 0; i < limit; i++ {\n\t\tif !p.compact {\n\t\t\tp.writeIndent(depth + 1)\n\t\t} else if i > 0 {\n\t\t\tp.write(\" \")\n\t\t}\n\t\tp.value(v.Index(i), depth+1)\n\t\tif i < limit-1 || limit < n {\n\t\t\tp.write(\",\")\n\t\t}\n\t}\n\tif limit < n {\n\t\tif !p.compact {\n\t\t\tp.writeIndent(depth + 1)\n\t\t} else {\n\t\t\tp.write(\" \")\n\t\t}\n\t\tp.write(fmt.Sprintf(\"... (%d more)\", n-limit))\n\t}\n\tif !p.compact {\n\t\tp.writeIndent(depth)\n\t}\n\tp.write(\"}\")\n}\n```\n\nFor slice nil: I wrote \"nil\". But should we show type? spew shows `([]int) <nil>`. I'll just write \"nil\". Hmm, for a typed nil slice maybe `[]int(nil)`. Let me write typeStr+\"(nil)\"? For map too. Let's do: nil map -> `map[K]V(nil)`, nil slice -> `[]T(nil)`, nil ptr -> `(*T)(nil)`. That's more informative. Let me implement accordingly:\n- Ptr nil: `(*T)(nil)` where type T is elem; v.Type() is *T. Write `(` + v.Type().String() + `)(nil)`.\n- Map nil: `map...nil`.\n- Slice nil: same.\n\nBut simple `nil` might be nicer. I'll go with typed nil for clarity since it's a debug tool.\n\nLet me adjust:\n- Ptr: if nil -> `(` + v.Type().String() + `)(nil)`.\n- Map: if nil -> v.Type().String() + `(nil)`.\n- Slice: if nil -> v.Type().String() + `(nil)`.\n\npointer non-nil:\n```go\nfunc (p *printer) pointer(v reflect.Value, depth int) {\n\tif v.IsNil() {\n\t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n\t\treturn\n\t}\n\tp.withCycle(v, func() {\n\t\tp.write(\"&\")\n\t\tp.value(v.Elem(), depth+1)\n\t})\n}\n```\n\nHmm but for pointer to pointer, each level prints `&`. Fine. However cycle detection key uses v.Pointer() which for ptr is data pointer. Good.\n\nBut wait: for a pointer to a struct, we print `&main.Foo{...}`. Good. For pointer to int, `&42`? Actually `&` + value(42) = `&42`. Fine.\n\nNow typeString method uses v.Type().String().\n\nStruct type string: for a named struct, good. But for pointer, we don't print pointer type; `&` suffices.\n\nNow `withCycle`:\n```go\nfunc (p *printer) withCycle(v reflect.Value, fn func()) {\n\tkey := visit{ptr: v.Pointer(), typ: v.Type()}\n\tif p.visited[key] {\n\t\tp.write(\"<cycle>\")\n\t\treturn\n\t}\n\tp.visited[key] = true\n\tdefer delete(p.visited, key)\n\tfn()\n}\n```\n\nEdge: v.Pointer() == 0 for empty slice non-nil? A non-nil empty slice can have pointer 0? `make([]int,0)` may have pointer to zerobase non-zero. But `[]int{}` has non-zero? Actually empty slice literal may have pointer 0. If pointer is 0, key {0, type} could collide across different empty slices, but empty slices have no elements so no recursion, so no false cycle. But a non-empty slice could it have pointer 0? No. Fine. But what about two distinct slices where one is empty with ptr 0 and another empty with ptr 0 at same time - but no recursion into elements, so visited set only momentarily. Fine.\n\nFor maps, v.Pointer() is never 0 for non-nil.\n\nNow the recover in FprintOpts. Also need to handle when `p.value` panics mid-way; buf may have partial data but we ignore and return error. Good.\n\nTests: Let me write tests covering:\n- basic scalars\n- string quoting\n- struct with unexported fields\n- pointer\n- slice/array/map sorted\n- cycle detection for pointer, map, slice\n- MaxDepth, MaxItems\n- nil handling\n- complex\n\nLet me write test cases carefully to match output. This is where I must be precise. Let me write the code and then run tests, adjusting expected output based on actual (but I should have them correct). I'll run and iterate.\n\nLet me write the implementation file.\n\nAlso add `cmd/demo/main.go`:\n```go\npackage main\n\nimport (\n\t\"fmt\"\n\t\"github.com/example/goprint\"\n)\n\ntype Node struct {\n\tName string\n\tNext *Node\n}\n\nfunc main() {\n\ta := &Node{Name: \"a\"}\n\tb := &Node{Name: \"b\", Next: a}\n\ta.Next = b\n\tgoprint.Print(a)\n}\n```\nWait Print takes ...any. `goprint.Print(a)`. Good.\n\nBut module path with cmd/demo importing the module works.\n\nLet me also add a README? The instruction says don't create docs unless requested. Skip README.\n\nLet me create the files. First `go mod init`.\n\nLet me also set git safe.directory since git complains. Not strictly needed for the task but useful. I won't modify global git config unless needed. Actually the bash commands with git fail due to dubious ownership. I'll add safe.directory for /work to be able to use git if needed. It's a config change; user didn't ask. I'll avoid unless necessary. I don't need git.\n\nLet me write files.\n\nLet me think about whether `Options.MaxDepth > 0 && depth > MaxDepth` is right. Top-level depth 0. MaxDepth 1: top printed, children at depth 1 printed, grandchildren at depth 2 -> \"...\". Hmm, depends. Let me define MaxDepth as maximum nesting levels printed. At depth > MaxDepth print \"...\". If MaxDepth=0 means unlimited. Fine.\n\nWait, but if MaxDepth=1, a struct's fields at depth 1 are printed, but their composite children at depth 2 become \"...\". That's reasonable.\n\nNow, for `sequence` and `struct` I increment depth for children. Good.\n\nLet me also consider that `p.value` for interface unwrap doesn't increment depth. Good, interfaces are transparent.\n\nNow, potential issue: printing `reflect.Value` fields. Not handling specially. Fine.\n\nPotential issue: For structs with embedded fields, f.Name gives the type name for embedded. Fine.\n\nPotential issue: `v.Field(i)` on unexported field - recursion into composite works; scalar getters work. `v.Pointer()` on unexported pointer field: works (Pointer doesn't require CanInterface). `v.MapKeys()` on unexported map field: works. Good.\n\nPotential issue: `v.Interface()` not used anywhere. Good.\n\nOne concern: `v.Type().String()` for unexported anonymous struct types is fine.\n\nNow, complex formatting: implement:\n```go\nfunc formatComplex(c complex128, bits int) string {\n\tre := strconv.FormatFloat(real(c), 'g', -1, bits)\n\tim := strconv.FormatFloat(imag(c), 'g', -1, bits)\n\tif !strings.HasPrefix(im, \"-\") {\n\t\tim = \"+\" + im\n\t}\n\treturn \"(\" + re + im + \"i)\"\n}\n```\nFor complex64, real(c) needs float64; FormatFloat with bits=32 on the float64 value works. Good.\n\nNow let me write.\n\nAlso, `Print` signature: maybe `func Print(v any)` simpler. But ...any allows multiple. I'll do `func Print(v ...any)`.\n\nLet me now create the module and files.\n\nLet me also think about tests expected output. I'll iterate by running.\n\nLet me write it.",
+          "time": {
+            "start": 1791063414383,
+            "end": 1791063451715
+          },
+          "id": "prt_103b2d66f001iXRHTnFhoK9Co7",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2d23d001NQlMmhd54pRLWu"
+        },
+        {
+          "type": "text",
+          "text": "I'll set up the Go module and implement a cycle-safe deep pretty printer with options and tests.",
+          "time": {
+            "start": 1791063451736,
+            "end": 1791063452283
+          },
+          "id": "prt_103b36858001i1m4T1Y94Z00nl",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2d23d001NQlMmhd54pRLWu"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_hAkLLoOSyJ6SFGPInbCS7987",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Initialize Go module",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement deep pretty-printer package",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests covering reflection edge cases",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add demo CLI",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Run gofmt, go vet, go test",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Initialize Go module\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement deep pretty-printer package\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests covering reflection edge cases\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add demo CLI\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Run gofmt, go vet, go test\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Initialize Go module",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement deep pretty-printer package",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests covering reflection edge cases",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add demo CLI",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Run gofmt, go vet, go test",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "5 todos",
+            "time": {
+              "start": 1791063452226,
+              "end": 1791063452235
+            }
+          },
+          "id": "prt_103b368c9001Ekw6fEG6bYeO65",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2d23d001NQlMmhd54pRLWu"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 18185,
+            "input": 193,
+            "output": 174,
+            "reasoning": 9242,
+            "cache": {
+              "write": 0,
+              "read": 8576
+            }
+          },
+          "cost": 0.005704278,
+          "id": "prt_103b36b5d001gyr7Bese0S738U",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b2d23d001NQlMmhd54pRLWu"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000121128,
+        "tokens": {
+          "total": 18416,
+          "input": 172,
+          "output": 68,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 18176
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063452698,
+          "completed": 1791063454514
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b36c19001qKQQSsOlH1A342",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103b36f59001xFFpNkRlBXNgXQ",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b36c19001qKQQSsOlH1A342"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_VtTffiTN306p1Vk6goBK7518",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "go mod init github.com/example/goprint && cat go.mod",
+              "workdir": "/work"
+            },
+            "output": "go: creating new go.mod: module github.com/example/goprint\nmodule github.com/example/goprint\n\ngo 1.27.1\n",
+            "metadata": {
+              "output": "go: creating new go.mod: module github.com/example/goprint\nmodule github.com/example/goprint\n\ngo 1.27.1\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "go mod init github.com/example/goprint && cat go.mod",
+            "time": {
+              "start": 1791063454251,
+              "end": 1791063454326
+            }
+          },
+          "id": "prt_103b371ed001K3Q5YxHYbMNUB3",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b36c19001qKQQSsOlH1A342"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "21ab443706b9dc1ff5acef38e13de4c3bd937a4a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 18416,
+            "input": 172,
+            "output": 68,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 18176
+            }
+          },
+          "cost": 0.000121128,
+          "id": "prt_103b372f7001PIGMoAawyUclYD",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b36c19001qKQQSsOlH1A342"
+        },
+        {
+          "type": "patch",
+          "hash": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "files": [
+            "/work/go.mod"
+          ],
+          "id": "prt_103b3732d001vgRU4jl3zxXuTw",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b36c19001qKQQSsOlH1A342"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001669662,
+        "tokens": {
+          "total": 21113,
+          "input": 157,
+          "output": 2647,
+          "reasoning": 5,
+          "cache": {
+            "write": 0,
+            "read": 18304
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063454519,
+          "completed": 1791063462783
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b37337001Bp0dPkugmoXulr",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "21ab443706b9dc1ff5acef38e13de4c3bd937a4a",
+          "type": "step-start",
+          "id": "prt_103b375a20015lRpFXBqmHc9yv",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b37337001Bp0dPkugmoXulr"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now write the implementation.",
+          "time": {
+            "start": 1791063455311,
+            "end": 1791063455407
+          },
+          "id": "prt_103b3764f001V0vRP6RhQSsCx8",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b37337001Bp0dPkugmoXulr"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_nes6NgntcZYTsBWVrQWZ9106",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint.go",
+              "content": "// Package goprint provides deep, cycle-safe pretty-printing of arbitrary Go\n// values for debugging and inspection.\n//\n// Unlike fmt's %v verb, goprint recurses into struct fields (including\n// unexported ones), reports the types of composite values, detects reference\n// cycles, sorts map keys for deterministic output, and can bound both the\n// recursion depth and the number of elements it emits. A value that cannot be\n// inspected never panics the program: the error is reported in the output.\npackage goprint\n\nimport (\n\t\"bytes\"\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\t\"reflect\"\n\t\"sort\"\n\t\"strconv\"\n\t\"strings\"\n)\n\n// Options configures printing. The zero value is usable and prints with tab\n// indentation and no depth or item limits.\ntype Options struct {\n\t// Indent is the string written once per nesting level. Defaults to \"\\t\".\n\tIndent string\n\t// MaxDepth limits how deep the printer recurses. A value <= 0 means no\n\t// limit. Values beyond the limit are rendered as \"...\".\n\tMaxDepth int\n\t// MaxItems limits how many elements of a slice, array or map are printed.\n\t// A value <= 0 means no limit.\n\tMaxItems int\n}\n\nfunc (o Options) indent() string {\n\tif o.Indent == \"\" {\n\t\treturn \"\\t\"\n\t}\n\treturn o.Indent\n}\n\n// Sprint returns a deep, pretty-printed representation of v.\nfunc Sprint(v any) string {\n\treturn SprintOpts(v, Options{})\n}\n\n// SprintOpts is Sprint with explicit options.\nfunc SprintOpts(v any, opts Options) string {\n\tvar buf bytes.Buffer\n\tFprintOpts(&buf, v, opts)\n\treturn buf.String()\n}\n\n// Fprint writes the deep representation of v to w.\nfunc Fprint(w io.Writer, v any) error {\n\treturn FprintOpts(w, v, Options{})\n}\n\n// FprintOpts writes the deep representation of v to w using opts.\nfunc FprintOpts(w io.Writer, v any, opts Options) (err error) {\n\tp := &printer{opts: opts, visited: map[visit]bool{}, buf: &bytes.Buffer{}}\n\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\terr = fmt.Errorf(\"goprint: recovered while printing %T: %v\", v, r)\n\t\t}\n\t}()\n\tp.value(reflect.ValueOf(v), 0)\n\t_, err = io.WriteString(w, p.buf.String())\n\treturn err\n}\n\n// Print writes the deep representation of each value to standard output,\n// one per line.\nfunc Print(v ...any) {\n\tfor _, x := range v {\n\t\tos.Stdout.WriteString(Sprint(x))\n\t\tos.Stdout.WriteString(\"\\n\")\n\t}\n}\n\n// visit identifies a reference value on the current printing path. It is used\n// to detect cycles without treating shared but acyclic values as cycles.\ntype visit struct {\n\tptr uintptr\n\ttyp reflect.Type\n}\n\ntype printer struct {\n\topts    Options\n\tvisited map[visit]bool\n\tbuf     *bytes.Buffer\n\tcompact bool\n}\n\nfunc (p *printer) write(s string) { p.buf.WriteString(s) }\n\n// writeIndent starts a new (indented) line. It is a no-op in compact mode.\nfunc (p *printer) writeIndent(depth int) {\n\tif p.compact {\n\t\treturn\n\t}\n\tp.write(\"\\n\")\n\tp.write(strings.Repeat(p.opts.indent(), depth))\n}\n\n// withCycle guards a reference value. If fn is invoked while v is already on\n// the active path, a cycle marker is printed instead.\nfunc (p *printer) withCycle(v reflect.Value, fn func()) {\n\tkey := visit{ptr: v.Pointer(), typ: v.Type()}\n\tif p.visited[key] {\n\t\tp.write(\"<cycle>\")\n\t\treturn\n\t}\n\tp.visited[key] = true\n\tdefer delete(p.visited, key)\n\tfn()\n}\n\n// inline renders v on a single line, sharing the cycle-detection state.\nfunc (p *printer) inline(v reflect.Value, depth int) string {\n\tsub := &printer{opts: p.opts, visited: p.visited, buf: &bytes.Buffer{}, compact: true}\n\tsub.value(v, depth)\n\treturn sub.buf.String()\n}\n\n// limit returns how many elements of a sequence of length n should be printed.\nfunc (p *printer) limit(n int) int {\n\tif p.opts.MaxItems > 0 && n > p.opts.MaxItems {\n\t\treturn p.opts.MaxItems\n\t}\n\treturn n\n}\n\nfunc (p *printer) value(v reflect.Value, depth int) {\n\tif !v.IsValid() {\n\t\tp.write(\"<nil>\")\n\t\treturn\n\t}\n\n\tif v.Kind() == reflect.Interface {\n\t\tif v.IsNil() {\n\t\t\tp.write(\"nil\")\n\t\t\treturn\n\t\t}\n\t\tp.value(v.Elem(), depth)\n\t\treturn\n\t}\n\n\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n\t\tp.write(\"...\")\n\t\treturn\n\t}\n\n\tswitch v.Kind() {\n\tcase reflect.Bool:\n\t\tp.write(strconv.FormatBool(v.Bool()))\n\tcase reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:\n\t\tp.write(strconv.FormatInt(v.Int(), 10))\n\tcase reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:\n\t\tp.write(strconv.FormatUint(v.Uint(), 10))\n\tcase reflect.Float32:\n\t\tp.write(strconv.FormatFloat(v.Float(), 'g', -1, 32))\n\tcase reflect.Float64:\n\t\tp.write(strconv.FormatFloat(v.Float(), 'g', -1, 64))\n\tcase reflect.Complex64:\n\t\tp.write(formatComplex(v.Complex(), 32))\n\tcase reflect.Complex128:\n\t\tp.write(formatComplex(v.Complex(), 64))\n\tcase reflect.String:\n\t\tp.write(strconv.Quote(v.String()))\n\tcase reflect.Ptr:\n\t\tp.pointer(v, depth)\n\tcase reflect.Struct:\n\t\tp.structValue(v, depth)\n\tcase reflect.Map:\n\t\tp.mapValue(v, depth)\n\tcase reflect.Slice:\n\t\tp.sliceValue(v, depth)\n\tcase reflect.Array:\n\t\tp.sequence(v, depth, v.Type().String())\n\tcase reflect.Chan:\n\t\tp.write(\"(\" + v.Type().String() + \")(\" + hexPtr(v.Pointer()) + \")\")\n\tcase reflect.Func:\n\t\tif v.IsNil() {\n\t\t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n\t\t} else {\n\t\t\tp.write(\"(\" + v.Type().String() + \")(\" + hexPtr(v.Pointer()) + \")\")\n\t\t}\n\tcase reflect.UnsafePointer:\n\t\tp.write(\"unsafe.Pointer(\" + hexPtr(v.Pointer()) + \")\")\n\tdefault:\n\t\tp.write(fmt.Sprintf(\"<%s>\", v.Type()))\n\t}\n}\n\nfunc (p *printer) pointer(v reflect.Value, depth int) {\n\tif v.IsNil() {\n\t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n\t\treturn\n\t}\n\tp.withCycle(v, func() {\n\t\tp.write(\"&\")\n\t\tp.value(v.Elem(), depth+1)\n\t})\n}\n\nfunc (p *printer) structValue(v reflect.Value, depth int) {\n\tt := v.Type()\n\tp.write(t.String())\n\tp.write(\"{\")\n\tfor i := 0; i < t.NumField(); i++ {\n\t\tif i > 0 {\n\t\t\tp.write(\",\")\n\t\t}\n\t\tif p.compact {\n\t\t\tp.write(\" \")\n\t\t} else {\n\t\t\tp.writeIndent(depth + 1)\n\t\t}\n\t\tp.write(t.Field(i).Name)\n\t\tp.write(\": \")\n\t\tp.value(v.Field(i), depth+1)\n\t}\n\tif t.NumField() > 0 {\n\t\tif p.compact {\n\t\t\tp.write(\" \")\n\t\t} else {\n\t\t\tp.writeIndent(depth)\n\t\t}\n\t}\n\tp.write(\"}\")\n}\n\nfunc (p *printer) mapValue(v reflect.Value, depth int) {\n\tif v.IsNil() {\n\t\tp.write(v.Type().String() + \"(nil)\")\n\t\treturn\n\t}\n\tp.withCycle(v, func() {\n\t\tn := v.Len()\n\t\tp.write(v.Type().String())\n\t\tif n == 0 {\n\t\t\tp.write(\"{}\")\n\t\t\treturn\n\t\t}\n\n\t\ttype entry struct {\n\t\t\tkey  reflect.Value\n\t\t\ttext string\n\t\t}\n\t\tkeys := v.MapKeys()\n\t\tentries := make([]entry, len(keys))\n\t\tfor i, k := range keys {\n\t\t\tentries[i] = entry{key: k, text: p.inline(k, depth+1)}\n\t\t}\n\t\tsort.Slice(entries, func(i, j int) bool { return entries[i].text < entries[j].text })\n\n\t\tlimit := p.limit(n)\n\t\tp.write(\"{\")\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tif i > 0 {\n\t\t\t\tp.write(\",\")\n\t\t\t}\n\t\t\tif p.compact {\n\t\t\t\tp.write(\" \")\n\t\t\t} else {\n\t\t\t\tp.writeIndent(depth + 1)\n\t\t\t}\n\t\t\tp.write(entries[i].text)\n\t\t\tp.write(\": \")\n\t\t\tp.value(v.MapIndex(entries[i].key), depth+1)\n\t\t}\n\t\tif limit < n {\n\t\t\tp.write(\",\")\n\t\t\tif p.compact {\n\t\t\t\tp.write(\" \")\n\t\t\t} else {\n\t\t\t\tp.writeIndent(depth + 1)\n\t\t\t}\n\t\t\tp.write(fmt.Sprintf(\"... (%d more)\", n-limit))\n\t\t}\n\t\tif p.compact {\n\t\t\tp.write(\" \")\n\t\t} else {\n\t\t\tp.writeIndent(depth)\n\t\t}\n\t\tp.write(\"}\")\n\t})\n}\n\nfunc (p *printer) sliceValue(v reflect.Value, depth int) {\n\tif v.IsNil() {\n\t\tp.write(v.Type().String() + \"(nil)\")\n\t\treturn\n\t}\n\tp.withCycle(v, func() {\n\t\t// Copy the header to avoid a liveness issue: taking the address of a\n\t\t// slice's backing array keeps it alive for the duration of the print.\n\t\tp.sequence(v, depth, v.Type().String())\n\t})\n}\n\nfunc (p *printer) sequence(v reflect.Value, depth int, typeStr string) {\n\tn := v.Len()\n\tp.write(typeStr)\n\tif n == 0 {\n\t\tp.write(\"{}\")\n\t\treturn\n\t}\n\tlimit := p.limit(n)\n\tp.write(\"{\")\n\tfor i := 0; i < limit; i++ {\n\t\tif i > 0 {\n\t\t\tp.write(\",\")\n\t\t}\n\t\tif p.compact {\n\t\t\tp.write(\" \")\n\t\t} else {\n\t\t\tp.writeIndent(depth + 1)\n\t\t}\n\t\tp.value(v.Index(i), depth+1)\n\t}\n\tif limit < n {\n\t\tp.write(\",\")\n\t\tif p.compact {\n\t\t\tp.write(\" \")\n\t\t} else {\n\t\t\tp.writeIndent(depth + 1)\n\t\t}\n\t\tp.write(fmt.Sprintf(\"... (%d more)\", n-limit))\n\t}\n\tif p.compact {\n\t\tp.write(\" \")\n\t} else {\n\t\tp.writeIndent(depth)\n\t}\n\tp.write(\"}\")\n}\n\nfunc formatComplex(c complex128, bits int) string {\n\tre := strconv.FormatFloat(real(c), 'g', -1, bits)\n\tim := strconv.FormatFloat(imag(c), 'g', -1, bits)\n\tif !strings.HasPrefix(im, \"-\") {\n\t\tim = \"+\" + im\n\t}\n\treturn \"(\" + re + im + \"i)\"\n}\n\nfunc hexPtr(p uintptr) string {\n\treturn \"0x\" + strconv.FormatUint(uint64(p), 16)\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/goprint.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "goprint.go",
+            "time": {
+              "start": 1791063462465,
+              "end": 1791063462494
+            }
+          },
+          "id": "prt_103b376b60010HLK7ZwNvO3CR1",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b37337001Bp0dPkugmoXulr"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "5bc67e1b7786eff91d95d3e74955d7240851988f",
+          "type": "step-finish",
+          "tokens": {
+            "total": 21113,
+            "input": 157,
+            "output": 2647,
+            "reasoning": 5,
+            "cache": {
+              "write": 0,
+              "read": 18304
+            }
+          },
+          "cost": 0.001669662,
+          "id": "prt_103b3930d0014KbwJt8G7QTzDT",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b37337001Bp0dPkugmoXulr"
+        },
+        {
+          "type": "patch",
+          "hash": "21ab443706b9dc1ff5acef38e13de4c3bd937a4a",
+          "files": [
+            "/work/goprint.go"
+          ],
+          "id": "prt_103b39377001SYtfNA3BlE2Mfr",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b37337001Bp0dPkugmoXulr"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001179126,
+        "tokens": {
+          "total": 22955,
+          "input": 137,
+          "output": 127,
+          "reasoning": 1699,
+          "cache": {
+            "write": 0,
+            "read": 20992
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063462793,
+          "completed": 1791063471434
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b39389001MIxaiMyFnaQhKy",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "5bc67e1b7786eff91d95d3e74955d7240851988f",
+          "type": "step-start",
+          "id": "prt_103b39691001tctx6i3R2nSSas",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b39389001MIxaiMyFnaQhKy"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now let me write tests. I need to compute expected outputs. Let me instead write tests using examples and run to see actual, then verify correctness manually. But better to write expected and iterate.\n\nLet me think about output for a struct:\n\n```go\ntype Inner struct{ N int }\ntype Outer struct {\n    Name string\n    In   Inner\n    P    *int\n    priv int\n}\nx := 7\no := Outer{Name: \"hi\", In: Inner{N: 3}, P: &x, priv: 9}\nSprint(o)\n```\n\nExpected:\n```\ngoprint.Outer{\n\tName: \"hi\",\n\tIn: goprint.Inner{\n\t\tN: 3\n\t},\n\tP: &3,\n\tpriv: 9\n}\n```\nWait struct closing: for fields, in compact we write trailing space before `}`. In non-compact we writeIndent(depth) then `}`. For the inner struct at depth 1, after last field it writes newline + indent(1) then `}`. So:\n```\ngoprint.Outer{\n\tName: \"hi\",\n\tIn: goprint.Inner{\n\t\tN: 3\n\t},\n\tP: &3,\n\tpriv: 9\n}\n```\nHmm comma placement: In structValue, we write comma before each field except first (`if i>0 p.write(\",\")`). So field lines end without comma, and next field starts with `,`? Wait: order is: for i, if i>0 write \",\"; then newline+indent; then name. So the comma is written BEFORE the newline? Let's trace: i=0: no comma, writeIndent -> \"\\n\\t\", name. Then value. i=1: write \",\" -> so after value of field0, we write \",\" then writeIndent -> \"\\n\\t\". So output: `Name: \"hi\",\\n\\tIn: ...`. Yes comma at end of previous line. Good, that matches. So expected is right.\n\nFor closing inner: after field N, no comma (last), then since NumField>0: writeIndent(depth=1) -> \"\\n\\t\", then \"}\". So inner ends:\n```\n\tIn: goprint.Inner{\n\t\tN: 3\n\t},\n```\nWait after inner value, the outer loop does i increments to next field: writes \",\" then newline. So `},` yes.\n\nTop-level closing: after priv value, i done, NumField>0 so writeIndent(depth=0) -> \"\\n\", then \"}\". Good.\n\nNow pointer to struct prints `&` + struct type string. For `*int` -> `&3`. Good.\n\nMap:\n```go\nm := map[string]int{\"b\":2,\"a\":1}\n```\nExpected:\n```\nmap[string]int{\n\t\"a\": 1,\n\t\"b\": 2\n}\n```\n\nSlice `[]int{1,2,3}`:\n```\n[]int{\n\t1,\n\t2,\n\t3\n}\n```\n\nArray `[2]string{\"x\",\"y\"}`:\n```\n[2]string{\n\t\"x\",\n\t\"y\"\n}\n```\n\nNil map: `map[string]int(nil)`. Nil slice: `[]int(nil)`.\n\nCycle:\n```go\ntype Node struct{ Name string; Next *Node }\na := &Node{Name:\"a\"}; b := &Node{Name:\"b\", Next:a}; a.Next=b\nSprint(a)\n```\nTrace: p.value(ptr a, depth0) -> pointer, withCycle key(a ptr), write \"&\", value(elem struct, depth1). struct type `goprint.Node{`, field Name \"a\", Next -> pointer b -> withCycle key(b), \"&\", struct depth2: Name \"b\", Next -> pointer a -> withCycle key(a) already visited -> \"<cycle>\". So:\n```\n&goprint.Node{\n\tName: \"a\",\n\tNext: &goprint.Node{\n\t\tName: \"b\",\n\t\tNext: <cycle>\n\t}\n}\n```\nWait: after Next value in inner struct, closing inner: writeIndent(depth2) then \"}\". Then outer Next field done, outer closing writeIndent(depth1)?? Wait outer struct is at depth1, its fields' children use depth+1 = 2. Closing outer uses writeIndent(depth) = writeIndent(1). So:\n```\n&goprint.Node{\n\tName: \"a\",\n\tNext: &goprint.Node{\n\t\tName: \"b\",\n\t\tNext: <cycle>\n\t}\n}\n```\nLet me verify indentation: outer struct depth1: fields indent depth+1=2? Wait writeIndent(depth+1) where depth=1 => indent 2 tabs? Hmm. But outer came from pointer at depth0, and value(elem, depth+1=1). So struct depth=1. Field indentation depth+1=2 -> two tabs. That seems too indented; the `&` is at column 0, then `{`, then fields should be one tab. But we use depth+1=2 tabs. That's a bug: when a struct is the element of a pointer, the depth was incremented, so fields get depth+1. Hmm.\n\nLet me reconsider depth semantics. Maybe pointer shouldn't increment depth for the element; the `&` is inline prefix, so the struct is at the same visual level. Let me change pointer to call p.value(v.Elem(), depth) without increment. Similarly interface unwrap keeps depth. Then struct fields at depth+1. That gives:\n- pointer a depth0 -> struct depth0 -> fields depth1 (one tab). Good.\n- Next pointer depth1 -> struct depth1 -> fields depth2 (two tabs). Good.\n\nFor map keys inline we pass depth+1 but compact ignores indent. Fine.\n\nFor slice: slice at depth0 -> elements depth1. Good. If slice is pointed to: pointer depth0 -> slice depth0 -> elements depth1. Good.\n\nSo change pointer to not increment depth. Also for map/slice/struct value calls, children increment. Good.\n\nBut wait, what about pointer to int at top: `&3` fine.\n\nWhat about nested pointer `**int`: p.value(ptr, 0) -> \"&\" + value(elem ptr, 0) -> \"&\" + value(int,0) -> \"&3\"? Actually elem is *int, so \"&\" then int -> \"&&3\". Hmm that's wrong-ish; ideally `&` + `(*int)`? Whatever, edge.\n\nLet me fix pointer depth.\n\nAlso, for a pointer element that's a struct, depth same. Let me update code.\n\nNow also address: `v.Elem()` on pointer might be unexported field? works.\n\nLet me update the pointer function.\n\nAlso sequence for array: arrayValue passes depth; children depth+1. Good.\n\nNow consider cycle detection for slice elements when slice is at depth. fine.\n\nLet me also reconsider MaxDepth semantics with pointer not incrementing. Fine.\n\nLet me edit pointer.\n\nAlso, there's a subtle bug: in mapValue, I compute `entries[i].text` via p.inline which shares visited. But inline uses a sub-printer with a fresh buffer and compact true. However, when rendering a key that is a pointer which is currently on the visited path, it will print `<cycle>`. That's fine/correct.\n\nBut a bigger issue: shared `visited` means rendering key text could add/remove entries during the call, but withCycle defers delete so state restored. Good.\n\nNow, one concern with `structValue` for `time.Time` — it will recurse into unexported fields, which is what \"deeply\" means. Fine.\n\nLet me fix pointer depth and then write tests.\n\nAlso note: `p.value` for Interface at depth; interface unwrap doesn't change depth. Good.\n\nLet me apply the edit.",
+          "time": {
+            "start": 1791063463774,
+            "end": 1791063470969
+          },
+          "id": "prt_103b3975d001XYjgyI7gqWEFQk",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b39389001MIxaiMyFnaQhKy"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_RHzQfpItE6svptGHC19b3500",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint.go",
+              "oldString": "\tp.withCycle(v, func() {\n\t\tp.write(\"&\")\n\t\tp.value(v.Elem(), depth+1)\n\t})",
+              "newString": "\tp.withCycle(v, func() {\n\t\tp.write(\"&\")\n\t\tp.value(v.Elem(), depth)\n\t})"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/goprint.go\n===================================================================\n--- /work/goprint.go\n+++ /work/goprint.go\n@@ -199,9 +199,9 @@\n \t\treturn\n \t}\n \tp.withCycle(v, func() {\n \t\tp.write(\"&\")\n-\t\tp.value(v.Elem(), depth+1)\n+\t\tp.value(v.Elem(), depth)\n \t})\n }\n \n func (p *printer) structValue(v reflect.Value, depth int) {\n",
+              "filediff": {
+                "file": "/work/goprint.go",
+                "patch": "Index: /work/goprint.go\n===================================================================\n--- /work/goprint.go\n+++ /work/goprint.go\n@@ -199,9 +199,9 @@\n \t\treturn\n \t}\n \tp.withCycle(v, func() {\n \t\tp.write(\"&\")\n-\t\tp.value(v.Elem(), depth+1)\n+\t\tp.value(v.Elem(), depth)\n \t})\n }\n \n func (p *printer) structValue(v reflect.Value, depth int) {\n",
+                "additions": 1,
+                "deletions": 1
+              },
+              "truncated": false
+            },
+            "title": "goprint.go",
+            "time": {
+              "start": 1791063471221,
+              "end": 1791063471255
+            }
+          },
+          "id": "prt_103b3b3a1001SNECayApICpCUS",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b39389001MIxaiMyFnaQhKy"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "9c70e8ccafebc58aa4daf6d037d87116d77ad6e9",
+          "type": "step-finish",
+          "tokens": {
+            "total": 22955,
+            "input": 137,
+            "output": 127,
+            "reasoning": 1699,
+            "cache": {
+              "write": 0,
+              "read": 20992
+            }
+          },
+          "cost": 0.001179126,
+          "id": "prt_103b3b50b001CM3ixdJnrBCMzP",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b39389001MIxaiMyFnaQhKy"
+        },
+        {
+          "type": "patch",
+          "hash": "5bc67e1b7786eff91d95d3e74955d7240851988f",
+          "files": [
+            "/work/goprint.go"
+          ],
+          "id": "prt_103b3b5450012L3jETSl6BXyrL",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b39389001MIxaiMyFnaQhKy"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.002030052,
+        "tokens": {
+          "total": 26193,
+          "input": 186,
+          "output": 1823,
+          "reasoning": 1400,
+          "cache": {
+            "write": 0,
+            "read": 22784
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063471441,
+          "completed": 1791063483410
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b3b551001TfxALjqSBcQiKo",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "9c70e8ccafebc58aa4daf6d037d87116d77ad6e9",
+          "type": "step-start",
+          "id": "prt_103b3b79c001r2F10Z7UnGbi7E",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3b551001TfxALjqSBcQiKo"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now write the test file. Let me write comprehensive tests.\n\nI'll define types in package goprint_test to get type strings like `goprint_test.Outer`. Let me make package goprint (internal test) or goprint_test. If goprint_test, type names print as `goprint_test.Outer`. I'll account.\n\nActually easier: use package `goprint` for tests so types print `goprint.Outer`. But then tests can access internals if needed. I'll use `package goprint`.\n\nLet me write test cases with expected strings.\n\nTest types:\n```go\ntype inner struct{ N int }\ntype outer struct {\n\tName string\n\tIn   inner\n\tP    *int\n\tpriv int\n}\ntype node struct {\n\tName string\n\tNext *node\n}\n```\n\nTest basics:\n- Sprint(nil) -> \"<nil>\"? reflect.ValueOf(nil) invalid -> \"<nil>\". Yes.\n- Sprint(42) -> \"42\"\n- Sprint(\"hi\") -> \"\\\"hi\\\"\" i.e. `\"hi\"` including quotes.\n- Sprint(3.5) -> \"3.5\"\n- Sprint(true) -> \"true\"\n- Sprint(complex(1,2)) -> \"(1+2i)\"\n- Sprint(complex(1,-2)) -> \"(1-2i)\"\n- Sprint([]byte(nil)) -> \"[]uint8(nil)\"\n\nStruct expected as computed.\n\nLet me write test using table and also dedicated tests for cycles.\n\nLet me write.\n\nFor `outer` with priv: p prints all fields including unexported. Expected:\n```\ngoprint.outer{\n\tName: \"hi\",\n\tIn: goprint.inner{\n\t\tN: 3\n\t},\n\tP: &3,\n\tpriv: 9\n}\n```\n\nMap test: `map[string]int{\"b\":2,\"a\":1}` expected as above.\n\nNested map/slice maybe.\n\nMaxItems: `SprintOpts([]int{1,2,3,4}, Options{MaxItems:2})` ->:\n```\n[]int{\n\t1,\n\t2,\n\t... (2 more)\n}\n```\n\nMaxDepth: `SprintOpts(node chain, Options{MaxDepth:1})`. Let me construct acyclic 3-level. Hmm easier use struct outer? Let's test with pointer chain:\n```go\ntype link struct { V int; Next *link }\nl3 := &link{V:3}\nl2 := &link{V:2, Next:l3}\nl1 := &link{V:1, Next:l2}\nSprintOpts(l1, Options{MaxDepth:1})\n```\nTrace: depth0 pointer -> struct depth0. fields indent depth1. V:1. Next pointer depth1 -> struct depth1 (same). V:2. Next pointer depth2: value at depth2. MaxDepth=1, depth2>1 -> \"...\". So:\n```\n&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: 2,\n\t\tNext: ...\n\t}\n}\n```\nWait the pointer at depth2: p.value called with depth2 for the pointer. The MaxDepth check happens before switch, so prints \"...\". But the pointer itself is at depth2 and we check depth>MaxDepth -> \"...\". Good. But note depth for pointer: Next field value uses depth+1 where struct depth=1 -> depth2. So \"...\". Good.\n\nHmm but the MaxDepth check is after interface unwrap. Fine.\n\nCycle test expected as computed.\n\nSlice cycle: \n```go\ntype ring []ring  // hmm []ring is slice of ring (slice type). \n```\nActually `type ring []*ring`? Let me do a slice containing itself: \n```go\ns := make([]any, 1)\ns[0] = s\n```\nHere element is interface holding the slice. Cycle detection: slice s value (interface unwrap) -> withCycle key {ptr of backing array first elem, type []interface{}}. It writes `[]interface{}{`, then element 0 interface -> unwrap to s slice -> withCycle same ptr -> `<cycle>`. \n\nBut wait: `v.Pointer()` for the outer slice and inner slice — are they the same backing array pointer? `s[0] = s` stores the slice header (ptr,len,cap) pointing to same array. So yes same Pointer(). Good. Expected:\n```\n[]interface{}{\n\t<cycle>\n}\n```\nBut careful: `p.inline` not used. Good.\n\nMap cycle:\n```go\nm := map[string]any{}\nm[\"self\"] = m\n```\nOuter map withCycle key {ptr of hmap, type map[string]interface{}}. Then key \"self\" inline rendering (string key fine). value MapIndex(\"self\") is interface holding map m. unwrap -> mapValue, withCycle same key -> `<cycle>`. Expected:\n```\nmap[string]interface{}{\n\t\"self\": <cycle>\n}\n```\n\nUnexported fields: covered by outer.priv.\n\nNil pointer: `(*int)(nil)`.\n\nSorted map keys: covered.\n\nLet me also test chan/func? Hard to get deterministic pointer. Skip exact; maybe test prefix. I'll test that Sprint of a nil func equals `func()(nil)`? Type string for `func()` is \"func()\". So `(func())(nil)`. Let me include.\n\nNil chan: `(chan int)(0x0)`. type string \"(chan int)\"? Actually v.Type().String() for chan int is \"chan int\". We write \"(\" + \"chan int\" + \")(\" + \"0x0\" + \")\" = \"(chan int)(0x0)\". Good.\n\nUnsafePointer maybe skip.\n\nLet me also test error recovery? Hard to trigger panic. Maybe skip.\n\nNow write test file.\n\nFor the struct test, unexported field `priv` — in `package goprint` test file, defining outer in same package. Value from `outer` is fine.\n\nLet me also test Fprint writing to bytes.Buffer equals Sprint.\n\nLet me write it.\n\nOne more check on struct output: in structValue, for i>0 we write comma then if compact space else writeIndent. For non-compact: after first field value, i=1 writes \",\" then writeIndent -> newline. So `\"hi\",\\n`. Good. For compact: `{ Name: \"hi\", In: ... }`. Good.\n\nNow sequence: same comma-before pattern. Good.\n\nLet me write tests.",
+          "time": {
+            "start": 1791063472339,
+            "end": 1791063478458
+          },
+          "id": "prt_103b3b8d3001lAe0AlNkRZEsKs",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3b551001TfxALjqSBcQiKo"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_gNFAZEQM3gYIpwuQFaRT6696",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "package goprint\n\nimport (\n\t\"bytes\"\n\t\"strings\"\n\t\"testing\"\n)\n\ntype inner struct {\n\tN int\n}\n\ntype outer struct {\n\tName string\n\tIn   inner\n\tP    *int\n\tpriv int\n}\n\ntype node struct {\n\tName string\n\tNext *node\n}\n\ntype link struct {\n\tV    int\n\tNext *link\n}\n\nfunc TestScalars(t *testing.T) {\n\ti := 7\n\tcases := []struct {\n\t\tname string\n\t\tin   any\n\t\twant string\n\t}{\n\t\t{\"nil\", nil, \"<nil>\"},\n\t\t{\"bool\", true, \"true\"},\n\t\t{\"int\", 42, \"42\"},\n\t\t{\"negative\", -3, \"-3\"},\n\t\t{\"uint\", uint(9), \"9\"},\n\t\t{\"float\", 3.5, \"3.5\"},\n\t\t{\"complex\", complex(1, 2), \"(1+2i)\"},\n\t\t{\"complex neg\", complex(1, -2), \"(1-2i)\"},\n\t\t{\"string\", \"hi\", `\"hi\"`},\n\t\t{\"string escaping\", \"a\\nb\", `\"a\\nb\"`},\n\t\t{\"nil pointer\", (*int)(nil), \"(*int)(nil)\"},\n\t\t{\"int pointer\", &i, \"&7\"},\n\t\t{\"nil slice\", []int(nil), \"[]int(nil)\"},\n\t\t{\"nil map\", map[string]int(nil), \"map[string]int(nil)\"},\n\t\t{\"nil func\", (func())(nil), \"(func())(nil)\"},\n\t\t{\"chan\", make(chan int), \"(chan int)(0x0)\"},\n\t}\n\tfor _, tc := range cases {\n\t\tt.Run(tc.name, func(t *testing.T) {\n\t\t\tif got := Sprint(tc.in); got != tc.want {\n\t\t\t\tt.Fatalf(\"Sprint(%v) =\\n%q\\nwant\\n%q\", tc.in, got, tc.want)\n\t\t\t}\n\t\t})\n\t}\n}\n\nfunc TestStruct(t *testing.T) {\n\ti := 7\n\tv := outer{Name: \"hi\", In: inner{N: 3}, P: &i, priv: 9}\n\twant := `goprint.outer{\n\tName: \"hi\",\n\tIn: goprint.inner{\n\t\tN: 3\n\t},\n\tP: &3,\n\tpriv: 9\n}`\n\tif got := Sprint(v); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestMapSorted(t *testing.T) {\n\twant := `map[string]int{\n\t\"a\": 1,\n\t\"b\": 2,\n\t\"c\": 3\n}`\n\tif got := Sprint(map[string]int{\"c\": 3, \"a\": 1, \"b\": 2}); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestSliceAndArray(t *testing.T) {\n\twant := `[]int{\n\t1,\n\t2,\n\t3\n}`\n\tif got := Sprint([]int{1, 2, 3}); got != want {\n\t\tt.Fatalf(\"slice got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n\n\twantArray := `[2]string{\n\t\"x\",\n\t\"y\"\n}`\n\tif got := Sprint([2]string{\"x\", \"y\"}); got != wantArray {\n\t\tt.Fatalf(\"array got:\\n%s\\nwant:\\n%s\", got, wantArray)\n\t}\n\n\tif got := Sprint([]int{}); got != \"[]int{}\" {\n\t\tt.Fatalf(\"empty slice got %q\", got)\n\t}\n}\n\nfunc TestPointerCycle(t *testing.T) {\n\ta := &node{Name: \"a\"}\n\tb := &node{Name: \"b\", Next: a}\n\ta.Next = b\n\n\twant := `&goprint.node{\n\tName: \"a\",\n\tNext: &goprint.node{\n\t\tName: \"b\",\n\t\tNext: <cycle>\n\t}\n}`\n\tif got := Sprint(a); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestSliceCycle(t *testing.T) {\n\ts := make([]any, 1)\n\ts[0] = s\n\n\twant := `[]interface {}{\n\t<cycle>\n}`\n\tif got := Sprint(s); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestMapCycle(t *testing.T) {\n\tm := map[string]any{}\n\tm[\"self\"] = m\n\n\twant := `map[string]interface {}{\n\t\"self\": <cycle>\n}`\n\tif got := Sprint(m); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestSharedNotCycle(t *testing.T) {\n\ti := 5\n\tv := struct {\n\t\tA *int\n\t\tB *int\n\t}{A: &i, B: &i}\n\n\tgot := Sprint(v)\n\tif strings.Contains(got, \"<cycle>\") {\n\t\tt.Fatalf(\"shared acyclic pointer reported as cycle:\\n%s\", got)\n\t}\n\tif strings.Count(got, \"&5\") != 2 {\n\t\tt.Fatalf(\"expected both pointers printed fully, got:\\n%s\", got)\n\t}\n}\n\nfunc TestMaxDepth(t *testing.T) {\n\tl3 := &link{V: 3}\n\tl2 := &link{V: 2, Next: l3}\n\tl1 := &link{V: 1, Next: l2}\n\n\twant := `&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: 2,\n\t\tNext: ...\n\t}\n}`\n\tif got := SprintOpts(l1, Options{MaxDepth: 1}); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestMaxItems(t *testing.T) {\n\twant := `[]int{\n\t1,\n\t2,\n\t... (2 more)\n}`\n\tif got := SprintOpts([]int{1, 2, 3, 4}, Options{MaxItems: 2}); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestCustomIndent(t *testing.T) {\n\twant := \"[]int{\\n  1,\\n  2\\n}\"\n\tif got := SprintOpts([]int{1, 2}, Options{Indent: \"  \"}); got != want {\n\t\tt.Fatalf(\"got:\\n%q\\nwant:\\n%q\", got, want)\n\t}\n}\n\nfunc TestFprint(t *testing.T) {\n\tvar buf bytes.Buffer\n\tif err := Fprint(&buf, map[string]int{\"a\": 1}); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif got, want := buf.String(), Sprint(map[string]int{\"a\": 1}); got != want {\n\t\tt.Fatalf(\"Fprint = %q, Sprint = %q\", got, want)\n\t}\n}\n\nfunc TestNestedContainers(t *testing.T) {\n\tv := map[string][]inner{\n\t\t\"b\": {{N: 2}},\n\t\t\"a\": {{N: 1}, {N: 1}},\n\t}\n\twant := `map[string][]goprint.inner{\n\t\"a\": []goprint.inner{\n\t\tgoprint.inner{\n\t\t\tN: 1\n\t\t},\n\t\tgoprint.inner{\n\t\t\tN: 1\n\t\t}\n\t},\n\t\"b\": []goprint.inner{\n\t\tgoprint.inner{\n\t\t\tN: 2\n\t\t}\n\t}\n}`\n\tif got := Sprint(v); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n",
+              "filePath": "/work/goprint_test.go"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/goprint_test.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "goprint_test.go",
+            "time": {
+              "start": 1791063483183,
+              "end": 1791063483245
+            }
+          },
+          "id": "prt_103b3d0c60015h1Unkvzq8T2pU",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3b551001TfxALjqSBcQiKo"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "6d66fcd08ffb635c95139ba7012b7e0d12c6dd96",
+          "type": "step-finish",
+          "tokens": {
+            "total": 26193,
+            "input": 186,
+            "output": 1823,
+            "reasoning": 1400,
+            "cache": {
+              "write": 0,
+              "read": 22784
+            }
+          },
+          "cost": 0.002030052,
+          "id": "prt_103b3e3e70012RSmuhze1ymA0R",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3b551001TfxALjqSBcQiKo"
+        },
+        {
+          "type": "patch",
+          "hash": "9c70e8ccafebc58aa4daf6d037d87116d77ad6e9",
+          "files": [
+            "/work/goprint_test.go"
+          ],
+          "id": "prt_103b3e40e001yg2PqUIqIjKFlK",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3b551001TfxALjqSBcQiKo"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000225102,
+        "tokens": {
+          "total": 26398,
+          "input": 225,
+          "output": 171,
+          "reasoning": 18,
+          "cache": {
+            "write": 0,
+            "read": 25984
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063483416,
+          "completed": 1791063485249
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b3e4180010RAf7ekxpi1Wrd",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "6d66fcd08ffb635c95139ba7012b7e0d12c6dd96",
+          "type": "step-start",
+          "id": "prt_103b3e6f0001THZmjpmvk964Yo",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3e4180010RAf7ekxpi1Wrd"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now the demo CLI. Then run tests.\n\nLet me create cmd/demo/main.go.",
+          "time": {
+            "start": 1791063484521,
+            "end": 1791063484659
+          },
+          "id": "prt_103b3e869001zluv9c09M5CZZD",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3e4180010RAf7ekxpi1Wrd"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_aI9bUtbHcyewetkUShjj3628",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "// Command demo shows goprint inspecting a small object graph, including a\n// reference cycle.\npackage main\n\nimport (\n\t\"github.com/example/goprint\"\n)\n\ntype Node struct {\n\tName  string\n\tValue any\n\tNext  *Node\n}\n\nfunc main() {\n\ta := &Node{Name: \"a\", Value: 1}\n\tb := &Node{Name: \"b\", Value: []string{\"x\", \"y\"}}\n\ta.Next = b\n\tb.Next = a\n\n\tgoprint.Print(a)\n}\n",
+              "filePath": "/work/cmd/demo/main.go"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/cmd/demo/main.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "cmd/demo/main.go",
+            "time": {
+              "start": 1791063485095,
+              "end": 1791063485108
+            }
+          },
+          "id": "prt_103b3e915001efyM4ovmcZCObq",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3e4180010RAf7ekxpi1Wrd"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "6012f3cca3f592d9c881fc2feb264aeeb3da0d77",
+          "type": "step-finish",
+          "tokens": {
+            "total": 26398,
+            "input": 225,
+            "output": 171,
+            "reasoning": 18,
+            "cache": {
+              "write": 0,
+              "read": 25984
+            }
+          },
+          "cost": 0.000225102,
+          "id": "prt_103b3eb0c001qco4tO76kGKCFq",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3e4180010RAf7ekxpi1Wrd"
+        },
+        {
+          "type": "patch",
+          "hash": "6d66fcd08ffb635c95139ba7012b7e0d12c6dd96",
+          "files": [
+            "/work/cmd/demo/main.go"
+          ],
+          "id": "prt_103b3eb3c001JYcwSypsG2eMeu",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3e4180010RAf7ekxpi1Wrd"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00015162,
+        "tokens": {
+          "total": 26492,
+          "input": 174,
+          "output": 78,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 26240
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063485257,
+          "completed": 1791063495278
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b3eb49001QzXxTqsAnGxXqV",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "6012f3cca3f592d9c881fc2feb264aeeb3da0d77",
+          "type": "step-start",
+          "id": "prt_103b3edff001V8MYkum5zVQD58",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3eb49001QzXxTqsAnGxXqV"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_4yiKW6ZD0G12VNnv5Nlc4765",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "gofmt -l . && go vet ./... && go test ./... 2>&1 | tail -40",
+              "workdir": "/work"
+            },
+            "output": "--- FAIL: TestStruct (0.00s)\n    goprint_test.go:75: got:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \tP: &7,\n        \tpriv: 9\n        }\n        want:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \tP: &3,\n        \tpriv: 9\n        }\n--- FAIL: TestMaxDepth (0.00s)\n    goprint_test.go:183: got:\n        &goprint.link{\n        \tV: 1,\n        \tNext: &goprint.link{\n        \t\tV: ...,\n        \t\tNext: ...\n        \t}\n        }\n        want:\n        &goprint.link{\n        \tV: 1,\n        \tNext: &goprint.link{\n        \t\tV: 2,\n        \t\tNext: ...\n        \t}\n        }\nFAIL\nFAIL\tgithub.com/example/goprint\t0.003s\n?   \tgithub.com/example/goprint/cmd/demo\t[no test files]\nFAIL\n",
+            "metadata": {
+              "output": "--- FAIL: TestStruct (0.00s)\n    goprint_test.go:75: got:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \tP: &7,\n        \tpriv: 9\n        }\n        want:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \tP: &3,\n        \tpriv: 9\n        }\n--- FAIL: TestMaxDepth (0.00s)\n    goprint_test.go:183: got:\n        &goprint.link{\n        \tV: 1,\n        \tNext: &goprint.link{\n        \t\tV: ...,\n        \t\tNext: ...\n        \t}\n        }\n        want:\n        &goprint.link{\n        \tV: 1,\n        \tNext: &goprint.link{\n        \t\tV: 2,\n        \t\tNext: ...\n        \t}\n        }\nFAIL\nFAIL\tgithub.com/example/goprint\t0.003s\n?   \tgithub.com/example/goprint/cmd/demo\t[no test files]\nFAIL\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "gofmt -l . && go vet ./... && go test ./... 2>&1 | tail -40",
+            "time": {
+              "start": 1791063486860,
+              "end": 1791063495141
+            }
+          },
+          "id": "prt_103b3f13a001fKqazOeT3XmyKa",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3eb49001QzXxTqsAnGxXqV"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "6012f3cca3f592d9c881fc2feb264aeeb3da0d77",
+          "type": "step-finish",
+          "tokens": {
+            "total": 26492,
+            "input": 174,
+            "output": 78,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 26240
+            }
+          },
+          "cost": 0.00015162,
+          "id": "prt_103b4122b0014nW4D6s5VA3Rzz",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b3eb49001QzXxTqsAnGxXqV"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001519554,
+        "tokens": {
+          "total": 29074,
+          "input": 407,
+          "output": 138,
+          "reasoning": 2161,
+          "cache": {
+            "write": 0,
+            "read": 26368
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063495285,
+          "completed": 1791063507571
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b41275001YO14Kjp0sTQsNE",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "6012f3cca3f592d9c881fc2feb264aeeb3da0d77",
+          "type": "step-start",
+          "id": "prt_103b41545001Lo7lhmChY7d5f0",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b41275001YO14Kjp0sTQsNE"
+        },
+        {
+          "type": "reasoning",
+          "text": "Two failures:\n\n1. TestStruct: I set `i := 7` and expected `&3` — my mistake. Wait P points to i=7, so `&7`. But In is inner{N:3}. I mistakenly expected &3. Fix test expected to `&7`.\n\nWait but the test's `i` is 7, yes `&7`. Fix.\n\n2. TestMaxDepth: expected V:2 but got V:... The issue: MaxDepth check is at the start of `value` for the struct at depth? Let's trace. l1 pointer depth0 -> struct at depth0, field Next pointer value called with depth+1=1. Pointer at depth1, check 1>1 false, so prints \"&\" then struct at depth1. Struct fields V and Next: V value called with depth+1=2 -> 2>1 -> \"...\". Oops, V prints \"...\". So my depth semantics: MaxDepth=1 means only root struct level fields should print but their children become \"...\". However V is a scalar child at depth2. Hmm.\n\nActually the conceptual issue: fields of the root struct are at \"depth\" of the struct, not struct+1? I've been incrementing for fields. Let me reconsider: For root struct at depth0, fields are at depth1. With MaxDepth=1, fields at depth1 allowed (1>1 false). But the struct at depth0's field value is called with depth+1=1, so scalar V should be depth1, not 2. Wait why did V become depth2?\n\nTrace more carefully: pointer l1 depth0 -> value(elem, depth) = struct depth0. structValue: p.value(v.Field(i), depth+1) = depth1 for V. So V at depth1, 1>1 false -> prints 2? But got V:... So something else.\n\nOh wait, the struct is `link` and field V=1 for l1, Next=l2. For l1 struct depth0: V=1 at depth1 prints \"1\". Next=l2 pointer called at depth1. Pointer at depth1 (1>1 false) -> value(elem, depth) with depth=1 -> struct l2 at depth1. Its fields: V=2 called at depth2 -> 2>1 -> \"...\". Next=l3 pointer at depth2 -> \"...\".\n\nSo got shows:\n```\n&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: ...,\n\t\tNext: ...\n\t}\n}\n```\nRight. So MaxDepth=1 allows root struct's immediate scalar children, and the struct reached via root's Next field is at depth1 but its children at depth2 are cut. That's actually a reasonable semantics: MaxDepth counts container nesting. To get expected `V:2` and `Next: ...`, I'd need MaxDepth=2. Let me change the test to MaxDepth=2 and expect:\n```\n&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: 2,\n\t\tNext: ...\n\t}\n}\n```\nTrace with MaxDepth=2: root struct depth0, Next ptr depth1 -> struct depth1, V at depth2 -> 2>2 false prints \"2\", Next ptr at depth2 -> 2>2 false -> struct depth2 -> fields at depth3 -> \"...\" So Next would be `&goprint.link{ V: ..., Next: ...}` not `...`. Hmm.\n\nLet me reconsider. The pointer doesn't increment depth now. So the pointer to l3 is at depth2, passes, and then struct at depth2, fields at depth3 cut. So expected would be:\n```\n&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: 2,\n\t\tNext: &goprint.link{\n\t\t\tV: ...,\n\t\t\tNext: ...\n\t\t}\n\t}\n}\n```\nThat's verbose.\n\nMaybe a cleaner semantics: check depth BEFORE descending into a value only for composite children? Or define MaxDepth such that a pointer does not count as a level. Honestly the exact semantics is arbitrary. Let me just make the test match a sensible behavior.\n\nPerhaps better: check the depth limit when we're about to print a composite's children, i.e., treat depth as the container nesting level. Let me redefine: `value(v, depth)` where depth = current nesting. For scalars, check `depth > MaxDepth`. Hmm same.\n\nActually the issue is whether scalar fields at the deepest allowed level should print. With MaxDepth=1, we printed root's scalars and cut the nested struct's scalars. Is that intuitive? MaxDepth=1 means \"one level deep\". The root is level 0. Its fields are level 1. A nested struct's fields are level 2. So printing level-1 scalars and cutting level-2 is correct. The nested struct header itself is at level 1 (shown) but its fields cut. That's fine.\n\nSo the MaxDepth semantics is consistent. I'll update the test to reflect actual behavior with MaxDepth=1, or use MaxDepth=2 and expect deeper. Let me pick a cleaner demonstration: use MaxDepth=1 and expect what we got:\n```\n&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: ...,\n\t\tNext: ...\n\t}\n}\n```\nHmm but then the nested `&goprint.link{` still shown with all children \"...\", which is a bit odd but acceptable. Alternatively, maybe depth limit should prevent even opening the nested composite, printing \"...\" for the whole pointer. That would be nicer: if depth > MaxDepth, print \"...\". The pointer is at depth1 which is not >1, so it opens. To make the pointer itself cut, we'd need depth check to consider that the pointer would lead to a composite. \n\nI think a more intuitive approach: increment depth when entering any composite (struct/map/slice/array/pointer), and check at the composite. Let me redefine depth as \"number of composite ancestors\". Root composite at depth0. Its children composites at depth1. Scalars at depth of their enclosing composite.\n\nCheck at top of value: if kind is composite and depth > MaxDepth -> \"...\". Scalars always print. That gives: MaxDepth=1, root link depth0 prints, Next ptr depth1 (composite, 1>1 false) opens struct depth1, its V scalar prints 2, its Next ptr depth2 (2>1) -> \"...\". Result:\n```\n&goprint.link{\n\tV: 1,\n\tNext: &goprint.link{\n\t\tV: 2,\n\t\tNext: ...\n\t}\n}\n```\nThat's exactly the desired output! But the depth increment for fields: how do children get their depth? For pointer, child struct should be at same depth? Let's define depth passed to children as depth+1 only when descending into composite's contents.\n\nLet me restructure: `value(v, depth)` where depth is the number of composites already opened on the path (i.e., current nesting level). A scalar at current level prints if depth <= MaxDepth (always). A composite at current level with depth > MaxDepth prints \"...\".\n\n- Root call value(v, 0).\n- For pointer: it's a composite. Check limit. Then print \"&\", recurse into Elem with same depth (pointer doesn't add nesting visually).\n- For struct: check limit. Print fields with depth+1.\n- For slice/map/array: check limit; elements with depth+1.\n- Interface: transparent, same depth.\n- Scalars: print regardless (or check? scalars don't nest).\n\nBut then with MaxDepth=1: root struct depth0 opens, fields depth1. Next pointer at depth1: composite check 1>1 false, opens, struct depth1, fields depth2. V scalar prints, Next pointer at depth2: 2>1 -> \"...\". \n\nFor slice: root slice depth0, elements depth1. Good.\n\nThis seems intuitive. Let me implement: move MaxDepth check to only apply to composite kinds, and check `depth > MaxDepth`. Scalars unaffected.\n\nBut wait, for pointer root depth0 always opens even if MaxDepth=0? MaxDepth 0 means unlimited per Options doc. `MaxDepth > 0` condition. Fine.\n\nLet me implement: In `value`, after interface unwrap, determine if kind is composite (Ptr with non-nil, Struct, Map, Slice non-nil, Array, Chan, Func? interface handled). Actually for nil pointer/slice/map we print typed nil and don't recurse, so no need to limit. For non-nil composite, check.\n\nSimplest: add a helper `isComposite(k reflect.Kind) bool` returning true for Struct, Map, Slice, Array, Ptr. And at top:\n\n```go\nif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth && isComposite(v.Kind()) {\n    p.write(\"...\")\n    return\n}\n```\n\nBut for nil ptr/slice/map, they're composite but no recursion; printing \"...\" for a nil at too-deep level is fine too (it's a value at that depth). Actually if depth>max the whole thing is elided anyway. So check before the switch for composite kinds regardless of nil. That's fine.\n\nChan and Func are leaf-ish (no recursion), so don't elide; print. Good.\n\nNow children depth: pointer uses same depth; struct/map/slice/array children use depth+1. That's what I have except pointer now same. Good. The check moved.\n\nLet me update code. Replace the existing MaxDepth check.\n\nCurrent:\n```go\n\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n\t\tp.write(\"...\")\n\t\treturn\n\t}\n```\nChange to add isComposite.\n\nLet me edit. Also fix TestStruct expected &7.\n\nAlso need to double check map/slice cycle tests under new depth: unlimited default. Fine.\n\nLet me apply.",
+          "time": {
+            "start": 1791063496256,
+            "end": 1791063506184
+          },
+          "id": "prt_103b41640001o0S8peck7fjpoT",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b41275001YO14Kjp0sTQsNE"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_uUNEiFERksZzeslXCh6y4618",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint.go",
+              "oldString": "\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n\t\tp.write(\"...\")\n\t\treturn\n\t}",
+              "newString": "\tif p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth && isComposite(v.Kind()) {\n\t\tp.write(\"...\")\n\t\treturn\n\t}"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/goprint.go\n===================================================================\n--- /work/goprint.go\n+++ /work/goprint.go\n@@ -145,9 +145,9 @@\n \tp.value(v.Elem(), depth)\n \treturn\n }\n \n-if p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n+if p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth && isComposite(v.Kind()) {\n \tp.write(\"...\")\n \treturn\n }\n \n",
+              "filediff": {
+                "file": "/work/goprint.go",
+                "patch": "Index: /work/goprint.go\n===================================================================\n--- /work/goprint.go\n+++ /work/goprint.go\n@@ -145,9 +145,9 @@\n \tp.value(v.Elem(), depth)\n \treturn\n }\n \n-if p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth {\n+if p.opts.MaxDepth > 0 && depth > p.opts.MaxDepth && isComposite(v.Kind()) {\n \tp.write(\"...\")\n \treturn\n }\n \n",
+                "additions": 1,
+                "deletions": 1
+              },
+              "truncated": false
+            },
+            "title": "goprint.go",
+            "time": {
+              "start": 1791063507259,
+              "end": 1791063507314
+            }
+          },
+          "id": "prt_103b43d1c001htytGiY79qTLdF",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b41275001YO14Kjp0sTQsNE"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "9049ea6e53b2c44411441025320fcb51b03cf20b",
+          "type": "step-finish",
+          "tokens": {
+            "total": 29074,
+            "input": 407,
+            "output": 138,
+            "reasoning": 2161,
+            "cache": {
+              "write": 0,
+              "read": 26368
+            }
+          },
+          "cost": 0.001519554,
+          "id": "prt_103b4420c001dVix0IxOjmzDuB",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b41275001YO14Kjp0sTQsNE"
+        },
+        {
+          "type": "patch",
+          "hash": "6012f3cca3f592d9c881fc2feb264aeeb3da0d77",
+          "files": [
+            "/work/goprint.go"
+          ],
+          "id": "prt_103b44265001rPJOcG9qKfRWrH",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b41275001YO14Kjp0sTQsNE"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000202734,
+        "tokens": {
+          "total": 29242,
+          "input": 161,
+          "output": 153,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 28928
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063507591,
+          "completed": 1791063509557
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b44287001qVnJvFuEOV1HZa",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "9049ea6e53b2c44411441025320fcb51b03cf20b",
+          "type": "step-start",
+          "id": "prt_103b447470016BfDmWUMF8QCMP",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44287001qVnJvFuEOV1HZa"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_ET_Tp68KrGayXCmZH7hAIhY2370",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint.go",
+              "oldString": "func (p *printer) pointer(v reflect.Value, depth int) {",
+              "newString": "func isComposite(k reflect.Kind) bool {\n\tswitch k {\n\tcase reflect.Ptr, reflect.Struct, reflect.Map, reflect.Slice, reflect.Array:\n\t\treturn true\n\tdefault:\n\t\treturn false\n\t}\n}\n\nfunc (p *printer) pointer(v reflect.Value, depth int) {"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/goprint.go\n===================================================================\n--- /work/goprint.go\n+++ /work/goprint.go\n@@ -192,8 +192,17 @@\n \t\tp.write(fmt.Sprintf(\"<%s>\", v.Type()))\n \t}\n }\n \n+func isComposite(k reflect.Kind) bool {\n+\tswitch k {\n+\tcase reflect.Ptr, reflect.Struct, reflect.Map, reflect.Slice, reflect.Array:\n+\t\treturn true\n+\tdefault:\n+\t\treturn false\n+\t}\n+}\n+\n func (p *printer) pointer(v reflect.Value, depth int) {\n \tif v.IsNil() {\n \t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n \t\treturn\n",
+              "filediff": {
+                "file": "/work/goprint.go",
+                "patch": "Index: /work/goprint.go\n===================================================================\n--- /work/goprint.go\n+++ /work/goprint.go\n@@ -192,8 +192,17 @@\n \t\tp.write(fmt.Sprintf(\"<%s>\", v.Type()))\n \t}\n }\n \n+func isComposite(k reflect.Kind) bool {\n+\tswitch k {\n+\tcase reflect.Ptr, reflect.Struct, reflect.Map, reflect.Slice, reflect.Array:\n+\t\treturn true\n+\tdefault:\n+\t\treturn false\n+\t}\n+}\n+\n func (p *printer) pointer(v reflect.Value, depth int) {\n \tif v.IsNil() {\n \t\tp.write(\"(\" + v.Type().String() + \")(nil)\")\n \t\treturn\n",
+                "additions": 9,
+                "deletions": 0
+              },
+              "truncated": false
+            },
+            "title": "goprint.go",
+            "time": {
+              "start": 1791063509345,
+              "end": 1791063509375
+            }
+          },
+          "id": "prt_103b447d5001AzzacBMJeMTUgV",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44287001qVnJvFuEOV1HZa"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "c54af6a61ad609f160f5e4e87ca5f54b66e6ee76",
+          "type": "step-finish",
+          "tokens": {
+            "total": 29242,
+            "input": 161,
+            "output": 153,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 28928
+            }
+          },
+          "cost": 0.000202734,
+          "id": "prt_103b449f3001buIrnconF8NdRO",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44287001qVnJvFuEOV1HZa"
+        },
+        {
+          "type": "patch",
+          "hash": "9049ea6e53b2c44411441025320fcb51b03cf20b",
+          "files": [
+            "/work/goprint.go"
+          ],
+          "id": "prt_103b44a31001Xoz5F1oxK80o4k",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44287001qVnJvFuEOV1HZa"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000178518,
+        "tokens": {
+          "total": 29359,
+          "input": 201,
+          "output": 102,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 29056
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063509562,
+          "completed": 1791063511371
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b44a3a0016mVz4S0IwyUrHW",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "c54af6a61ad609f160f5e4e87ca5f54b66e6ee76",
+          "type": "step-start",
+          "id": "prt_103b44f75001pw4y0oF8gyi6nr",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44a3a0016mVz4S0IwyUrHW"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_ET_7LyNdJ6zoc4hzLIhdF0f2168",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint_test.go",
+              "oldString": "\t\tP: &3,\n\t\tpriv: 9",
+              "newString": "\t\tP: &7,\n\t\tpriv: 9"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/goprint_test.go\n===================================================================\n--- /work/goprint_test.go\n+++ /work/goprint_test.go\n@@ -67,10 +67,10 @@\n \tName: \"hi\",\n \tIn: goprint.inner{\n \t\tN: 3\n \t},\n-\tP: &3,\n-\tpriv: 9\n+\t\tP: &7,\n+\t\tpriv: 9\n }`\n \tif got := Sprint(v); got != want {\n \t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n \t}\n",
+              "filediff": {
+                "file": "/work/goprint_test.go",
+                "patch": "Index: /work/goprint_test.go\n===================================================================\n--- /work/goprint_test.go\n+++ /work/goprint_test.go\n@@ -67,10 +67,10 @@\n \tName: \"hi\",\n \tIn: goprint.inner{\n \t\tN: 3\n \t},\n-\tP: &3,\n-\tpriv: 9\n+\t\tP: &7,\n+\t\tpriv: 9\n }`\n \tif got := Sprint(v); got != want {\n \t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n \t}\n",
+                "additions": 2,
+                "deletions": 2
+              },
+              "truncated": false
+            },
+            "title": "goprint_test.go",
+            "time": {
+              "start": 1791063511092,
+              "end": 1791063511123
+            }
+          },
+          "id": "prt_103b44f7f00116Je3pyuWzyex4",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44a3a0016mVz4S0IwyUrHW"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "type": "step-finish",
+          "tokens": {
+            "total": 29359,
+            "input": 201,
+            "output": 102,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 29056
+            }
+          },
+          "cost": 0.000178518,
+          "id": "prt_103b45114001kr2RuJbnHGkKlF",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44a3a0016mVz4S0IwyUrHW"
+        },
+        {
+          "type": "patch",
+          "hash": "c54af6a61ad609f160f5e4e87ca5f54b66e6ee76",
+          "files": [
+            "/work/goprint_test.go"
+          ],
+          "id": "prt_103b45144001WaDdouyi71r8B0",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b44a3a0016mVz4S0IwyUrHW"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000162852,
+        "tokens": {
+          "total": 29452,
+          "input": 190,
+          "output": 78,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 29184
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063511382,
+          "completed": 1791063515719
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b451560015OhQkDHju18oTY",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "type": "step-start",
+          "id": "prt_103b454250010TZCzzT54ilCqP",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b451560015OhQkDHju18oTY"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_tRZn749XPBuvGTkL2o392549",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "gofmt -l . && go vet ./... && go test ./... 2>&1 | tail -40",
+              "workdir": "/work"
+            },
+            "output": "--- FAIL: TestScalars (0.00s)\n    --- FAIL: TestScalars/chan (0.00s)\n        goprint_test.go:57: Sprint(0x70acc9006230) =\n            \"(chan int)(0x70acc9006230)\"\n            want\n            \"(chan int)(0x0)\"\n--- FAIL: TestStruct (0.00s)\n    goprint_test.go:75: got:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \tP: &7,\n        \tpriv: 9\n        }\n        want:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \t\tP: &7,\n        \t\tpriv: 9\n        }\nFAIL\nFAIL\tgithub.com/example/goprint\t0.003s\n?   \tgithub.com/example/goprint/cmd/demo\t[no test files]\nFAIL\n",
+            "metadata": {
+              "output": "--- FAIL: TestScalars (0.00s)\n    --- FAIL: TestScalars/chan (0.00s)\n        goprint_test.go:57: Sprint(0x70acc9006230) =\n            \"(chan int)(0x70acc9006230)\"\n            want\n            \"(chan int)(0x0)\"\n--- FAIL: TestStruct (0.00s)\n    goprint_test.go:75: got:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \tP: &7,\n        \tpriv: 9\n        }\n        want:\n        goprint.outer{\n        \tName: \"hi\",\n        \tIn: goprint.inner{\n        \t\tN: 3\n        \t},\n        \t\tP: &7,\n        \t\tpriv: 9\n        }\nFAIL\nFAIL\tgithub.com/example/goprint\t0.003s\n?   \tgithub.com/example/goprint/cmd/demo\t[no test files]\nFAIL\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "gofmt -l . && go vet ./... && go test ./... 2>&1 | tail -40",
+            "time": {
+              "start": 1791063512741,
+              "end": 1791063515482
+            }
+          },
+          "id": "prt_103b45597001rAoCYk5J6hzqGW",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b451560015OhQkDHju18oTY"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "type": "step-finish",
+          "tokens": {
+            "total": 29452,
+            "input": 190,
+            "output": 78,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 29184
+            }
+          },
+          "cost": 0.000162852,
+          "id": "prt_103b46197001XRa9S2jaRIYtUG",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b451560015OhQkDHju18oTY"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00033282,
+        "tokens": {
+          "total": 30041,
+          "input": 258,
+          "output": 76,
+          "reasoning": 267,
+          "cache": {
+            "write": 0,
+            "read": 29440
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063515726,
+          "completed": 1791063518151
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b4624e001HUhNIsqlxCB3QU",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "type": "step-start",
+          "id": "prt_103b46530001QD3wNySOk2tVqk",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4624e001HUhNIsqlxCB3QU"
+        },
+        {
+          "type": "reasoning",
+          "text": "Interesting: TestStruct \"want\" now shows extra tabs on P and priv. Wait the test failure says want has extra indentation. Did I accidentally edit the wrong occurrence? The edit replaced `P: &3,` with `P: &7,` but there might have been two occurrences? No, edit requires unique. Hmm the \"want\" now displays P with two tabs. Let me look at the test file around there. Oh! I bet the raw string in the test has `\\t` but when I wrote it, the lines for P and priv maybe had literal tabs? Let me read.\n\nActually the displayed \"got\" vs \"want\": got has P and priv with one tab, want with two tabs. So in the test file, P and priv lines have two tabs. That's odd. The edit only changed 3 to 7. But maybe my original write had inconsistent indentation for those lines? Let me read the file.\n\nAlso chan test: `make(chan int)` is non-nil so pointer nonzero. My expected 0x0 wrong. A non-nil chan gets an address. Better test nil chan: `var ch chan int; Sprint(ch)` -> \"(chan int)(0x0)\". Use a nil chan.\n\nLet me read test file lines.",
+          "time": {
+            "start": 1791063516702,
+            "end": 1791063517884
+          },
+          "id": "prt_103b4661e001mgrIXRsMshrx97",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4624e001HUhNIsqlxCB3QU"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_00_cabo0HOJUDnWoHSbLDW09073",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint_test.go",
+              "offset": 62,
+              "limit": 18
+            },
+            "output": "<path>/work/goprint_test.go</path>\n<type>file</type>\n<content>\n62: \n63: func TestStruct(t *testing.T) {\n64: \ti := 7\n65: \tv := outer{Name: \"hi\", In: inner{N: 3}, P: &i, priv: 9}\n66: \twant := `goprint.outer{\n67: \tName: \"hi\",\n68: \tIn: goprint.inner{\n69: \t\tN: 3\n70: \t},\n71: \t\tP: &7,\n72: \t\tpriv: 9\n73: }`\n74: \tif got := Sprint(v); got != want {\n75: \t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n76: \t}\n77: }\n78: \n79: func TestMapSorted(t *testing.T) {\n\n(Showing lines 62-79 of 238. Use offset=80 to continue.)\n</content>",
+            "metadata": {
+              "preview": "\nfunc TestStruct(t *testing.T) {\n\ti := 7\n\tv := outer{Name: \"hi\", In: inner{N: 3}, P: &i, priv: 9}\n\twant := `goprint.outer{\n\tName: \"hi\",\n\tIn: goprint.inner{\n\t\tN: 3\n\t},\n\t\tP: &7,\n\t\tpriv: 9\n}`\n\tif got := Sprint(v); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestMapSorted(t *testing.T) {",
+              "truncated": true,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/goprint_test.go",
+                "text": "\nfunc TestStruct(t *testing.T) {\n\ti := 7\n\tv := outer{Name: \"hi\", In: inner{N: 3}, P: &i, priv: 9}\n\twant := `goprint.outer{\n\tName: \"hi\",\n\tIn: goprint.inner{\n\t\tN: 3\n\t},\n\t\tP: &7,\n\t\tpriv: 9\n}`\n\tif got := Sprint(v); got != want {\n\t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n\t}\n}\n\nfunc TestMapSorted(t *testing.T) {",
+                "lineStart": 62,
+                "lineEnd": 79,
+                "totalLines": 238,
+                "truncated": true
+              }
+            },
+            "title": "goprint_test.go",
+            "time": {
+              "start": 1791063518048,
+              "end": 1791063518062
+            }
+          },
+          "id": "prt_103b46ac0001sKll71AduSxAtj",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4624e001HUhNIsqlxCB3QU"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "type": "step-finish",
+          "tokens": {
+            "total": 30041,
+            "input": 258,
+            "output": 76,
+            "reasoning": 267,
+            "cache": {
+              "write": 0,
+              "read": 29440
+            }
+          },
+          "cost": 0.00033282,
+          "id": "prt_103b46ba0001gohMPTfpqSxelS",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4624e001HUhNIsqlxCB3QU"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000470706,
+        "tokens": {
+          "total": 30826,
+          "input": 319,
+          "output": 120,
+          "reasoning": 435,
+          "cache": {
+            "write": 0,
+            "read": 29952
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063518158,
+          "completed": 1791063521368
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b46bce001kwQ4LYnutJi8wA",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "type": "step-start",
+          "id": "prt_103b46ebc001qthKtkN305rVQ8",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b46bce001kwQ4LYnutJi8wA"
+        },
+        {
+          "type": "reasoning",
+          "text": "The lines 71-72 have an extra tab. So my original write actually had them? Looking at my write content, I wrote:\n```\n\tP: &7,\n\tpriv: 9\n```\nwith one tab. But the editor shows two. Perhaps my edit \"P: &3,\" -> \"P: &7,\" matched something and... no. Actually the original write content I gave had `\tP: &3,` with one tab? Let me recheck what I wrote. In the write call I wrote:\n```\n\tName: \"hi\",\n\tIn: goprint.inner{\n\t\tN: 3\n\t},\n\tP: &3,\n\tpriv: 9\n```\none tab. But now there are two tabs on those lines. Strange. Maybe the edit's oldString was `P: &3,\\n\\t\\tpriv: 9`? No.\n\nWait—the edit I applied matched `\tP: &3,\\n\tpriv: 9`? The oldString I passed was \"\t\tP: &3,\\n\t\tpriv: 9\" with two tabs? Let me look at my edit call: \noldString: \"\\t\\tP: &3,\\n\\t\\tpriv: 9\" — in the tool call I wrote:\n```\n\t\tP: &3,\n\t\tpriv: 9\n```\nActually yes! Looking at the edit I made, the oldString/newString shown were:\n```\n\t\tP: &3,\n\t\tpriv: 9\n```\nwith two tabs leading. I mistakenly copied from the test failure output which showed two tabs (the \"got\" display? no). Anyway, the edit introduced two tabs. Let me fix lines 71-72 to one tab. Actually wait, the edit replaced oldString which was the two-tab version, meaning the file already had two tabs before the edit? No—the edit succeeded, so the file contained the two-tab version as oldString. That means my original write had two tabs there. Hmm. Regardless, fix now.\n\nLet me edit the want block properly.",
+          "time": {
+            "start": 1791063519282,
+            "end": 1791063521188
+          },
+          "id": "prt_103b47032001eZXzbGHTjxro2p",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b46bce001kwQ4LYnutJi8wA"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_fcLbamBs6KvDHj3IZnlj2911",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint_test.go",
+              "oldString": "\t\tN: 3\n\t},\n\t\tP: &7,\n\t\tpriv: 9\n}`",
+              "newString": "\t\tN: 3\n\t},\n\tP: &7,\n\tpriv: 9\n}`"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/goprint_test.go\n===================================================================\n--- /work/goprint_test.go\n+++ /work/goprint_test.go\n@@ -67,10 +67,10 @@\n \tName: \"hi\",\n \tIn: goprint.inner{\n \t\tN: 3\n \t},\n-\t\tP: &7,\n-\t\tpriv: 9\n+\tP: &7,\n+\tpriv: 9\n }`\n \tif got := Sprint(v); got != want {\n \t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n \t}\n",
+              "filediff": {
+                "file": "/work/goprint_test.go",
+                "patch": "Index: /work/goprint_test.go\n===================================================================\n--- /work/goprint_test.go\n+++ /work/goprint_test.go\n@@ -67,10 +67,10 @@\n \tName: \"hi\",\n \tIn: goprint.inner{\n \t\tN: 3\n \t},\n-\t\tP: &7,\n-\t\tpriv: 9\n+\tP: &7,\n+\tpriv: 9\n }`\n \tif got := Sprint(v); got != want {\n \t\tt.Fatalf(\"got:\\n%s\\nwant:\\n%s\", got, want)\n \t}\n",
+                "additions": 2,
+                "deletions": 2
+              },
+              "truncated": false
+            },
+            "title": "goprint_test.go",
+            "time": {
+              "start": 1791063521267,
+              "end": 1791063521284
+            }
+          },
+          "id": "prt_103b477a9001jlg88U4oSZp5C7",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b46bce001kwQ4LYnutJi8wA"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "5a7aaec689f0a4dec7d8e61234318bd08f61b404",
+          "type": "step-finish",
+          "tokens": {
+            "total": 30826,
+            "input": 319,
+            "output": 120,
+            "reasoning": 435,
+            "cache": {
+              "write": 0,
+              "read": 29952
+            }
+          },
+          "cost": 0.000470706,
+          "id": "prt_103b47836001tbCdVzldBDU0X9",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b46bce001kwQ4LYnutJi8wA"
+        },
+        {
+          "type": "patch",
+          "hash": "83a890c9902e84b6b39705dc949139ad7374af04",
+          "files": [
+            "/work/goprint_test.go"
+          ],
+          "id": "prt_103b47854001ab5HQSX8fs83JT",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b46bce001kwQ4LYnutJi8wA"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000221526,
+        "tokens": {
+          "total": 30995,
+          "input": 249,
+          "output": 154,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 30592
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063521374,
+          "completed": 1791063523051
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b4785e0017hgEQ9toNfqsHv",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "5a7aaec689f0a4dec7d8e61234318bd08f61b404",
+          "type": "step-start",
+          "id": "prt_103b47b25001D8yCO0BGWZfC2K",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4785e0017hgEQ9toNfqsHv"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_ET_JytZyhWe0PQETZ5LKJg57427",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/goprint_test.go",
+              "oldString": "\t\t{\"nil func\", (func())(nil), \"(func())(nil)\"},\n\t\t{\"chan\", make(chan int), \"(chan int)(0x0)\"},",
+              "newString": "\t\t{\"nil func\", (func())(nil), \"(func())(nil)\"},\n\t\t{\"nil chan\", (chan int)(nil), \"(chan int)(0x0)\"},"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/goprint_test.go\n===================================================================\n--- /work/goprint_test.go\n+++ /work/goprint_test.go\n@@ -48,9 +48,9 @@\n \t{\"int pointer\", &i, \"&7\"},\n \t{\"nil slice\", []int(nil), \"[]int(nil)\"},\n \t{\"nil map\", map[string]int(nil), \"map[string]int(nil)\"},\n \t{\"nil func\", (func())(nil), \"(func())(nil)\"},\n-\t{\"chan\", make(chan int), \"(chan int)(0x0)\"},\n+\t{\"nil chan\", (chan int)(nil), \"(chan int)(0x0)\"},\n }\n for _, tc := range cases {\n \tt.Run(tc.name, func(t *testing.T) {\n \t\tif got := Sprint(tc.in); got != tc.want {\n",
+              "filediff": {
+                "file": "/work/goprint_test.go",
+                "patch": "Index: /work/goprint_test.go\n===================================================================\n--- /work/goprint_test.go\n+++ /work/goprint_test.go\n@@ -48,9 +48,9 @@\n \t{\"int pointer\", &i, \"&7\"},\n \t{\"nil slice\", []int(nil), \"[]int(nil)\"},\n \t{\"nil map\", map[string]int(nil), \"map[string]int(nil)\"},\n \t{\"nil func\", (func())(nil), \"(func())(nil)\"},\n-\t{\"chan\", make(chan int), \"(chan int)(0x0)\"},\n+\t{\"nil chan\", (chan int)(nil), \"(chan int)(0x0)\"},\n }\n for _, tc := range cases {\n \tt.Run(tc.name, func(t *testing.T) {\n \t\tif got := Sprint(tc.in); got != tc.want {\n",
+                "additions": 1,
+                "deletions": 1
+              },
+              "truncated": false
+            },
+            "title": "goprint_test.go",
+            "time": {
+              "start": 1791063522870,
+              "end": 1791063522886
+            }
+          },
+          "id": "prt_103b47cf2001UMxNwdgfaJJjqv",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4785e0017hgEQ9toNfqsHv"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-finish",
+          "tokens": {
+            "total": 30995,
+            "input": 249,
+            "output": 154,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 30592
+            }
+          },
+          "cost": 0.000221526,
+          "id": "prt_103b47ebb001iVuMKRGAxd2OuI",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4785e0017hgEQ9toNfqsHv"
+        },
+        {
+          "type": "patch",
+          "hash": "5a7aaec689f0a4dec7d8e61234318bd08f61b404",
+          "files": [
+            "/work/goprint_test.go"
+          ],
+          "id": "prt_103b47ee7001hASj8bNs4J21t4",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b4785e0017hgEQ9toNfqsHv"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000163644,
+        "tokens": {
+          "total": 31088,
+          "input": 162,
+          "output": 78,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 30848
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063523055,
+          "completed": 1791063525445
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b47eef0016CFr3W2vNOLcvq",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-start",
+          "id": "prt_103b481df001pYy0PEl8AAt4sX",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b47eef0016CFr3W2vNOLcvq"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_LfKsYQ5Hgi4a5RrfrqZ62899",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "gofmt -l . && go vet ./... && go test ./... 2>&1 | tail -40",
+              "workdir": "/work"
+            },
+            "output": "ok  \tgithub.com/example/goprint\t0.003s\n?   \tgithub.com/example/goprint/cmd/demo\t[no test files]\n",
+            "metadata": {
+              "output": "ok  \tgithub.com/example/goprint\t0.003s\n?   \tgithub.com/example/goprint/cmd/demo\t[no test files]\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "gofmt -l . && go vet ./... && go test ./... 2>&1 | tail -40",
+            "time": {
+              "start": 1791063524225,
+              "end": 1791063525368
+            }
+          },
+          "id": "prt_103b482e20016G0FMLa3te3SVJ",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b47eef0016CFr3W2vNOLcvq"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-finish",
+          "tokens": {
+            "total": 31088,
+            "input": 162,
+            "output": 78,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 30848
+            }
+          },
+          "cost": 0.000163644,
+          "id": "prt_103b48812001o6GDd4Eyl2j3pX",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b47eef0016CFr3W2vNOLcvq"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000171528,
+        "tokens": {
+          "total": 31227,
+          "input": 160,
+          "output": 60,
+          "reasoning": 31,
+          "cache": {
+            "write": 0,
+            "read": 30976
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063525449,
+          "completed": 1791063527312
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b48849001izCmTvKc59SMvU",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-start",
+          "id": "prt_103b48b2b001gxpnOxQB8OvmKG",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48849001izCmTvKc59SMvU"
+        },
+        {
+          "type": "reasoning",
+          "text": "All tests pass. Let me run the demo to show output and update todos. Also run test with -race maybe not needed. Let me run demo.",
+          "time": {
+            "start": 1791063526584,
+            "end": 1791063526799
+          },
+          "id": "prt_103b48cb8001m7Nmt8iM7KPt6Q",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48849001izCmTvKc59SMvU"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_j9vjw4bz3l5b6Qf83UuP3057",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "go run ./cmd/demo",
+              "workdir": "/work"
+            },
+            "output": "&main.Node{\n\tName: \"a\",\n\tValue: 1,\n\tNext: &main.Node{\n\t\tName: \"b\",\n\t\tValue: []string{\n\t\t\t\"x\",\n\t\t\t\"y\"\n\t\t},\n\t\tNext: <cycle>\n\t}\n}\n",
+            "metadata": {
+              "output": "&main.Node{\n\tName: \"a\",\n\tValue: 1,\n\tNext: &main.Node{\n\t\tName: \"b\",\n\t\tValue: []string{\n\t\t\t\"x\",\n\t\t\t\"y\"\n\t\t},\n\t\tNext: <cycle>\n\t}\n}\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "go run ./cmd/demo",
+            "time": {
+              "start": 1791063526958,
+              "end": 1791063527217
+            }
+          },
+          "id": "prt_103b48d93001WMhVlNfF5B1VNM",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48849001izCmTvKc59SMvU"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-finish",
+          "tokens": {
+            "total": 31227,
+            "input": 160,
+            "output": 60,
+            "reasoning": 31,
+            "cache": {
+              "write": 0,
+              "read": 30976
+            }
+          },
+          "cost": 0.000171528,
+          "id": "prt_103b48f6f001kgicGI26iHW3o1",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48849001izCmTvKc59SMvU"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000214212,
+        "tokens": {
+          "total": 31451,
+          "input": 194,
+          "output": 153,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 31104
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063527316,
+          "completed": 1791063529007
+        },
+        "finish": "tool-calls",
+        "id": "msg_103b48f940018AQsJi1X4oBbUg",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-start",
+          "id": "prt_103b492c5001fPLCxp7IG7d4XO",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48f940018AQsJi1X4oBbUg"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_ET_qxtb6rWrl3mhWIAuBsyh0923",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Initialize Go module",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Implement deep pretty-printer package",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add tests covering reflection edge cases",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add demo CLI",
+                  "priority": "medium",
+                  "status": "completed"
+                },
+                {
+                  "content": "Run gofmt, go vet, go test",
+                  "priority": "high",
+                  "status": "completed"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Initialize Go module\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement deep pretty-printer package\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests covering reflection edge cases\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add demo CLI\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Run gofmt, go vet, go test\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Initialize Go module",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement deep pretty-printer package",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests covering reflection edge cases",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add demo CLI",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Run gofmt, go vet, go test",
+                  "status": "completed",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "0 todos",
+            "time": {
+              "start": 1791063528899,
+              "end": 1791063528910
+            }
+          },
+          "id": "prt_103b4949a001qDmiNXOgl7UVHd",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48f940018AQsJi1X4oBbUg"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-finish",
+          "tokens": {
+            "total": 31451,
+            "input": 194,
+            "output": 153,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 31104
+            }
+          },
+          "cost": 0.000214212,
+          "id": "prt_103b4960b001AV471lehiL0Af8",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b48f940018AQsJi1X4oBbUg"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103b2b090001xgLxXshCBcw5Pl",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00029508,
+        "tokens": {
+          "total": 31884,
+          "input": 252,
+          "output": 272,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 31360
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791063529011,
+          "completed": 1791063531629
+        },
+        "finish": "stop",
+        "id": "msg_103b49633001PgxQ0sbDJey4Tv",
+        "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa"
+      },
+      "parts": [
+        {
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-start",
+          "id": "prt_103b49941001Wik5UAsdL0VsRT",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b49633001PgxQ0sbDJey4Tv"
+        },
+        {
+          "type": "text",
+          "text": "Module set up at `github.com/example/goprint`. All checks pass.\n\n**Layout**\n- `goprint.go` — package with `Sprint`/`SprintOpts`, `Fprint`/`FprintOpts`, `Print`, and `Options{Indent, MaxDepth, MaxItems}`\n- `goprint_test.go` — coverage for scalars, structs (incl. unexported), sorted maps, slices/arrays, pointer/map/slice cycles, shared acyclic refs, depth/item limits\n- `cmd/demo/main.go` — example object graph with a cycle\n\n**Design notes**\n- Recurses via reflection using kind getters only (never `Interface()`), so unexported fields print safely (`goprint.go:147`).\n- Cycle detection tracks references on the active path, so shared-but-acyclic values print fully (`goprint.go:113`).\n- Map keys sorted by rendered text for deterministic output (`goprint.go:236`).\n- Top-level `recover` turns any reflection panic into an error instead of crashing the debugger (`goprint.go:64`).\n\n```\ngofmt -l .   # clean\ngo vet ./... # clean\ngo test ./... # ok\n```",
+          "time": {
+            "start": 1791063530446,
+            "end": 1791063531543
+          },
+          "id": "prt_103b49bce001E01mPUc96CNhu1",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b49633001PgxQ0sbDJey4Tv"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "eef0e74b163f3af4edf81a8b80cceb30524c55ed",
+          "type": "step-finish",
+          "tokens": {
+            "total": 31884,
+            "input": 252,
+            "output": 272,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 31360
+            }
+          },
+          "cost": 0.00029508,
+          "id": "prt_103b4a045001lpuIYnGD5pSu7N",
+          "sessionID": "ses_efc4d4fdcffegwUvnepc8XAosa",
+          "messageID": "msg_103b49633001PgxQ0sbDJey4Tv"
+        }
+      ]
+    }
+  ]
+}

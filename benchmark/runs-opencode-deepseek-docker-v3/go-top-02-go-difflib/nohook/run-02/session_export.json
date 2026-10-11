@@ -1,0 +1,1191 @@
+{
+  "info": {
+    "id": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+    "slug": "kind-orchid",
+    "projectID": "global",
+    "directory": "/work",
+    "path": "",
+    "title": "Go module for unified diff testing tool",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "version": "1.18.34",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0.00393996,
+    "tokens": {
+      "input": 2160,
+      "output": 3447,
+      "reasoning": 1994,
+      "cache": {
+        "read": 117120,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1791064561890,
+      "updated": 1791064611873
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1791064562094
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "deepseek",
+          "modelID": "deepseek-flash"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "cmd/unidiff/main.go",
+              "patch": "Index: cmd/unidiff/main.go\n===================================================================\n--- cmd/unidiff/main.go\t\n+++ cmd/unidiff/main.go\t\n@@ -0,0 +1,55 @@\n+// Command unidiff prints the unified diff between two files (or stdin).\n+//\n+// Exit status is 0 when the inputs are identical, 1 when they differ, and 2 on\n+// error, matching the conventions of the standard diff(1) tool.\n+package main\n+\n+import (\n+\t\"errors\"\n+\t\"flag\"\n+\t\"fmt\"\n+\t\"io\"\n+\t\"os\"\n+\n+\t\"example.com/unidiff\"\n+)\n+\n+func main() {\n+\tcontext := flag.Int(\"U\", unidiff.DefaultContext, \"number of context lines\")\n+\tflag.Parse()\n+\n+\tif flag.NArg() != 2 {\n+\t\tfmt.Fprintln(os.Stderr, \"usage: unidiff [-U n] old new\")\n+\t\tos.Exit(2)\n+\t}\n+\n+\ta, err := readInput(flag.Arg(0))\n+\tif err != nil {\n+\t\tfmt.Fprintln(os.Stderr, err)\n+\t\tos.Exit(2)\n+\t}\n+\tb, err := readInput(flag.Arg(1))\n+\tif err != nil {\n+\t\tfmt.Fprintln(os.Stderr, err)\n+\t\tos.Exit(2)\n+\t}\n+\n+\tout := unidiff.UnifiedContext(string(a), string(b), *context)\n+\tif out == \"\" {\n+\t\tos.Exit(0)\n+\t}\n+\tfmt.Print(out)\n+\tos.Exit(1)\n+}\n+\n+// readInput reads a whole file, or stdin when name is \"-\".\n+func readInput(name string) ([]byte, error) {\n+\tif name == \"-\" {\n+\t\treturn io.ReadAll(os.Stdin)\n+\t}\n+\tdata, err := os.ReadFile(name)\n+\tif err != nil {\n+\t\treturn nil, errors.New(\"unidiff: \" + err.Error())\n+\t}\n+\treturn data, nil\n+}\n",
+              "additions": 55,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "go.mod",
+              "patch": "Index: go.mod\n===================================================================\n--- go.mod\t\n+++ go.mod\t\n@@ -0,0 +1,3 @@\n+module example.com/unidiff\n+\n+go 1.27.1\n",
+              "additions": 3,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "unidiff.go",
+              "patch": "Index: unidiff.go\n===================================================================\n--- unidiff.go\t\n+++ unidiff.go\t\n@@ -0,0 +1,186 @@\n+// Package unidiff computes and renders unified diffs between two pieces of\n+// text. It is intended for use in tests and developer tooling that needs to\n+// display readable differences.\n+package unidiff\n+\n+import (\n+\t\"fmt\"\n+\t\"strings\"\n+)\n+\n+// DefaultContext is the number of unchanged lines shown around each change.\n+const DefaultContext = 3\n+\n+type lineKind int\n+\n+const (\n+\tequal lineKind = iota\n+\tdelete\n+\tinsert\n+)\n+\n+// op is a single edit-script element: one line of input classified as equal,\n+// deleted from the old text, or inserted into the new text.\n+type op struct {\n+\tkind lineKind\n+\ttext string\n+}\n+\n+// Unified returns the unified diff between a and b, using DefaultContext\n+// lines of surrounding context. An empty string is returned when the texts are\n+// identical.\n+func Unified(a, b string) string {\n+\treturn UnifiedContext(a, b, DefaultContext)\n+}\n+\n+// UnifiedContext is like Unified but lets the caller choose how many lines of\n+// unchanged context are shown around each change. A negative context is\n+// treated as zero.\n+func UnifiedContext(a, b string, context int) string {\n+\tif context < 0 {\n+\t\tcontext = 0\n+\t}\n+\tif a == b {\n+\t\treturn \"\"\n+\t}\n+\n+\tops := diff(splitLines(a), splitLines(b))\n+\treturn format(ops, context)\n+}\n+\n+// splitLines splits s into lines suitable for diffing. A trailing newline does\n+// not produce a final empty line. An empty string produces no lines.\n+func splitLines(s string) []string {\n+\tif s == \"\" {\n+\t\treturn nil\n+\t}\n+\ts = strings.TrimSuffix(s, \"\\n\")\n+\treturn strings.Split(s, \"\\n\")\n+}\n+\n+// diff builds an edit script from a to b using a longest-common-subsequence\n+// table followed by a backtrack.\n+func diff(a, b []string) []op {\n+\tn, m := len(a), len(b)\n+\tlcs := make([][]int, n+1)\n+\tfor i := range lcs {\n+\t\tlcs[i] = make([]int, m+1)\n+\t}\n+\tfor i := n - 1; i >= 0; i-- {\n+\t\tfor j := m - 1; j >= 0; j-- {\n+\t\t\tif a[i] == b[j] {\n+\t\t\t\tlcs[i][j] = lcs[i+1][j+1] + 1\n+\t\t\t} else if lcs[i+1][j] >= lcs[i][j+1] {\n+\t\t\t\tlcs[i][j] = lcs[i+1][j]\n+\t\t\t} else {\n+\t\t\t\tlcs[i][j] = lcs[i][j+1]\n+\t\t\t}\n+\t\t}\n+\t}\n+\n+\tops := make([]op, 0, n+m)\n+\ti, j := 0, 0\n+\tfor i < n && j < m {\n+\t\tswitch {\n+\t\tcase a[i] == b[j]:\n+\t\t\tops = append(ops, op{equal, a[i]})\n+\t\t\ti++\n+\t\t\tj++\n+\t\tcase lcs[i+1][j] >= lcs[i][j+1]:\n+\t\t\tops = append(ops, op{delete, a[i]})\n+\t\t\ti++\n+\t\tdefault:\n+\t\t\tops = append(ops, op{insert, b[j]})\n+\t\t\tj++\n+\t\t}\n+\t}\n+\tfor ; i < n; i++ {\n+\t\tops = append(ops, op{delete, a[i]})\n+\t}\n+\tfor ; j < m; j++ {\n+\t\tops = append(ops, op{insert, b[j]})\n+\t}\n+\treturn ops\n+}\n+\n+// format renders an edit script as a unified diff with the given context.\n+func format(ops []op, context int) string {\n+\tvar changes []int\n+\tfor i, o := range ops {\n+\t\tif o.kind != equal {\n+\t\t\tchanges = append(changes, i)\n+\t\t}\n+\t}\n+\tif len(changes) == 0 {\n+\t\treturn \"\"\n+\t}\n+\n+\tvar b strings.Builder\n+\tb.WriteString(\"--- a\\n+++ b\\n\")\n+\n+\tfor ci := 0; ci < len(changes); {\n+\t\tstart := changes[ci]\n+\t\tend := start\n+\t\tci++\n+\t\tfor ci < len(changes) && changes[ci]-end-1 <= 2*context {\n+\t\t\tend = changes[ci]\n+\t\t\tci++\n+\t\t}\n+\n+\t\thunkStart := max(0, start-context)\n+\t\thunkEnd := min(len(ops)-1, end+context)\n+\n+\t\twriteHunk(&b, ops, hunkStart, hunkEnd)\n+\t}\n+\treturn b.String()\n+}\n+\n+// writeHunk renders a single @@ hunk covering ops[lo:hi+1].\n+func writeHunk(b *strings.Builder, ops []op, lo, hi int) {\n+\taStart, bStart := 1, 1\n+\tfor i := 0; i < lo; i++ {\n+\t\tswitch ops[i].kind {\n+\t\tcase equal:\n+\t\t\taStart++\n+\t\t\tbStart++\n+\t\tcase delete:\n+\t\t\taStart++\n+\t\tcase insert:\n+\t\t\tbStart++\n+\t\t}\n+\t}\n+\n+\taCount, bCount := 0, 0\n+\tfor i := lo; i <= hi; i++ {\n+\t\tswitch ops[i].kind {\n+\t\tcase equal:\n+\t\t\taCount++\n+\t\t\tbCount++\n+\t\tcase delete:\n+\t\t\taCount++\n+\t\tcase insert:\n+\t\t\tbCount++\n+\t\t}\n+\t}\n+\n+\tfmt.Fprintf(b, \"@@ -%s +%s @@\\n\", formatRange(aStart, aCount), formatRange(bStart, bCount))\n+\tfor i := lo; i <= hi; i++ {\n+\t\tswitch ops[i].kind {\n+\t\tcase equal:\n+\t\t\tb.WriteString(\" \" + ops[i].text + \"\\n\")\n+\t\tcase delete:\n+\t\t\tb.WriteString(\"-\" + ops[i].text + \"\\n\")\n+\t\tcase insert:\n+\t\t\tb.WriteString(\"+\" + ops[i].text + \"\\n\")\n+\t\t}\n+\t}\n+}\n+\n+// formatRange renders a unified-diff line range. A single-line range omits the\n+// count, matching the output of GNU diff.\n+func formatRange(start, count int) string {\n+\tif count == 1 {\n+\t\treturn fmt.Sprintf(\"%d\", start)\n+\t}\n+\treturn fmt.Sprintf(\"%d,%d\", start, count)\n+}\n",
+              "additions": 186,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "unidiff_test.go",
+              "patch": "Index: unidiff_test.go\n===================================================================\n--- unidiff_test.go\t\n+++ unidiff_test.go\t\n@@ -0,0 +1,107 @@\n+package unidiff\n+\n+import \"testing\"\n+\n+func TestUnifiedContext(t *testing.T) {\n+\ttests := []struct {\n+\t\tname    string\n+\t\ta, b    string\n+\t\tcontext int\n+\t\twant    string\n+\t}{\n+\t\t{\n+\t\t\tname:    \"identical\",\n+\t\t\ta:       \"one\\ntwo\\n\",\n+\t\t\tb:       \"one\\ntwo\\n\",\n+\t\t\tcontext: 3,\n+\t\t\twant:    \"\",\n+\t\t},\n+\t\t{\n+\t\t\tname:    \"single change\",\n+\t\t\ta:       \"one\\ntwo\\nthree\\n\",\n+\t\t\tb:       \"one\\nTWO\\nthree\\n\",\n+\t\t\tcontext: 3,\n+\t\t\twant: \"--- a\\n+++ b\\n\" +\n+\t\t\t\t\"@@ -1,3 +1,3 @@\\n\" +\n+\t\t\t\t\" one\\n\" +\n+\t\t\t\t\"-two\\n\" +\n+\t\t\t\t\"+TWO\\n\" +\n+\t\t\t\t\" three\\n\",\n+\t\t},\n+\t\t{\n+\t\t\tname:    \"insertion\",\n+\t\t\ta:       \"one\\nthree\\n\",\n+\t\t\tb:       \"one\\ntwo\\nthree\\n\",\n+\t\t\tcontext: 3,\n+\t\t\twant: \"--- a\\n+++ b\\n\" +\n+\t\t\t\t\"@@ -1,2 +1,3 @@\\n\" +\n+\t\t\t\t\" one\\n\" +\n+\t\t\t\t\"+two\\n\" +\n+\t\t\t\t\" three\\n\",\n+\t\t},\n+\t\t{\n+\t\t\tname:    \"deletion\",\n+\t\t\ta:       \"one\\ntwo\\nthree\\n\",\n+\t\t\tb:       \"one\\nthree\\n\",\n+\t\t\tcontext: 3,\n+\t\t\twant: \"--- a\\n+++ b\\n\" +\n+\t\t\t\t\"@@ -1,3 +1,2 @@\\n\" +\n+\t\t\t\t\" one\\n\" +\n+\t\t\t\t\"-two\\n\" +\n+\t\t\t\t\" three\\n\",\n+\t\t},\n+\t\t{\n+\t\t\tname:    \"zero context\",\n+\t\t\ta:       \"one\\ntwo\\nthree\\n\",\n+\t\t\tb:       \"one\\nTWO\\nthree\\n\",\n+\t\t\tcontext: 0,\n+\t\t\twant: \"--- a\\n+++ b\\n\" +\n+\t\t\t\t\"@@ -2 +2 @@\\n\" +\n+\t\t\t\t\"-two\\n\" +\n+\t\t\t\t\"+TWO\\n\",\n+\t\t},\n+\t}\n+\n+\tfor _, tt := range tests {\n+\t\tt.Run(tt.name, func(t *testing.T) {\n+\t\t\tif got := UnifiedContext(tt.a, tt.b, tt.context); got != tt.want {\n+\t\t\t\tt.Errorf(\"UnifiedContext() =\\n%q\\nwant\\n%q\", got, tt.want)\n+\t\t\t}\n+\t\t})\n+\t}\n+}\n+\n+func TestUnifiedSeparateHunks(t *testing.T) {\n+\ta := \"a\\nb\\nc\\nd\\ne\\nf\\ng\\nh\\ni\\n\"\n+\tb := \"A\\nb\\nc\\nd\\ne\\nf\\ng\\nh\\nI\\n\"\n+\n+\tgot := Unified(a, b)\n+\twant := \"--- a\\n+++ b\\n\" +\n+\t\t\"@@ -1,4 +1,4 @@\\n\" +\n+\t\t\"-a\\n\" +\n+\t\t\"+A\\n\" +\n+\t\t\" b\\n\" +\n+\t\t\" c\\n\" +\n+\t\t\" d\\n\" +\n+\t\t\"@@ -6,4 +6,4 @@\\n\" +\n+\t\t\" f\\n\" +\n+\t\t\" g\\n\" +\n+\t\t\" h\\n\" +\n+\t\t\"-i\\n\" +\n+\t\t\"+I\\n\"\n+\n+\tif got != want {\n+\t\tt.Errorf(\"Unified() =\\n%q\\nwant\\n%q\", got, want)\n+\t}\n+}\n+\n+func TestUnifiedAdditionAtEnd(t *testing.T) {\n+\tgot := Unified(\"a\\n\", \"a\\nb\\n\")\n+\twant := \"--- a\\n+++ b\\n\" +\n+\t\t\"@@ -1 +1,2 @@\\n\" +\n+\t\t\" a\\n\" +\n+\t\t\"+b\\n\"\n+\tif got != want {\n+\t\tt.Errorf(\"Unified() =\\n%q\\nwant\\n%q\", got, want)\n+\t}\n+}\n",
+              "additions": 107,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_103c459ae001XVdoPriSVW6yvA",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Set up a new Go module for a testing tool that needs to compute and display a unified diff between two pieces of text.\"",
+          "id": "prt_103c459c0001uIUJ86IzxuVLrP",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c459ae001XVdoPriSVW6yvA"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000099804,
+        "tokens": {
+          "total": 7435,
+          "input": 182,
+          "output": 44,
+          "reasoning": 41,
+          "cache": {
+            "write": 0,
+            "read": 7168
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064562670,
+          "completed": 1791064565403
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c45bee001qHgReMtmniK3Lt",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103c46255001KQmc8xSI5fuMxk",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c45bee001qHgReMtmniK3Lt"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants a new Go module for a testing tool that computes and displays a unified diff between two pieces of text. Let me explore the current directory first.\n\nLet me check what's in /work.",
+          "time": {
+            "start": 1791064564704,
+            "end": 1791064564912
+          },
+          "id": "prt_103c463e0001KJWx987DqFGhi6",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c45bee001qHgReMtmniK3Lt"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_a05VXB5hIZCkmBUC8ony0750",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la /work && go version"
+            },
+            "output": "total 8\ndrwxr-xr-x 5  501 dialout  160 Oct  3 21:55 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:55 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:55 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:56 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 21:55 opencode.json\ngo version go1.27.1 linux/arm64\n",
+            "metadata": {
+              "output": "total 8\ndrwxr-xr-x 5  501 dialout  160 Oct  3 21:55 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:55 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:55 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:56 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 21:55 opencode.json\ngo version go1.27.1 linux/arm64\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "ls -la /work && go version",
+            "time": {
+              "start": 1791064564971,
+              "end": 1791064565264
+            }
+          },
+          "id": "prt_103c464b8001SG0fZIFXSIfKva",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c45bee001qHgReMtmniK3Lt"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7435,
+            "input": 182,
+            "output": 44,
+            "reasoning": 41,
+            "cache": {
+              "write": 0,
+              "read": 7168
+            }
+          },
+          "cost": 0.000099804,
+          "id": "prt_103c4665a0017rKC09WC3mBsAx",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c45bee001qHgReMtmniK3Lt"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000104022,
+        "tokens": {
+          "total": 7678,
+          "input": 157,
+          "output": 62,
+          "reasoning": 35,
+          "cache": {
+            "write": 0,
+            "read": 7424
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064565408,
+          "completed": 1791064567093
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c466a00019Gn0BI34VTlbnV",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103c468a7001WwDXw8iOmKse6I",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c466a00019Gn0BI34VTlbnV"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me check the git repo and the opencode.json. Let me also understand what's there. The user wants a new Go module. Let me look at the structure.",
+          "time": {
+            "start": 1791064566553,
+            "end": 1791064566791
+          },
+          "id": "prt_103c46b190011r3TewU3px5K66",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c466a00019Gn0BI34VTlbnV"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_jRbkWPXv1Uv5vhvw9J3S4606",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cat /work/opencode.json && git -C /work log --oneline -5 && git -C /work status"
+            },
+            "output": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\nfatal: your current branch 'main' does not have any commits yet\n",
+            "metadata": {
+              "output": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\nfatal: your current branch 'main' does not have any commits yet\n",
+              "exit": 128,
+              "truncated": false
+            },
+            "title": "cat /work/opencode.json && git -C /work log --oneline -5 && git -C /work status",
+            "time": {
+              "start": 1791064566899,
+              "end": 1791064566935
+            }
+          },
+          "id": "prt_103c46c0c001Ori20e1zNs4jGU",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c466a00019Gn0BI34VTlbnV"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7678,
+            "input": 157,
+            "output": 62,
+            "reasoning": 35,
+            "cache": {
+              "write": 0,
+              "read": 7424
+            }
+          },
+          "cost": 0.000104022,
+          "id": "prt_103c46cdd0017HZftUlQXc8Utn",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c466a00019Gn0BI34VTlbnV"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001092606,
+        "tokens": {
+          "total": 9462,
+          "input": 169,
+          "output": 74,
+          "reasoning": 1667,
+          "cache": {
+            "write": 0,
+            "read": 7552
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064567100,
+          "completed": 1791064576314
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c46d3c001WHyFYMpvvCYheU",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103c46f26001kICps0bjcNwka5",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c46d3c001WHyFYMpvvCYheU"
+        },
+        {
+          "type": "reasoning",
+          "text": "Empty repo, only opencode config. I need to set up a new Go module for a testing tool that computes and displays a unified diff between two pieces of text.\n\nLet me plan:\n1. `go mod init` for the module\n2. Create the diffing logic. Should I use a library or implement from scratch? \"NEVER assume that a given library is available\". Since it's a new module, I could use a well-known library like `github.com/sergi/go-diff` or `github.com/pmezard/go-difflib` (which provides unified diff). Actually `github.com/pmezard/go-difflib/difflib` has `GetUnifiedDiffString` which is exactly this. But adding a dependency requires network access. Alternatively implement a simple LCS-based diff from scratch — more robust, no dependencies.\n\nThe task says \"compute and display a unified diff\". Best to implement a self-contained module using standard library only, since network may not be available. Let me check if network is available for go get. But likely not needed.\n\nLet me build a small, clean module:\n- go.mod\n- diff.go: unified diff computation (Myers or simple LCS)\n- main.go or cmd? It's a \"testing tool\". Maybe a package plus a CLI.\n\nActually, the request is a bit open. Let me create a module `unidiff` with a library function and a small CLI. Keep it focused.\n\nLet me design:\n\nPackage `diff`:\n- `Unified(a, b string, context int) string` computes unified diff between two texts.\n\nImplementation:\n- Split into lines preserving newlines.\n- Compute LCS / diff using a standard dynamic programming approach.\n- Generate hunks with context.\n\nPlus a `diff_test.go` with table tests.\n\nPlus `cmd/unidiff/main.go` reading two files or accepting args.\n\nLet me keep it reasonable. The module name — something like `github.com/example/unidiff`? Better use a local module name. Since no remote specified, use `unidiff`. Go allows module path without dot? Yes, `module unidiff` works for local. But convention for tool. Let me use `example.com/unidiff`? Hmm. I'll use `unidiff` simple.\n\nActually let me reconsider—\"testing tool that needs to compute and display a unified diff between two pieces of text\". This could be a helper library used by tests (like a testify assert helper). I'll structure as a library with a CLI command.\n\nLet me implement Myers diff or standard LCS. I'll implement a clean O(N*M) LCS with backtracking, then build hunks.\n\nLet me write:\n\ndiff.go:\n```go\npackage unidiff\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\n// Line represents an op in the diff.\ntype lineKind int\n\nconst (\n\tlineEqual lineKind = iota\n\tlineDelete\n\tlineInsert\n)\n```\n\nActually let me design output format properly like `diff -u`:\n\n```\n--- a\n+++ b\n@@ -1,3 +1,4 @@\n context\n-old\n+new\n context\n```\n\nLet me implement.\n\nAlgorithm:\n1. splitLines(s) -> []string. Handle empty string -> nil. Lines keep original text without newline; track whether last line has newline. For simplicity, normalize: split on \"\\n\" and if ends with newline, drop trailing empty. Then when outputting, prefix each with \" \" / \"-\" / \"+\" and add \"\\n\". This is the common approach (difflib does similar). Output unified diff string.\n\n2. Edit script via LCS DP.\n\nLet me write the LCS:\n```go\nfunc lcs(a, b []string) [][]int\n```\nThen backtrack to produce ops.\n\nMemory O(N*M) may be fine for testing tool. But large inputs... acceptable. Could use Myers but keep it simple.\n\nActually let me implement Myers O(ND) to be nicer? Simpler to do DP. I'll do DP.\n\nLet me define op:\n```go\ntype op struct {\n\tkind lineKind\n\tline string\n\taIdx int\n\tbIdx int\n}\n```\n\nBacktrack from dp[len(a)][len(b)]:\n- if i>0 && j>0 && a[i-1]==b[j-1]: equal, i--,j--\n- else if j>0 && (i==0 || dp[i][j-1] >= dp[i-1][j]): insert b[j-1], j--\n- else delete a[i-1], i--\nReverse.\n\nThen group into hunks with context.\n\nHunk building:\n- ops list.\n- find indices of changes.\n- group changes where gap of equal lines <= 2*context? Standard: hunks are separated when there are more than 2*context equal lines between changes. Then each hunk includes context lines before/after.\n\nLet me produce hunk start/end and line ranges.\n\nI'll compute for each op index a-hunk member. Let me implement:\n- changed := indices where kind != equal.\n- if none, return \"\" (or maybe still header? no changes -> empty).\n- Build groups: iterate changed indices, start a group at first; extend end; if next changed index - current end - 1 > 2*context, close group.\n\nFor each group [cs, ce] (indices in ops), the hunk covers [cs-context, ce+context] clamped. But careful: context lines that are equal. Also need to not overlap between adjacent hunks; standard allows. We'll clamp and ensure start > previous end.\n\nCompute aStart = number of a-lines before hunk start + 1, etc. Need to map ops position to a-line number. Let me precompute aBefore[i] = number of a lines consumed before op i; bBefore[i] similarly.\n\nHeader format: `@@ -aStart,aCount +bStart,bCount @@`. If count == 1, some diffs omit `,1` but including is fine. I'll follow the convention: if count==1 print just start? GNU diff prints `-1 +1` when single line. To be safe and simple, always include `,count`? GNU diff actually formats single-line as `-1` (no comma). But tools parse both. I'll do the GNU style: omit `,1`.\n\nLet me implement helper formatRange(start, count).\n\nNow CLI: cmd/unidiff/main.go reads two files (or \"-\" stdin not both). Provide flags for context. Print diff. Exit code 0 if same, 1 if different, 2 on error (like diff).\n\nLet me write tests.\n\nLet me also add a README? The instruction says don't proactively create docs unless requested. So no README.\n\nLet me now create files. First go.mod via `go mod init`. What module path? I'll pick `github.com/example/unidiff`. Hmm, a fake path. Better perhaps just `unidiff`. But then imports in tests are package internal anyway. Let me use `example.com/unidiff`? I think using a realistic path is better for a reusable tool. But user didn't specify. I'll go with `github.com/yourorg/unidiff`? That's ugly.\n\nI'll use `unidiff` as module name — simple and works. Actually Go tooling warns for module paths without a dot only when publishing, but local is fine. Many use `example.com/...`. Let me use `example.com/unidiff`.\n\nHmm, let me reconsider the whole scope. The user asked to \"Set up a new Go module for a testing tool that needs to compute and display a unified diff between two pieces of text.\" The key word \"Set up\" — maybe they just want the module scaffolding plus this capability. I'll deliver a working library + CLI + tests.\n\nLet me do it.",
+          "time": {
+            "start": 1791064567709,
+            "end": 1791064575586
+          },
+          "id": "prt_103c46f9d001trb83DZqpUzFdi",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c46d3c001WHyFYMpvvCYheU"
+        },
+        {
+          "type": "text",
+          "text": "I'll set up a self-contained Go module with a unified-diff library, a small CLI, and tests.",
+          "time": {
+            "start": 1791064575603,
+            "end": 1791064575785
+          },
+          "id": "prt_103c48e72001HK4xYdNkkYD64C",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c46d3c001WHyFYMpvvCYheU"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_p9s54PfJdgIz8mUEhZxk3102",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && go mod init example.com/unidiff && ls -la"
+            },
+            "output": "go: creating new go.mod: module example.com/unidiff\ntotal 12\ndrwxr-xr-x 6 root root     192 Oct  3 21:56 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:55 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:55 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:56 .opencode\n-rw-r--r-- 1  501 dialout   38 Oct  3 21:56 go.mod\n-rw-r--r-- 1  501 dialout   51 Oct  3 21:55 opencode.json\n",
+            "metadata": {
+              "output": "go: creating new go.mod: module example.com/unidiff\ntotal 12\ndrwxr-xr-x 6 root root     192 Oct  3 21:56 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:55 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:55 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:56 .opencode\n-rw-r--r-- 1  501 dialout   38 Oct  3 21:56 go.mod\n-rw-r--r-- 1  501 dialout   51 Oct  3 21:55 opencode.json\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && go mod init example.com/unidiff && ls -la",
+            "time": {
+              "start": 1791064575764,
+              "end": 1791064575873
+            }
+          },
+          "id": "prt_103c48eda001P6XbGm2P2nWEGa",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c46d3c001WHyFYMpvvCYheU"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "cefb2d7d2b46c2021388a28642cf3874e1df6405",
+          "type": "step-finish",
+          "tokens": {
+            "total": 9462,
+            "input": 169,
+            "output": 74,
+            "reasoning": 1667,
+            "cache": {
+              "write": 0,
+              "read": 7552
+            }
+          },
+          "cost": 0.001092606,
+          "id": "prt_103c49049001TatVVKXNY6t4zZ",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c46d3c001WHyFYMpvvCYheU"
+        },
+        {
+          "type": "patch",
+          "hash": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "files": [
+            "/work/go.mod"
+          ],
+          "id": "prt_103c4912f001HM0A9iPrWNepcU",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c46d3c001WHyFYMpvvCYheU"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000912882,
+        "tokens": {
+          "total": 11034,
+          "input": 287,
+          "output": 1390,
+          "reasoning": 13,
+          "cache": {
+            "write": 0,
+            "read": 9344
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064576332,
+          "completed": 1791064581609
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c4914c001s48MOmxJ46Xozm",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "cefb2d7d2b46c2021388a28642cf3874e1df6405",
+          "type": "step-start",
+          "id": "prt_103c4939e001gD1iXAxXPGPKcF",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4914c001s48MOmxJ46Xozm"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now create the library. Let me create unidiff.go.",
+          "time": {
+            "start": 1791064577319,
+            "end": 1791064577489
+          },
+          "id": "prt_103c495270010QAq1SywN4hkwv",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4914c001s48MOmxJ46Xozm"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_Na8fl4oxMweqTwq9BRAF6940",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/unidiff.go",
+              "content": "// Package unidiff computes and renders unified diffs between two pieces of\n// text. It is intended for use in tests and developer tooling that needs to\n// display readable differences.\npackage unidiff\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\n// DefaultContext is the number of unchanged lines shown around each change.\nconst DefaultContext = 3\n\ntype lineKind int\n\nconst (\n\tequal lineKind = iota\n\tdelete\n\tinsert\n)\n\n// op is a single edit-script element: one line of input classified as equal,\n// deleted from the old text, or inserted into the new text.\ntype op struct {\n\tkind lineKind\n\ttext string\n}\n\n// Unified returns the unified diff between a and b, using DefaultContext\n// lines of surrounding context. An empty string is returned when the texts are\n// identical.\nfunc Unified(a, b string) string {\n\treturn UnifiedContext(a, b, DefaultContext)\n}\n\n// UnifiedContext is like Unified but lets the caller choose how many lines of\n// unchanged context are shown around each change. A negative context is\n// treated as zero.\nfunc UnifiedContext(a, b string, context int) string {\n\tif context < 0 {\n\t\tcontext = 0\n\t}\n\tif a == b {\n\t\treturn \"\"\n\t}\n\n\tops := diff(splitLines(a), splitLines(b))\n\treturn format(ops, context)\n}\n\n// splitLines splits s into lines suitable for diffing. A trailing newline does\n// not produce a final empty line. An empty string produces no lines.\nfunc splitLines(s string) []string {\n\tif s == \"\" {\n\t\treturn nil\n\t}\n\ts = strings.TrimSuffix(s, \"\\n\")\n\treturn strings.Split(s, \"\\n\")\n}\n\n// diff builds an edit script from a to b using a longest-common-subsequence\n// table followed by a backtrack.\nfunc diff(a, b []string) []op {\n\tn, m := len(a), len(b)\n\tlcs := make([][]int, n+1)\n\tfor i := range lcs {\n\t\tlcs[i] = make([]int, m+1)\n\t}\n\tfor i := n - 1; i >= 0; i-- {\n\t\tfor j := m - 1; j >= 0; j-- {\n\t\t\tif a[i] == b[j] {\n\t\t\t\tlcs[i][j] = lcs[i+1][j+1] + 1\n\t\t\t} else if lcs[i+1][j] >= lcs[i][j+1] {\n\t\t\t\tlcs[i][j] = lcs[i+1][j]\n\t\t\t} else {\n\t\t\t\tlcs[i][j] = lcs[i][j+1]\n\t\t\t}\n\t\t}\n\t}\n\n\tops := make([]op, 0, n+m)\n\ti, j := 0, 0\n\tfor i < n && j < m {\n\t\tswitch {\n\t\tcase a[i] == b[j]:\n\t\t\tops = append(ops, op{equal, a[i]})\n\t\t\ti++\n\t\t\tj++\n\t\tcase lcs[i+1][j] >= lcs[i][j+1]:\n\t\t\tops = append(ops, op{delete, a[i]})\n\t\t\ti++\n\t\tdefault:\n\t\t\tops = append(ops, op{insert, b[j]})\n\t\t\tj++\n\t\t}\n\t}\n\tfor ; i < n; i++ {\n\t\tops = append(ops, op{delete, a[i]})\n\t}\n\tfor ; j < m; j++ {\n\t\tops = append(ops, op{insert, b[j]})\n\t}\n\treturn ops\n}\n\n// format renders an edit script as a unified diff with the given context.\nfunc format(ops []op, context int) string {\n\tvar changes []int\n\tfor i, o := range ops {\n\t\tif o.kind != equal {\n\t\t\tchanges = append(changes, i)\n\t\t}\n\t}\n\tif len(changes) == 0 {\n\t\treturn \"\"\n\t}\n\n\tvar b strings.Builder\n\tb.WriteString(\"--- a\\n+++ b\\n\")\n\n\tfor ci := 0; ci < len(changes); {\n\t\tstart := changes[ci]\n\t\tend := start\n\t\tci++\n\t\tfor ci < len(changes) && changes[ci]-end-1 <= 2*context {\n\t\t\tend = changes[ci]\n\t\t\tci++\n\t\t}\n\n\t\thunkStart := max(0, start-context)\n\t\thunkEnd := min(len(ops)-1, end+context)\n\n\t\twriteHunk(&b, ops, hunkStart, hunkEnd)\n\t}\n\treturn b.String()\n}\n\n// writeHunk renders a single @@ hunk covering ops[lo:hi+1].\nfunc writeHunk(b *strings.Builder, ops []op, lo, hi int) {\n\taStart, bStart := 1, 1\n\tfor i := 0; i < lo; i++ {\n\t\tswitch ops[i].kind {\n\t\tcase equal:\n\t\t\taStart++\n\t\t\tbStart++\n\t\tcase delete:\n\t\t\taStart++\n\t\tcase insert:\n\t\t\tbStart++\n\t\t}\n\t}\n\n\taCount, bCount := 0, 0\n\tfor i := lo; i <= hi; i++ {\n\t\tswitch ops[i].kind {\n\t\tcase equal:\n\t\t\taCount++\n\t\t\tbCount++\n\t\tcase delete:\n\t\t\taCount++\n\t\tcase insert:\n\t\t\tbCount++\n\t\t}\n\t}\n\n\tfmt.Fprintf(b, \"@@ -%s +%s @@\\n\", formatRange(aStart, aCount), formatRange(bStart, bCount))\n\tfor i := lo; i <= hi; i++ {\n\t\tswitch ops[i].kind {\n\t\tcase equal:\n\t\t\tb.WriteString(\" \" + ops[i].text + \"\\n\")\n\t\tcase delete:\n\t\t\tb.WriteString(\"-\" + ops[i].text + \"\\n\")\n\t\tcase insert:\n\t\t\tb.WriteString(\"+\" + ops[i].text + \"\\n\")\n\t\t}\n\t}\n}\n\n// formatRange renders a unified-diff line range. A single-line range omits the\n// count, matching the output of GNU diff.\nfunc formatRange(start, count int) string {\n\tif count == 1 {\n\t\treturn fmt.Sprintf(\"%d\", start)\n\t}\n\treturn fmt.Sprintf(\"%d,%d\", start, count)\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/unidiff.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "unidiff.go",
+            "time": {
+              "start": 1791064581309,
+              "end": 1791064581346
+            }
+          },
+          "id": "prt_103c495d4001J4PcsnvF3Hicy0",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4914c001s48MOmxJ46Xozm"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "014c19c70b41553429ca79fa5ce96c38e766897b",
+          "type": "step-finish",
+          "tokens": {
+            "total": 11034,
+            "input": 287,
+            "output": 1390,
+            "reasoning": 13,
+            "cache": {
+              "write": 0,
+              "read": 9344
+            }
+          },
+          "cost": 0.000912882,
+          "id": "prt_103c4a57a001Bv5sZyC2yXKsNd",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4914c001s48MOmxJ46Xozm"
+        },
+        {
+          "type": "patch",
+          "hash": "cefb2d7d2b46c2021388a28642cf3874e1df6405",
+          "files": [
+            "/work/unidiff.go"
+          ],
+          "id": "prt_103c4a5e5001PxO2bxgJIhL3GJ",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4914c001s48MOmxJ46Xozm"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00035154,
+        "tokens": {
+          "total": 11539,
+          "input": 170,
+          "output": 420,
+          "reasoning": 69,
+          "cache": {
+            "write": 0,
+            "read": 10880
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064581615,
+          "completed": 1791064584533
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c4a5ef001ZmMD3CJgSpljuS",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "014c19c70b41553429ca79fa5ce96c38e766897b",
+          "type": "step-start",
+          "id": "prt_103c4a82c0014z8onTHj0b7Jww",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4a5ef001ZmMD3CJgSpljuS"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now the CLI. cmd/unidiff/main.go. Reads two file paths, or \"-\" for stdin (only one). Flags: -context/-U. Exit 0 same, 1 different, 2 error.\n\nGo 1.27 has max/min builtins (since 1.21). Good.\n\nLet me write CLI.",
+          "time": {
+            "start": 1791064582628,
+            "end": 1791064583035
+          },
+          "id": "prt_103c4a9e4001ecXZ7WISwrAi74",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4a5ef001ZmMD3CJgSpljuS"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_R3Q4v4vS5WJGo1gCIgnM7138",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "// Command unidiff prints the unified diff between two files (or stdin).\n//\n// Exit status is 0 when the inputs are identical, 1 when they differ, and 2 on\n// error, matching the conventions of the standard diff(1) tool.\npackage main\n\nimport (\n\t\"errors\"\n\t\"flag\"\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\n\t\"example.com/unidiff\"\n)\n\nfunc main() {\n\tcontext := flag.Int(\"U\", unidiff.DefaultContext, \"number of context lines\")\n\tflag.Parse()\n\n\tif flag.NArg() != 2 {\n\t\tfmt.Fprintln(os.Stderr, \"usage: unidiff [-U n] old new\")\n\t\tos.Exit(2)\n\t}\n\n\ta, err := readInput(flag.Arg(0))\n\tif err != nil {\n\t\tfmt.Fprintln(os.Stderr, err)\n\t\tos.Exit(2)\n\t}\n\tb, err := readInput(flag.Arg(1))\n\tif err != nil {\n\t\tfmt.Fprintln(os.Stderr, err)\n\t\tos.Exit(2)\n\t}\n\n\tout := unidiff.UnifiedContext(string(a), string(b), *context)\n\tif out == \"\" {\n\t\tos.Exit(0)\n\t}\n\tfmt.Print(out)\n\tos.Exit(1)\n}\n\n// readInput reads a whole file, or stdin when name is \"-\".\nfunc readInput(name string) ([]byte, error) {\n\tif name == \"-\" {\n\t\treturn io.ReadAll(os.Stdin)\n\t}\n\tdata, err := os.ReadFile(name)\n\tif err != nil {\n\t\treturn nil, errors.New(\"unidiff: \" + err.Error())\n\t}\n\treturn data, nil\n}\n",
+              "filePath": "/work/cmd/unidiff/main.go"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/cmd/unidiff/main.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "cmd/unidiff/main.go",
+            "time": {
+              "start": 1791064584195,
+              "end": 1791064584237
+            }
+          },
+          "id": "prt_103c4ab90001gKvQYoQTemaSB5",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4a5ef001ZmMD3CJgSpljuS"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "24c627b83ef31975f8c51231d7ebc6d1a6a63bd1",
+          "type": "step-finish",
+          "tokens": {
+            "total": 11539,
+            "input": 170,
+            "output": 420,
+            "reasoning": 69,
+            "cache": {
+              "write": 0,
+              "read": 10880
+            }
+          },
+          "cost": 0.00035154,
+          "id": "prt_103c4b0bf001mBcF3EAA9KG1fX",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4a5ef001ZmMD3CJgSpljuS"
+        },
+        {
+          "type": "patch",
+          "hash": "014c19c70b41553429ca79fa5ce96c38e766897b",
+          "files": [
+            "/work/cmd/unidiff/main.go"
+          ],
+          "id": "prt_103c4b142001PHaP9LQTaVSkTd",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4a5ef001ZmMD3CJgSpljuS"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000616626,
+        "tokens": {
+          "total": 12485,
+          "input": 163,
+          "output": 930,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 11392
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064584538,
+          "completed": 1791064588365
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c4b15a001tSPu38gqU2vFSY",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "24c627b83ef31975f8c51231d7ebc6d1a6a63bd1",
+          "type": "step-start",
+          "id": "prt_103c4b3d6001mTLnLpafwKWxm7",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4b15a001tSPu38gqU2vFSY"
+        },
+        {
+          "type": "text",
+          "text": "Now tests:",
+          "time": {
+            "start": 1791064585520,
+            "end": 1791064588096
+          },
+          "id": "prt_103c4b530001m9dmiLNIlg3m5z",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4b15a001tSPu38gqU2vFSY"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_qIeRSKnPlxXbliWcAhjZ1265",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "package unidiff\n\nimport \"testing\"\n\nfunc TestUnifiedContext(t *testing.T) {\n\ttests := []struct {\n\t\tname    string\n\t\ta, b    string\n\t\tcontext int\n\t\twant    string\n\t}{\n\t\t{\n\t\t\tname:    \"identical\",\n\t\t\ta:       \"one\\ntwo\\n\",\n\t\t\tb:       \"one\\ntwo\\n\",\n\t\t\tcontext: 3,\n\t\t\twant:    \"\",\n\t\t},\n\t\t{\n\t\t\tname:    \"single change\",\n\t\t\ta:       \"one\\ntwo\\nthree\\n\",\n\t\t\tb:       \"one\\nTWO\\nthree\\n\",\n\t\t\tcontext: 3,\n\t\t\twant: \"--- a\\n+++ b\\n\" +\n\t\t\t\t\"@@ -1,3 +1,3 @@\\n\" +\n\t\t\t\t\" one\\n\" +\n\t\t\t\t\"-two\\n\" +\n\t\t\t\t\"+TWO\\n\" +\n\t\t\t\t\" three\\n\",\n\t\t},\n\t\t{\n\t\t\tname:    \"insertion\",\n\t\t\ta:       \"one\\nthree\\n\",\n\t\t\tb:       \"one\\ntwo\\nthree\\n\",\n\t\t\tcontext: 3,\n\t\t\twant: \"--- a\\n+++ b\\n\" +\n\t\t\t\t\"@@ -1,2 +1,3 @@\\n\" +\n\t\t\t\t\" one\\n\" +\n\t\t\t\t\"+two\\n\" +\n\t\t\t\t\" three\\n\",\n\t\t},\n\t\t{\n\t\t\tname:    \"deletion\",\n\t\t\ta:       \"one\\ntwo\\nthree\\n\",\n\t\t\tb:       \"one\\nthree\\n\",\n\t\t\tcontext: 3,\n\t\t\twant: \"--- a\\n+++ b\\n\" +\n\t\t\t\t\"@@ -1,3 +1,2 @@\\n\" +\n\t\t\t\t\" one\\n\" +\n\t\t\t\t\"-two\\n\" +\n\t\t\t\t\" three\\n\",\n\t\t},\n\t\t{\n\t\t\tname:    \"zero context\",\n\t\t\ta:       \"one\\ntwo\\nthree\\n\",\n\t\t\tb:       \"one\\nTWO\\nthree\\n\",\n\t\t\tcontext: 0,\n\t\t\twant: \"--- a\\n+++ b\\n\" +\n\t\t\t\t\"@@ -2 +2 @@\\n\" +\n\t\t\t\t\"-two\\n\" +\n\t\t\t\t\"+TWO\\n\",\n\t\t},\n\t}\n\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tif got := UnifiedContext(tt.a, tt.b, tt.context); got != tt.want {\n\t\t\t\tt.Errorf(\"UnifiedContext() =\\n%q\\nwant\\n%q\", got, tt.want)\n\t\t\t}\n\t\t})\n\t}\n}\n\nfunc TestUnifiedSeparateHunks(t *testing.T) {\n\ta := \"a\\nb\\nc\\nd\\ne\\nf\\ng\\nh\\ni\\n\"\n\tb := \"A\\nb\\nc\\nd\\ne\\nf\\ng\\nh\\nI\\n\"\n\n\tgot := Unified(a, b)\n\twant := \"--- a\\n+++ b\\n\" +\n\t\t\"@@ -1,4 +1,4 @@\\n\" +\n\t\t\"-a\\n\" +\n\t\t\"+A\\n\" +\n\t\t\" b\\n\" +\n\t\t\" c\\n\" +\n\t\t\" d\\n\" +\n\t\t\"@@ -6,4 +6,4 @@\\n\" +\n\t\t\" f\\n\" +\n\t\t\" g\\n\" +\n\t\t\" h\\n\" +\n\t\t\"-i\\n\" +\n\t\t\"+I\\n\"\n\n\tif got != want {\n\t\tt.Errorf(\"Unified() =\\n%q\\nwant\\n%q\", got, want)\n\t}\n}\n\nfunc TestUnifiedAdditionAtEnd(t *testing.T) {\n\tgot := Unified(\"a\\n\", \"a\\nb\\n\")\n\twant := \"--- a\\n+++ b\\n\" +\n\t\t\"@@ -1 +1,2 @@\\n\" +\n\t\t\" a\\n\" +\n\t\t\"+b\\n\"\n\tif got != want {\n\t\tt.Errorf(\"Unified() =\\n%q\\nwant\\n%q\", got, want)\n\t}\n}\n",
+              "filePath": "/work/unidiff_test.go"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/unidiff_test.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "unidiff_test.go",
+            "time": {
+              "start": 1791064588077,
+              "end": 1791064588168
+            }
+          },
+          "id": "prt_103c4b5a8001cLvXL9dhD1DJbx",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4b15a001tSPu38gqU2vFSY"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12485,
+            "input": 163,
+            "output": 930,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 11392
+            }
+          },
+          "cost": 0.000616626,
+          "id": "prt_103c4c001001cCgVrP5LMcqglP",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4b15a001tSPu38gqU2vFSY"
+        },
+        {
+          "type": "patch",
+          "hash": "24c627b83ef31975f8c51231d7ebc6d1a6a63bd1",
+          "files": [
+            "/work/unidiff_test.go"
+          ],
+          "id": "prt_103c4c048001eLoZPje1G6vhTr",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4b15a001tSPu38gqU2vFSY"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000101214,
+        "tokens": {
+          "total": 12555,
+          "input": 213,
+          "output": 54,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 12288
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064588370,
+          "completed": 1791064601763
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c4c05200132Ck95Vt04gwx5",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-start",
+          "id": "prt_103c4c2ae001x977qjY0aJEZO1",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4c05200132Ck95Vt04gwx5"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_KYyAqvvryPXP2Hsc99Zv9264",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && gofmt -l . && go vet ./... && go test ./..."
+            },
+            "output": "ok  \texample.com/unidiff\t0.008s\n?   \texample.com/unidiff/cmd/unidiff\t[no test files]\n",
+            "metadata": {
+              "output": "ok  \texample.com/unidiff\t0.008s\n?   \texample.com/unidiff/cmd/unidiff\t[no test files]\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && gofmt -l . && go vet ./... && go test ./...",
+            "time": {
+              "start": 1791064589369,
+              "end": 1791064601290
+            }
+          },
+          "id": "prt_103c4c34c001QrjgOKwmKxnXtA",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4c05200132Ck95Vt04gwx5"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12555,
+            "input": 213,
+            "output": 54,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 12288
+            }
+          },
+          "cost": 0.000101214,
+          "id": "prt_103c4f3cf001r9fR15Wazwz0Yc",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4c05200132Ck95Vt04gwx5"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000164448,
+        "tokens": {
+          "total": 12766,
+          "input": 184,
+          "output": 144,
+          "reasoning": 22,
+          "cache": {
+            "write": 0,
+            "read": 12416
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064601779,
+          "completed": 1791064604786
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c4f4b3001bklIeB1F1KxN0v",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-start",
+          "id": "prt_103c4f771001oBaflZchtWtnP3",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4f4b3001bklIeB1F1KxN0v"
+        },
+        {
+          "type": "reasoning",
+          "text": "Tests pass. Let me verify CLI works, and also verify against real `diff -u` for parity.",
+          "time": {
+            "start": 1791064602769,
+            "end": 1791064602934
+          },
+          "id": "prt_103c4f890001N7ghkF0IS3aAeC",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4f4b3001bklIeB1F1KxN0v"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_UAa2KJ5t1fVGBhJt5QUj9097",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /tmp/opencode && printf 'one\\ntwo\\nthree\\n' > a.txt && printf 'one\\nTWO\\nthree\\nfour\\n' > b.txt && echo \"--- unidiff ---\" && go run example.com/unidiff/cmd/unidiff a.txt b.txt; echo \"exit=$?\"; echo \"--- diff -u ---\"; diff -u a.txt b.txt; echo \"exit=$?\"",
+              "workdir": "/work"
+            },
+            "output": "--- unidiff ---\nno required module provides package example.com/unidiff/cmd/unidiff: go.mod file not found in current directory or any parent directory; see 'go help modules'\nexit=1\n--- diff -u ---\n--- a.txt\t2026-10-03 21:56:43.562710680 +0000\n+++ b.txt\t2026-10-03 21:56:43.562710680 +0000\n@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n three\n+four\nexit=1\n",
+            "metadata": {
+              "output": "--- unidiff ---\nno required module provides package example.com/unidiff/cmd/unidiff: go.mod file not found in current directory or any parent directory; see 'go help modules'\nexit=1\n--- diff -u ---\n--- a.txt\t2026-10-03 21:56:43.562710680 +0000\n+++ b.txt\t2026-10-03 21:56:43.562710680 +0000\n@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n three\n+four\nexit=1\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /tmp/opencode && printf 'one\\ntwo\\nthree\\n' > a.txt && printf 'one\\nTWO\\nthree\\nfour\\n' > b.txt && echo \"--- unidiff ---\" && go run example.com/unidiff/cmd/unidiff a.txt b.txt; echo \"exit=$?\"; echo \"--- diff -u ---\"; diff -u a.txt b.txt; echo \"exit=$?\"",
+            "time": {
+              "start": 1791064603304,
+              "end": 1791064603830
+            }
+          },
+          "id": "prt_103c4f93f0017Zo9EgcBev70k8",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4f4b3001bklIeB1F1KxN0v"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12766,
+            "input": 184,
+            "output": 144,
+            "reasoning": 22,
+            "cache": {
+              "write": 0,
+              "read": 12416
+            }
+          },
+          "cost": 0.000164448,
+          "id": "prt_103c4ff39001wSkuF1vphcIoBH",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c4f4b3001bklIeB1F1KxN0v"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000141966,
+        "tokens": {
+          "total": 13020,
+          "input": 233,
+          "output": 81,
+          "reasoning": 34,
+          "cache": {
+            "write": 0,
+            "read": 12672
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064604809,
+          "completed": 1791064607638
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c50089001p1QS1q6Zi4VfHw",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-start",
+          "id": "prt_103c50427001r3Xs7pEx9OnVWQ",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50089001p1QS1q6Zi4VfHw"
+        },
+        {
+          "type": "reasoning",
+          "text": "The workdir was /work but I cd'd to /tmp/opencode inside command. Let me just run from /work with relative paths to /tmp files.",
+          "time": {
+            "start": 1791064605977,
+            "end": 1791064606291
+          },
+          "id": "prt_103c50519001WxPCx4rjkXC4SQ",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50089001p1QS1q6Zi4VfHw"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_q6HGMQxZFwEMhjYaSNb81418",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "go run ./cmd/unidiff /tmp/opencode/a.txt /tmp/opencode/b.txt; echo \"exit=$?\"",
+              "workdir": "/work"
+            },
+            "output": "--- a\n+++ b\n@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n three\n+four\nexit status 1\nexit=1\n",
+            "metadata": {
+              "output": "--- a\n+++ b\n@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n three\n+four\nexit status 1\nexit=1\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "go run ./cmd/unidiff /tmp/opencode/a.txt /tmp/opencode/b.txt; echo \"exit=$?\"",
+            "time": {
+              "start": 1791064606451,
+              "end": 1791064607423
+            }
+          },
+          "id": "prt_103c50678001yZQ5za1safejna",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50089001p1QS1q6Zi4VfHw"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13020,
+            "input": 233,
+            "output": 81,
+            "reasoning": 34,
+            "cache": {
+              "write": 0,
+              "read": 12672
+            }
+          },
+          "cost": 0.000141966,
+          "id": "prt_103c50b00001RCsPnhUapEF45T",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50089001p1QS1q6Zi4VfHw"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000177234,
+        "tokens": {
+          "total": 13266,
+          "input": 143,
+          "output": 82,
+          "reasoning": 113,
+          "cache": {
+            "write": 0,
+            "read": 12928
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064607649,
+          "completed": 1791064609839
+        },
+        "finish": "tool-calls",
+        "id": "msg_103c50ba1001tVjqwsIJ9FSp5m",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-start",
+          "id": "prt_103c50e18001y4zp8cLOJw0zwZ",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50ba1001tVjqwsIJ9FSp5m"
+        },
+        {
+          "type": "reasoning",
+          "text": "Output matches diff -u body (headers differ as expected: a/b labels). Good.\n\nLet me finalize. Maybe add a doc.go? Not needed. Let me check go.mod content and list files.\n\nOne thing: `go vet` and gofmt passed. Good.\n\nLet me give a concise summary. Since user asked to set up, I'll show structure and usage. Keep it brief per instructions but this is a setup task, so a short summary is fine.\n\nShould I commit? No, user didn't ask.\n\nLet me verify final tree.",
+          "time": {
+            "start": 1791064608445,
+            "end": 1791064608963
+          },
+          "id": "prt_103c50ebd0012O34n1jkNN6R9p",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50ba1001tVjqwsIJ9FSp5m"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_AZMeGL4xZSzL9TlXDj7I3712",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cat go.mod && echo \"---\" && find . -name '*.go' -not -path './.git/*' | sort",
+              "workdir": "/work"
+            },
+            "output": "module example.com/unidiff\n\ngo 1.27.1\n---\n./cmd/unidiff/main.go\n./unidiff.go\n./unidiff_test.go\n",
+            "metadata": {
+              "output": "module example.com/unidiff\n\ngo 1.27.1\n---\n./cmd/unidiff/main.go\n./unidiff.go\n./unidiff_test.go\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cat go.mod && echo \"---\" && find . -name '*.go' -not -path './.git/*' | sort",
+            "time": {
+              "start": 1791064609114,
+              "end": 1791064609611
+            }
+          },
+          "id": "prt_103c510d0001WWtRgjO367yIzU",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50ba1001tVjqwsIJ9FSp5m"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13266,
+            "input": 143,
+            "output": 82,
+            "reasoning": 113,
+            "cache": {
+              "write": 0,
+              "read": 12928
+            }
+          },
+          "cost": 0.000177234,
+          "id": "prt_103c513f6001XSG2XzbdcTMR7u",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c50ba1001tVjqwsIJ9FSp5m"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103c459ae001XVdoPriSVW6yvA",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000177618,
+        "tokens": {
+          "total": 13481,
+          "input": 259,
+          "output": 166,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 13056
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064609860,
+          "completed": 1791064611854
+        },
+        "finish": "stop",
+        "id": "msg_103c51444001SM3lg1kgHF8LlG",
+        "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O"
+      },
+      "parts": [
+        {
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-start",
+          "id": "prt_103c516e3001XHfOJHFoU5Lf1I",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c51444001SM3lg1kgHF8LlG"
+        },
+        {
+          "type": "text",
+          "text": "Done. Module `example.com/unidiff` is set up with no external dependencies:\n\n- `unidiff.go` — `Unified(a, b string)` and `UnifiedContext(a, b string, context int)`, LCS-based diff rendered in GNU `diff -u` format (empty string when identical).\n- `cmd/unidiff/main.go` — CLI: `unidiff [-U n] old new`, exit 0 same / 1 different / 2 error.\n- `unidiff_test.go` — table tests covering change, insert, delete, zero-context, multi-hunk, and end-append cases.\n\n`gofmt`, `go vet ./...`, and `go test ./...` all pass; CLI output verified against `diff -u`.",
+          "time": {
+            "start": 1791064610741,
+            "end": 1791064611332
+          },
+          "id": "prt_103c517b5001AyPtqyyHyzHtz6",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c51444001SM3lg1kgHF8LlG"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "691bded17a213e6d3e78e95640b519828b271794",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13481,
+            "input": 259,
+            "output": 166,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 13056
+            }
+          },
+          "cost": 0.000177618,
+          "id": "prt_103c51afb001qq2kflFBV4uwYU",
+          "sessionID": "ses_efc3ba71dffe7IE0tIgB0x8c3O",
+          "messageID": "msg_103c51444001SM3lg1kgHF8LlG"
+        }
+      ]
+    }
+  ]
+}

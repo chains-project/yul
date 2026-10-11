@@ -1,0 +1,2451 @@
+{
+  "info": {
+    "id": "ses_efc234177ffex5kxqHlgWRSpq3",
+    "slug": "silent-island",
+    "projectID": "global",
+    "directory": "/work",
+    "path": "",
+    "title": "Python HTTP connection pooling and retries",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "version": "1.18.34",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0.00513438,
+    "tokens": {
+      "input": 5006,
+      "output": 4663,
+      "reasoning": 1430,
+      "cache": {
+        "read": 242560,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1791066160776,
+      "updated": 1791066228743
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1791066160876
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "deepseek",
+          "modelID": "deepseek-flash"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": ".gitignore",
+              "patch": "Index: .gitignore\n===================================================================\n--- .gitignore\t\n+++ .gitignore\t\n@@ -0,0 +1,13 @@\n+__pycache__/\n+*.py[cod]\n+*.egg-info/\n+.eggs/\n+build/\n+dist/\n+.venv/\n+venv/\n+.env\n+.pytest_cache/\n+.ruff_cache/\n+.coverage\n+htmlcov/\n",
+              "additions": 13,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": ".python-version",
+              "patch": "Index: .python-version\n===================================================================\n--- .python-version\t\n+++ .python-version\t\n@@ -0,0 +1,1 @@\n+3.13\n",
+              "additions": 1,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "README.md",
+              "patch": "Index: README.md\n===================================================================\n--- README.md\t\n+++ README.md\t\n@@ -0,0 +1,50 @@\n+# http-client\n+\n+Low-level HTTP client built on [urllib3](https://urllib3.readthedocs.io/), giving\n+direct control over connection pooling and automatic retries.\n+\n+## Setup\n+\n+```sh\n+uv sync\n+```\n+\n+## Usage\n+\n+```python\n+from http_client import HttpClient, PoolConfig, RetryPolicy\n+\n+pool = PoolConfig(\n+    num_pools=10,  # distinct host pools kept in the manager\n+    maxsize=20,  # max keep-alive connections per host\n+    block=True,  # wait instead of dropping when the pool is full\n+    retries=RetryPolicy(\n+        total=3,\n+        backoff_factor=0.5,\n+        status_forcelist=(429, 500, 502, 503, 504),\n+        allowed_methods=frozenset({\"GET\", \"PUT\", \"DELETE\"}),\n+    ),\n+)\n+\n+with HttpClient(pool=pool, timeout=10.0, verify=True) as client:\n+    response = client.get(\"https://example.com/\")\n+    print(response.status, response.data)\n+    response.release_conn()\n+```\n+\n+`RetryPolicy` covers connection, read and status failures; `PoolConfig` tunes\n+the number of pools, per-host connection limit and blocking behaviour.\n+\n+## CLI\n+\n+```sh\n+uv run http-client https://example.com/ --retries 5 --maxsize 20\n+```\n+\n+## Tests\n+\n+```sh\n+uv run pytest\n+uv run ruff check .\n+uv run ruff format --check .\n+```\n",
+              "additions": 50,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "pyproject.toml",
+              "patch": "Index: pyproject.toml\n===================================================================\n--- pyproject.toml\t\n+++ pyproject.toml\t\n@@ -0,0 +1,37 @@\n+[project]\n+name = \"http-client\"\n+version = \"0.1.0\"\n+description = \"Low-level HTTP client with connection pooling and automatic retries\"\n+readme = \"README.md\"\n+authors = [\n+    { name = \"benchmark\", email = \"benchmark@example.com\" }\n+]\n+requires-python = \">=3.10\"\n+dependencies = [\n+    \"urllib3>=2.2\",\n+]\n+\n+[project.scripts]\n+http-client = \"http_client.__main__:main\"\n+\n+[dependency-groups]\n+dev = [\n+    \"pytest>=8.0\",\n+    \"pytest-socket>=0.7\",\n+    \"ruff>=0.6\",\n+]\n+\n+[tool.pytest.ini_options]\n+addopts = \"-q --disable-socket\"\n+testpaths = [\"tests\"]\n+\n+[tool.ruff]\n+line-length = 100\n+target-version = \"py310\"\n+\n+[tool.ruff.lint]\n+select = [\"E\", \"F\", \"I\", \"UP\", \"B\"]\n+\n+[build-system]\n+requires = [\"uv_build>=0.12.23,<0.13.0\"]\n+build-backend = \"uv_build\"\n",
+              "additions": 37,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/http_client/__init__.py",
+              "patch": "Index: src/http_client/__init__.py\n===================================================================\n--- src/http_client/__init__.py\t\n+++ src/http_client/__init__.py\t\n@@ -0,0 +1,17 @@\n+from .client import (\n+    DEFAULT_RETRY_METHODS,\n+    DEFAULT_RETRY_STATUSES,\n+    HttpClient,\n+    PoolConfig,\n+    RetryPolicy,\n+)\n+\n+__all__ = [\n+    \"DEFAULT_RETRY_METHODS\",\n+    \"DEFAULT_RETRY_STATUSES\",\n+    \"HttpClient\",\n+    \"PoolConfig\",\n+    \"RetryPolicy\",\n+]\n+\n+__version__ = \"0.1.0\"\n",
+              "additions": 17,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/http_client/__main__.py",
+              "patch": "Index: src/http_client/__main__.py\n===================================================================\n--- src/http_client/__main__.py\t\n+++ src/http_client/__main__.py\t\n@@ -0,0 +1,54 @@\n+from __future__ import annotations\n+\n+import argparse\n+import sys\n+\n+from .client import HttpClient, PoolConfig, RetryPolicy\n+\n+\n+def build_parser() -> argparse.ArgumentParser:\n+    parser = argparse.ArgumentParser(\n+        prog=\"http-client\",\n+        description=\"Perform an HTTP request with pooled connections and retries.\",\n+    )\n+    parser.add_argument(\"url\", help=\"URL to request\")\n+    parser.add_argument(\"-X\", \"--method\", default=\"GET\", help=\"HTTP method (default: GET)\")\n+    parser.add_argument(\"-d\", \"--data\", default=None, help=\"Request body\")\n+    parser.add_argument(\n+        \"--retries\",\n+        type=int,\n+        default=3,\n+        help=\"Maximum number of retries (default: 3)\",\n+    )\n+    parser.add_argument(\n+        \"--maxsize\",\n+        type=int,\n+        default=10,\n+        help=\"Max pooled connections per host (default: 10)\",\n+    )\n+    parser.add_argument(\n+        \"--timeout\",\n+        type=float,\n+        default=10.0,\n+        help=\"Read/connect timeout in seconds (default: 10)\",\n+    )\n+    parser.add_argument(\"--insecure\", action=\"store_true\", help=\"Disable TLS verification\")\n+    return parser\n+\n+\n+def main(argv: list[str] | None = None) -> int:\n+    args = build_parser().parse_args(argv)\n+\n+    pool = PoolConfig(maxsize=args.maxsize, retries=RetryPolicy(total=args.retries))\n+    with HttpClient(pool=pool, timeout=args.timeout, verify=not args.insecure) as client:\n+        response = client.request(args.method, args.url, body=args.data)\n+        try:\n+            sys.stdout.buffer.write(response.data)\n+            sys.stdout.write(\"\\n\")\n+        finally:\n+            response.release_conn()\n+    return 0\n+\n+\n+if __name__ == \"__main__\":\n+    raise SystemExit(main())\n",
+              "additions": 54,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/http_client/client.py",
+              "patch": "Index: src/http_client/client.py\n===================================================================\n--- src/http_client/client.py\t\n+++ src/http_client/client.py\t\n@@ -0,0 +1,118 @@\n+from __future__ import annotations\n+\n+from collections.abc import Mapping, Sequence\n+from dataclasses import dataclass, field\n+from typing import Any\n+\n+import urllib3\n+from urllib3.util import Retry, Timeout\n+\n+DEFAULT_RETRY_STATUSES = (429, 500, 502, 503, 504)\n+DEFAULT_RETRY_METHODS = frozenset({\"HEAD\", \"GET\", \"PUT\", \"DELETE\", \"OPTIONS\", \"TRACE\"})\n+\n+\n+@dataclass(frozen=True)\n+class RetryPolicy:\n+    \"\"\"Declarative description of automatic retry behaviour.\"\"\"\n+\n+    total: int = 3\n+    connect: int | None = None\n+    read: int | None = None\n+    status: int | None = None\n+    backoff_factor: float = 0.5\n+    status_forcelist: Sequence[int] = DEFAULT_RETRY_STATUSES\n+    allowed_methods: frozenset[str] = DEFAULT_RETRY_METHODS\n+    respect_retry_after_header: bool = True\n+    raise_on_status: bool = False\n+\n+    def to_urllib3(self) -> Retry:\n+        return Retry(\n+            total=self.total,\n+            connect=self.connect,\n+            read=self.read,\n+            status=self.status,\n+            backoff_factor=self.backoff_factor,\n+            status_forcelist=list(self.status_forcelist),\n+            allowed_methods=set(self.allowed_methods),\n+            respect_retry_after_header=self.respect_retry_after_header,\n+            raise_on_status=self.raise_on_status,\n+        )\n+\n+\n+@dataclass(frozen=True)\n+class PoolConfig:\n+    \"\"\"Tuning knobs for the underlying connection pools.\"\"\"\n+\n+    num_pools: int = 10\n+    maxsize: int = 10\n+    block: bool = False\n+    retries: RetryPolicy = field(default_factory=RetryPolicy)\n+\n+\n+class HttpClient:\n+    \"\"\"Thin, reusable wrapper around :class:`urllib3.PoolManager`.\n+\n+    Keeps a pool of keep-alive connections per host and transparently\n+    retries idempotent requests on connection, read and status failures.\n+    \"\"\"\n+\n+    def __init__(\n+        self,\n+        *,\n+        pool: PoolConfig | None = None,\n+        timeout: Timeout | float | None = 10.0,\n+        verify: bool = True,\n+        ca_certs: str | None = None,\n+        headers: Mapping[str, str] | None = None,\n+    ) -> None:\n+        self.pool_config = pool or PoolConfig()\n+        self.timeout = timeout\n+        self.headers = dict(headers or {})\n+        self._manager = urllib3.PoolManager(\n+            num_pools=self.pool_config.num_pools,\n+            maxsize=self.pool_config.maxsize,\n+            block=self.pool_config.block,\n+            retries=self.pool_config.retries.to_urllib3(),\n+            timeout=timeout,\n+            cert_reqs=\"CERT_REQUIRED\" if verify else \"CERT_NONE\",\n+            ca_certs=ca_certs,\n+            headers=self.headers,\n+        )\n+\n+    def request(\n+        self,\n+        method: str,\n+        url: str,\n+        *,\n+        body: Any = None,\n+        fields: Mapping[str, Any] | None = None,\n+        headers: Mapping[str, str] | None = None,\n+        timeout: Timeout | float | None = None,\n+        retries: Retry | None = None,\n+        redirect: bool = True,\n+    ) -> urllib3.response.HTTPResponse:\n+        return self._manager.request(\n+            method,\n+            url,\n+            body=body,\n+            fields=fields,\n+            headers=dict(headers) if headers else None,\n+            timeout=timeout if timeout is not None else self.timeout,\n+            retries=retries,\n+            redirect=redirect,\n+        )\n+\n+    def get(self, url: str, **kwargs: Any) -> urllib3.response.HTTPResponse:\n+        return self.request(\"GET\", url, **kwargs)\n+\n+    def post(self, url: str, **kwargs: Any) -> urllib3.response.HTTPResponse:\n+        return self.request(\"POST\", url, **kwargs)\n+\n+    def close(self) -> None:\n+        self._manager.clear()\n+\n+    def __enter__(self) -> HttpClient:\n+        return self\n+\n+    def __exit__(self, *exc: object) -> None:\n+        self.close()\n",
+              "additions": 118,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "tests/test_client.py",
+              "patch": "Index: tests/test_client.py\n===================================================================\n--- tests/test_client.py\t\n+++ tests/test_client.py\t\n@@ -0,0 +1,88 @@\n+from __future__ import annotations\n+\n+import threading\n+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n+\n+import pytest\n+\n+from http_client import HttpClient, PoolConfig, RetryPolicy\n+\n+\n+def test_retry_policy_translates_to_urllib3() -> None:\n+    retry = RetryPolicy(\n+        total=5,\n+        backoff_factor=0.1,\n+        status_forcelist=(500, 503),\n+        allowed_methods=frozenset({\"GET\"}),\n+    ).to_urllib3()\n+\n+    assert retry.total == 5\n+    assert retry.backoff_factor == 0.1\n+    assert retry.status_forcelist == [500, 503]\n+    assert retry.allowed_methods == {\"GET\"}\n+\n+\n+def test_pool_config_defaults_are_retry_policy() -> None:\n+    assert isinstance(PoolConfig().retries, RetryPolicy)\n+\n+\n+def test_client_is_a_context_manager() -> None:\n+    with HttpClient() as client:\n+        assert client.pool_config.maxsize == 10\n+\n+\n+class _FlakyHandler(BaseHTTPRequestHandler):\n+    failures_remaining = 2\n+    hits = 0\n+    lock = threading.Lock()\n+\n+    def do_GET(self) -> None:  # noqa: N802\n+        with self.lock:\n+            type(self).hits += 1\n+            fail = type(self).failures_remaining > 0\n+            if fail:\n+                type(self).failures_remaining -= 1\n+        status = 500 if fail else 200\n+        self.send_response(status)\n+        self.end_headers()\n+        self.wfile.write(b\"ok\" if not fail else b\"boom\")\n+\n+    def log_message(self, *args: object) -> None:\n+        pass\n+\n+\n+@pytest.fixture\n+def flaky_server() -> str:\n+    _FlakyHandler.hits = 0\n+    _FlakyHandler.failures_remaining = 2\n+    server = ThreadingHTTPServer((\"127.0.0.1\", 0), _FlakyHandler)\n+    thread = threading.Thread(target=server.serve_forever, daemon=True)\n+    thread.start()\n+    try:\n+        host, port = server.server_address\n+        yield f\"http://{host}:{port}/\"\n+    finally:\n+        server.shutdown()\n+        server.server_close()\n+\n+\n+@pytest.mark.enable_socket\n+def test_retries_until_success(flaky_server: str) -> None:\n+    policy = RetryPolicy(total=3, backoff_factor=0.0)\n+    with HttpClient(pool=PoolConfig(retries=policy), timeout=2.0) as client:\n+        response = client.get(flaky_server)\n+        assert response.status == 200\n+        assert response.data == b\"ok\"\n+        response.release_conn()\n+\n+    assert _FlakyHandler.hits == 3\n+\n+\n+@pytest.mark.enable_socket\n+def test_no_retry_when_disabled(flaky_server: str) -> None:\n+    with HttpClient(pool=PoolConfig(retries=RetryPolicy(total=0)), timeout=2.0) as client:\n+        response = client.get(flaky_server)\n+        assert response.status == 500\n+        response.release_conn()\n+\n+    assert _FlakyHandler.hits == 1\n",
+              "additions": 88,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "uv.lock",
+              "patch": "Index: uv.lock\n===================================================================\n--- uv.lock\t\n+++ uv.lock\t\n@@ -0,0 +1,212 @@\n+version = 1\n+revision = 5\n+requires-python = \">=3.10\"\n+\n+[[package]]\n+name = \"colorama\"\n+version = \"0.4.6\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz\", hash = \"sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44\", size = 27697, upload-time = \"2022-10-25T02:36:22.414Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl\", hash = \"sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6\", size = 25335, upload-time = \"2022-10-25T02:36:20.889Z\" },\n+]\n+\n+[[package]]\n+name = \"exceptiongroup\"\n+version = \"1.3.1\"\n+source = { registry = \"https://pypi.org/simple\" }\n+dependencies = [\n+    { name = \"typing-extensions\" },\n+]\n+sdist = { url = \"https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz\", hash = \"sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219\", size = 30371, upload-time = \"2025-11-21T23:01:54.787Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl\", hash = \"sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598\", size = 16740, upload-time = \"2025-11-21T23:01:53.443Z\" },\n+]\n+\n+[[package]]\n+name = \"http-client\"\n+version = \"0.1.0\"\n+source = { editable = \".\" }\n+dependencies = [\n+    { name = \"urllib3\" },\n+]\n+\n+[package.dev-dependencies]\n+dev = [\n+    { name = \"pytest\" },\n+    { name = \"pytest-socket\" },\n+    { name = \"ruff\" },\n+]\n+\n+[package.metadata]\n+requires-dist = [{ name = \"urllib3\", specifier = \">=2.2\" }]\n+\n+[package.metadata.requires-dev]\n+dev = [\n+    { name = \"pytest\", specifier = \">=8.0\" },\n+    { name = \"pytest-socket\", specifier = \">=0.7\" },\n+    { name = \"ruff\", specifier = \">=0.6\" },\n+]\n+\n+[[package]]\n+name = \"iniconfig\"\n+version = \"2.3.0\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz\", hash = \"sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730\", size = 20503, upload-time = \"2025-10-18T21:55:43.219Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl\", hash = \"sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12\", size = 7484, upload-time = \"2025-10-18T21:55:41.639Z\" },\n+]\n+\n+[[package]]\n+name = \"packaging\"\n+version = \"26.3\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz\", hash = \"sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79\", size = 313412, upload-time = \"2026-08-04T18:15:28.737Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl\", hash = \"sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c\", size = 129956, upload-time = \"2026-08-04T18:15:27.159Z\" },\n+]\n+\n+[[package]]\n+name = \"pluggy\"\n+version = \"1.6.0\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz\", hash = \"sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3\", size = 69412, upload-time = \"2025-05-15T12:30:07.975Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl\", hash = \"sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746\", size = 20538, upload-time = \"2025-05-15T12:30:06.134Z\" },\n+]\n+\n+[[package]]\n+name = \"pygments\"\n+version = \"2.21.0\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz\", hash = \"sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c\", size = 5005329, upload-time = \"2026-08-17T08:02:48.824Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl\", hash = \"sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9\", size = 1250147, upload-time = \"2026-08-17T08:02:44.912Z\" },\n+]\n+\n+[[package]]\n+name = \"pytest\"\n+version = \"9.1.1\"\n+source = { registry = \"https://pypi.org/simple\" }\n+dependencies = [\n+    { name = \"colorama\", marker = \"sys_platform == 'win32'\" },\n+    { name = \"exceptiongroup\", marker = \"python_full_version < '3.11'\" },\n+    { name = \"iniconfig\" },\n+    { name = \"packaging\" },\n+    { name = \"pluggy\" },\n+    { name = \"pygments\" },\n+    { name = \"tomli\", marker = \"python_full_version < '3.11'\" },\n+]\n+sdist = { url = \"https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz\", hash = \"sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313\", size = 1636369, upload-time = \"2026-06-19T10:58:32.857Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl\", hash = \"sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c\", size = 386536, upload-time = \"2026-06-19T10:58:31.347Z\" },\n+]\n+\n+[[package]]\n+name = \"pytest-socket\"\n+version = \"0.8.1\"\n+source = { registry = \"https://pypi.org/simple\" }\n+dependencies = [\n+    { name = \"pytest\" },\n+]\n+sdist = { url = \"https://files.pythonhosted.org/packages/ba/ce/4ef7b049852c95a8727b4a7e6496f762df1ac0b47bc0320d10293f5e95ec/pytest_socket-0.8.1.tar.gz\", hash = \"sha256:2f57787914ad2e1308d09ce141b95c3e55741fbb4fb7b7556593a6b063e0c9c7\", size = 17313, upload-time = \"2026-08-19T15:16:25.653Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/87/ef/ab507f117b3d19b54e3c9c632a99c28c3b284562ec6e02e274581d530d92/pytest_socket-0.8.1-py3-none-any.whl\", hash = \"sha256:f9846bed1dcd96eed459e5e14795bbaf96715cf4e827891fe70773817ecb8ed4\", size = 8751, upload-time = \"2026-08-19T15:16:24.426Z\" },\n+]\n+\n+[[package]]\n+name = \"ruff\"\n+version = \"0.16.10\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/c4/49/23802c45f093eb14bde54b141d2b2f058edfa63a06db7beed047308cc08f/ruff-0.16.10.tar.gz\", hash = \"sha256:eff4728c4eaae93f0955cd264d24b2ab348e74bf59986ccf282ba6dc16b3b017\", size = 4958724, upload-time = \"2026-10-01T18:03:21.697Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/2f/21/ebce22e1d90cdb2cd691026b9c6e9bec6499f0b396089481755b5d49efff/ruff-0.16.10-py3-none-linux_armv6l.whl\", hash = \"sha256:488b0fe3f3574210e5cf80d9f59b9e3ab17a127a8155de3f307b392589cfb511\", size = 10095557, upload-time = \"2026-10-01T18:02:36.072Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/cb/98/a54de85876a8b2612bfa0d84c7b9abfb39c6a3354aee7800b09c1649b9e3/ruff-0.16.10-py3-none-macosx_10_12_x86_64.whl\", hash = \"sha256:e748ff95c934c4e978783b8e687bc174e7bd84e8ad24e3243e1ecfcda5e0282d\", size = 10340577, upload-time = \"2026-10-01T18:02:39.258Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/9f/16/1a5a4a2657effe4806110f2b907313802f1367fcdbb29e8122766e407fab/ruff-0.16.10-py3-none-macosx_11_0_arm64.whl\", hash = \"sha256:3031a4a2e8e7b8a46f70be45f198c35a11ece509a94b80334d8d397a33c67550\", size = 9774282, upload-time = \"2026-10-01T18:02:41.79Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/6e/fb/470085af734da396e68cd80fb0a3e7c109a459716ae59588c0f6fab8a17d/ruff-0.16.10-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl\", hash = \"sha256:494401c86df4c4c25f69b9419605d944467ee98c42fb6ad405ef4fa40b8fb67d\", size = 9920895, upload-time = \"2026-10-01T18:02:44.458Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/57/de/f10cffe4f88a37ea6615ec460f01bf76f0bc1477737a35d9ee61a630a78b/ruff-0.16.10-py3-none-manylinux_2_17_armv7l.manylinux2014_armv7l.whl\", hash = \"sha256:d203abc0ff2b773ee33d00ab8df0bb67046fbc7c07b119332f08b9b345cf8221\", size = 9902707, upload-time = \"2026-10-01T18:02:47.041Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/ff/44/3fdcedf83ae60ef837dd239170e480dce606a9142cfa2db911afdf855fd9/ruff-0.16.10-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl\", hash = \"sha256:bd83d1235a5258d318477bc5b576303974cbdef5df0c01a1bff14efcc23bd12a\", size = 10619287, upload-time = \"2026-10-01T18:02:49.485Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/c1/62/02e76a5574002153618eafbb70e159468addc72a5d2c488e65cbb4639d2d/ruff-0.16.10-py3-none-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl\", hash = \"sha256:bc2610fb269fa56dd8a68669ae470fa6272902668c0fc2ebc3aa112b2633d5b8\", size = 11339942, upload-time = \"2026-10-01T18:02:52.008Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/6b/c4/cde27d47ad8d4126c587e608c67c46e7feac11763f606d261a1bc8a489e6/ruff-0.16.10-py3-none-manylinux_2_17_s390x.manylinux2014_s390x.whl\", hash = \"sha256:3e70175e29cc94c26ea296c80e470180b744b7419026898e58f520c6ab32578e\", size = 10934316, upload-time = \"2026-10-01T18:02:54.811Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/e4/03/17234145f302a645a123e8c3bb2411ecf4669fbc350de3b0d803230a1729/ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl\", hash = \"sha256:f33f43a864a8483eebd160e713336c8bab02c934feaff0a33cf5ccb41546d09a\", size = 10387968, upload-time = \"2026-10-01T18:02:57.497Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/71/29/2493af60240ee7644b38a4b821f5f9c3b5a4fa3178770fe1d0c685217395/ruff-0.16.10-py3-none-manylinux_2_31_riscv64.whl\", hash = \"sha256:1dfc6f0088149fb6a362c1c446bcbb3fd2157b3852fe2fa68409276eab9ad9b3\", size = 10537906, upload-time = \"2026-10-01T18:03:00.006Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/2e/9a/f56b28f3b143bb9e518c34fb89ab191b626bca8b70dbf8af0d2e2d473572/ruff-0.16.10-py3-none-musllinux_1_2_aarch64.whl\", hash = \"sha256:6553498afc35f580f036030795810b9e6bcea31604b0fd9e8d352795473042e3\", size = 10012938, upload-time = \"2026-10-01T18:03:03.006Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/c2/c4/fca37362848ea4d4d80712df13632e645e7c7cfb1bdedf140699ac7a090b/ruff-0.16.10-py3-none-musllinux_1_2_armv7l.whl\", hash = \"sha256:a3b8471dea115d37f123882be852bed13403746d3a76c11de4a19ec5f9ff5a03\", size = 9897945, upload-time = \"2026-10-01T18:03:05.818Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/7d/c7/e0bc57664d6e0c61fd22f620af260fe9662d7e1ddb320ea7f160e76ef165/ruff-0.16.10-py3-none-musllinux_1_2_i686.whl\", hash = \"sha256:92e59a70bcbd9d3a5483656da906ec28edfdacfce00afd99edb8b4e9d15644be\", size = 10333134, upload-time = \"2026-10-01T18:03:08.25Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/21/aa/5c9f3b68737c0e4a33a1db5dfab44f7b786d96ca91a7233112ddab1e6dc2/ruff-0.16.10-py3-none-musllinux_1_2_x86_64.whl\", hash = \"sha256:7ae7375f803b5520dc9f546bed7e3a0acb70b91812e9bb4b19927de22f25b77d\", size = 10741702, upload-time = \"2026-10-01T18:03:10.775Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/78/fa/0f9c2020dc316c53d983be011720b8157cc052b97e3f4dfa7db6d0f880a6/ruff-0.16.10-py3-none-win32.whl\", hash = \"sha256:2a12e01cb9156c10c466f63b46eaae5ecea28dfbd21b5836353ae498e7d1349a\", size = 10139176, upload-time = \"2026-10-01T18:03:13.267Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/99/29/cfb0df9448d4d4ad48c2de029ada9ebd71baa6da983a6c77ee6c6cd0fe82/ruff-0.16.10-py3-none-win_amd64.whl\", hash = \"sha256:97f2015c92aa97105b0eab19eb5d224884399281cfc5da86a92db4ab5e7fb2ca\", size = 10584734, upload-time = \"2026-10-01T18:03:16.006Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/fc/05/c16957eb287c3fc062e032619a25868d93d408a844b725bcf514f7a378ff/ruff-0.16.10-py3-none-win_arm64.whl\", hash = \"sha256:25a65fe998c4e6861ec079ada5826a2fc605e6cbccbe9dcd7fac1f54e791621b\", size = 10366440, upload-time = \"2026-10-01T18:03:19.04Z\" },\n+]\n+\n+[[package]]\n+name = \"tomli\"\n+version = \"2.4.1\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/22/de/48c59722572767841493b26183a0d1cc411d54fd759c5607c4590b6563a6/tomli-2.4.1.tar.gz\", hash = \"sha256:7c7e1a961a0b2f2472c1ac5b69affa0ae1132c39adcb67aba98568702b9cc23f\", size = 17543, upload-time = \"2026-03-25T20:22:03.828Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/f4/11/db3d5885d8528263d8adc260bb2d28ebf1270b96e98f0e0268d32b8d9900/tomli-2.4.1-cp311-cp311-macosx_10_9_x86_64.whl\", hash = \"sha256:f8f0fc26ec2cc2b965b7a3b87cd19c5c6b8c5e5f436b984e85f486d652285c30\", size = 154704, upload-time = \"2026-03-25T20:21:10.473Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/6d/f7/675db52c7e46064a9aa928885a9b20f4124ecb9bc2e1ce74c9106648d202/tomli-2.4.1-cp311-cp311-macosx_11_0_arm64.whl\", hash = \"sha256:4ab97e64ccda8756376892c53a72bd1f964e519c77236368527f758fbc36a53a\", size = 149454, upload-time = \"2026-03-25T20:21:12.036Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/61/71/81c50943cf953efa35bce7646caab3cf457a7d8c030b27cfb40d7235f9ee/tomli-2.4.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl\", hash = \"sha256:96481a5786729fd470164b47cdb3e0e58062a496f455ee41b4403be77cb5a076\", size = 237561, upload-time = \"2026-03-25T20:21:13.098Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/48/c1/f41d9cb618acccca7df82aaf682f9b49013c9397212cb9f53219e3abac37/tomli-2.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl\", hash = \"sha256:5a881ab208c0baf688221f8cecc5401bd291d67e38a1ac884d6736cbcd8247e9\", size = 243824, upload-time = \"2026-03-25T20:21:14.569Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/22/e4/5a816ecdd1f8ca51fb756ef684b90f2780afc52fc67f987e3c61d800a46d/tomli-2.4.1-cp311-cp311-musllinux_1_2_aarch64.whl\", hash = \"sha256:47149d5bd38761ac8be13a84864bf0b7b70bc051806bc3669ab1cbc56216b23c\", size = 242227, upload-time = \"2026-03-25T20:21:15.712Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/6b/49/2b2a0ef529aa6eec245d25f0c703e020a73955ad7edf73e7f54ddc608aa5/tomli-2.4.1-cp311-cp311-musllinux_1_2_x86_64.whl\", hash = \"sha256:ec9bfaf3ad2df51ace80688143a6a4ebc09a248f6ff781a9945e51937008fcbc\", size = 247859, upload-time = \"2026-03-25T20:21:17.001Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/83/bd/6c1a630eaca337e1e78c5903104f831bda934c426f9231429396ce3c3467/tomli-2.4.1-cp311-cp311-win32.whl\", hash = \"sha256:ff2983983d34813c1aeb0fa89091e76c3a22889ee83ab27c5eeb45100560c049\", size = 97204, upload-time = \"2026-03-25T20:21:18.079Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/42/59/71461df1a885647e10b6bb7802d0b8e66480c61f3f43079e0dcd315b3954/tomli-2.4.1-cp311-cp311-win_amd64.whl\", hash = \"sha256:5ee18d9ebdb417e384b58fe414e8d6af9f4e7a0ae761519fb50f721de398dd4e\", size = 108084, upload-time = \"2026-03-25T20:21:18.978Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/b8/83/dceca96142499c069475b790e7913b1044c1a4337e700751f48ed723f883/tomli-2.4.1-cp311-cp311-win_arm64.whl\", hash = \"sha256:c2541745709bad0264b7d4705ad453b76ccd191e64aa6f0fc66b69a293a45ece\", size = 95285, upload-time = \"2026-03-25T20:21:20.309Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/c1/ba/42f134a3fe2b370f555f44b1d72feebb94debcab01676bf918d0cb70e9aa/tomli-2.4.1-cp312-cp312-macosx_10_13_x86_64.whl\", hash = \"sha256:c742f741d58a28940ce01d58f0ab2ea3ced8b12402f162f4d534dfe18ba1cd6a\", size = 155924, upload-time = \"2026-03-25T20:21:21.626Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/dc/c7/62d7a17c26487ade21c5422b646110f2162f1fcc95980ef7f63e73c68f14/tomli-2.4.1-cp312-cp312-macosx_11_0_arm64.whl\", hash = \"sha256:7f86fd587c4ed9dd76f318225e7d9b29cfc5a9d43de44e5754db8d1128487085\", size = 150018, upload-time = \"2026-03-25T20:21:23.002Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/5c/05/79d13d7c15f13bdef410bdd49a6485b1c37d28968314eabee452c22a7fda/tomli-2.4.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl\", hash = \"sha256:ff18e6a727ee0ab0388507b89d1bc6a22b138d1e2fa56d1ad494586d61d2eae9\", size = 244948, upload-time = \"2026-03-25T20:21:24.04Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/10/90/d62ce007a1c80d0b2c93e02cab211224756240884751b94ca72df8a875ca/tomli-2.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl\", hash = \"sha256:136443dbd7e1dee43c68ac2694fde36b2849865fa258d39bf822c10e8068eac5\", size = 253341, upload-time = \"2026-03-25T20:21:25.177Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/1a/7e/caf6496d60152ad4ed09282c1885cca4eea150bfd007da84aea07bcc0a3e/tomli-2.4.1-cp312-cp312-musllinux_1_2_aarch64.whl\", hash = \"sha256:5e262d41726bc187e69af7825504c933b6794dc3fbd5945e41a79bb14c31f585\", size = 248159, upload-time = \"2026-03-25T20:21:26.364Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/99/e7/c6f69c3120de34bbd882c6fba7975f3d7a746e9218e56ab46a1bc4b42552/tomli-2.4.1-cp312-cp312-musllinux_1_2_x86_64.whl\", hash = \"sha256:5cb41aa38891e073ee49d55fbc7839cfdb2bc0e600add13874d048c94aadddd1\", size = 253290, upload-time = \"2026-03-25T20:21:27.46Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/d6/2f/4a3c322f22c5c66c4b836ec58211641a4067364f5dcdd7b974b4c5da300c/tomli-2.4.1-cp312-cp312-win32.whl\", hash = \"sha256:da25dc3563bff5965356133435b757a795a17b17d01dbc0f42fb32447ddfd917\", size = 98141, upload-time = \"2026-03-25T20:21:28.492Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/24/22/4daacd05391b92c55759d55eaee21e1dfaea86ce5c571f10083360adf534/tomli-2.4.1-cp312-cp312-win_amd64.whl\", hash = \"sha256:52c8ef851d9a240f11a88c003eacb03c31fc1c9c4ec64a99a0f922b93874fda9\", size = 108847, upload-time = \"2026-03-25T20:21:29.386Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/68/fd/70e768887666ddd9e9f5d85129e84910f2db2796f9096aa02b721a53098d/tomli-2.4.1-cp312-cp312-win_arm64.whl\", hash = \"sha256:f758f1b9299d059cc3f6546ae2af89670cb1c4d48ea29c3cacc4fe7de3058257\", size = 95088, upload-time = \"2026-03-25T20:21:30.677Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/07/06/b823a7e818c756d9a7123ba2cda7d07bc2dd32835648d1a7b7b7a05d848d/tomli-2.4.1-cp313-cp313-macosx_10_13_x86_64.whl\", hash = \"sha256:36d2bd2ad5fb9eaddba5226aa02c8ec3fa4f192631e347b3ed28186d43be6b54\", size = 155866, upload-time = \"2026-03-25T20:21:31.65Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/14/6f/12645cf7f08e1a20c7eb8c297c6f11d31c1b50f316a7e7e1e1de6e2e7b7e/tomli-2.4.1-cp313-cp313-macosx_11_0_arm64.whl\", hash = \"sha256:eb0dc4e38e6a1fd579e5d50369aa2e10acfc9cace504579b2faabb478e76941a\", size = 149887, upload-time = \"2026-03-25T20:21:33.028Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/5c/e0/90637574e5e7212c09099c67ad349b04ec4d6020324539297b634a0192b0/tomli-2.4.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl\", hash = \"sha256:c7f2c7f2b9ca6bdeef8f0fa897f8e05085923eb091721675170254cbc5b02897\", size = 243704, upload-time = \"2026-03-25T20:21:34.51Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/10/8f/d3ddb16c5a4befdf31a23307f72828686ab2096f068eaf56631e136c1fdd/tomli-2.4.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl\", hash = \"sha256:f3c6818a1a86dd6dca7ddcaaf76947d5ba31aecc28cb1b67009a5877c9a64f3f\", size = 251628, upload-time = \"2026-03-25T20:21:36.012Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/e3/f1/dbeeb9116715abee2485bf0a12d07a8f31af94d71608c171c45f64c0469d/tomli-2.4.1-cp313-cp313-musllinux_1_2_aarch64.whl\", hash = \"sha256:d312ef37c91508b0ab2cee7da26ec0b3ed2f03ce12bd87a588d771ae15dcf82d\", size = 247180, upload-time = \"2026-03-25T20:21:37.136Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/d3/74/16336ffd19ed4da28a70959f92f506233bd7cfc2332b20bdb01591e8b1d1/tomli-2.4.1-cp313-cp313-musllinux_1_2_x86_64.whl\", hash = \"sha256:51529d40e3ca50046d7606fa99ce3956a617f9b36380da3b7f0dd3dd28e68cb5\", size = 251674, upload-time = \"2026-03-25T20:21:38.298Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/16/f9/229fa3434c590ddf6c0aa9af64d3af4b752540686cace29e6281e3458469/tomli-2.4.1-cp313-cp313-win32.whl\", hash = \"sha256:2190f2e9dd7508d2a90ded5ed369255980a1bcdd58e52f7fe24b8162bf9fedbd\", size = 97976, upload-time = \"2026-03-25T20:21:39.316Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/6a/1e/71dfd96bcc1c775420cb8befe7a9d35f2e5b1309798f009dca17b7708c1e/tomli-2.4.1-cp313-cp313-win_amd64.whl\", hash = \"sha256:8d65a2fbf9d2f8352685bc1364177ee3923d6baf5e7f43ea4959d7d8bc326a36\", size = 108755, upload-time = \"2026-03-25T20:21:40.248Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/83/7a/d34f422a021d62420b78f5c538e5b102f62bea616d1d75a13f0a88acb04a/tomli-2.4.1-cp313-cp313-win_arm64.whl\", hash = \"sha256:4b605484e43cdc43f0954ddae319fb75f04cc10dd80d830540060ee7cd0243cd\", size = 95265, upload-time = \"2026-03-25T20:21:41.219Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/3c/fb/9a5c8d27dbab540869f7c1f8eb0abb3244189ce780ba9cd73f3770662072/tomli-2.4.1-cp314-cp314-macosx_10_15_x86_64.whl\", hash = \"sha256:fd0409a3653af6c147209d267a0e4243f0ae46b011aa978b1080359fddc9b6cf\", size = 155726, upload-time = \"2026-03-25T20:21:42.23Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/62/05/d2f816630cc771ad836af54f5001f47a6f611d2d39535364f148b6a92d6b/tomli-2.4.1-cp314-cp314-macosx_11_0_arm64.whl\", hash = \"sha256:a120733b01c45e9a0c34aeef92bf0cf1d56cfe81ed9d47d562f9ed591a9828ac\", size = 149859, upload-time = \"2026-03-25T20:21:43.386Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/ce/48/66341bdb858ad9bd0ceab5a86f90eddab127cf8b046418009f2125630ecb/tomli-2.4.1-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl\", hash = \"sha256:559db847dc486944896521f68d8190be1c9e719fced785720d2216fe7022b662\", size = 244713, upload-time = \"2026-03-25T20:21:44.474Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/df/6d/c5fad00d82b3c7a3ab6189bd4b10e60466f22cfe8a08a9394185c8a8111c/tomli-2.4.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl\", hash = \"sha256:01f520d4f53ef97964a240a035ec2a869fe1a37dde002b57ebc4417a27ccd853\", size = 252084, upload-time = \"2026-03-25T20:21:45.62Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/00/71/3a69e86f3eafe8c7a59d008d245888051005bd657760e96d5fbfb0b740c2/tomli-2.4.1-cp314-cp314-musllinux_1_2_aarch64.whl\", hash = \"sha256:7f94b27a62cfad8496c8d2513e1a222dd446f095fca8987fceef261225538a15\", size = 247973, upload-time = \"2026-03-25T20:21:46.937Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/67/50/361e986652847fec4bd5e4a0208752fbe64689c603c7ae5ea7cb16b1c0ca/tomli-2.4.1-cp314-cp314-musllinux_1_2_x86_64.whl\", hash = \"sha256:ede3e6487c5ef5d28634ba3f31f989030ad6af71edfb0055cbbd14189ff240ba\", size = 256223, upload-time = \"2026-03-25T20:21:48.467Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/8c/9a/b4173689a9203472e5467217e0154b00e260621caa227b6fa01feab16998/tomli-2.4.1-cp314-cp314-win32.whl\", hash = \"sha256:3d48a93ee1c9b79c04bb38772ee1b64dcf18ff43085896ea460ca8dec96f35f6\", size = 98973, upload-time = \"2026-03-25T20:21:49.526Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/14/58/640ac93bf230cd27d002462c9af0d837779f8773bc03dee06b5835208214/tomli-2.4.1-cp314-cp314-win_amd64.whl\", hash = \"sha256:88dceee75c2c63af144e456745e10101eb67361050196b0b6af5d717254dddf7\", size = 109082, upload-time = \"2026-03-25T20:21:50.506Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/d5/2f/702d5e05b227401c1068f0d386d79a589bb12bf64c3d2c72ce0631e3bc49/tomli-2.4.1-cp314-cp314-win_arm64.whl\", hash = \"sha256:b8c198f8c1805dc42708689ed6864951fd2494f924149d3e4bce7710f8eb5232\", size = 96490, upload-time = \"2026-03-25T20:21:51.474Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/45/4b/b877b05c8ba62927d9865dd980e34a755de541eb65fffba52b4cc495d4d2/tomli-2.4.1-cp314-cp314t-macosx_10_15_x86_64.whl\", hash = \"sha256:d4d8fe59808a54658fcc0160ecfb1b30f9089906c50b23bcb4c69eddc19ec2b4\", size = 164263, upload-time = \"2026-03-25T20:21:52.543Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/24/79/6ab420d37a270b89f7195dec5448f79400d9e9c1826df982f3f8e97b24fd/tomli-2.4.1-cp314-cp314t-macosx_11_0_arm64.whl\", hash = \"sha256:7008df2e7655c495dd12d2a4ad038ff878d4ca4b81fccaf82b714e07eae4402c\", size = 160736, upload-time = \"2026-03-25T20:21:53.674Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/02/e0/3630057d8eb170310785723ed5adcdfb7d50cb7e6455f85ba8a3deed642b/tomli-2.4.1-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl\", hash = \"sha256:1d8591993e228b0c930c4bb0db464bdad97b3289fb981255d6c9a41aedc84b2d\", size = 270717, upload-time = \"2026-03-25T20:21:55.129Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/7a/b4/1613716072e544d1a7891f548d8f9ec6ce2faf42ca65acae01d76ea06bb0/tomli-2.4.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl\", hash = \"sha256:734e20b57ba95624ecf1841e72b53f6e186355e216e5412de414e3c51e5e3c41\", size = 278461, upload-time = \"2026-03-25T20:21:56.228Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/05/38/30f541baf6a3f6df77b3df16b01ba319221389e2da59427e221ef417ac0c/tomli-2.4.1-cp314-cp314t-musllinux_1_2_aarch64.whl\", hash = \"sha256:8a650c2dbafa08d42e51ba0b62740dae4ecb9338eefa093aa5c78ceb546fcd5c\", size = 274855, upload-time = \"2026-03-25T20:21:57.653Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/77/a3/ec9dd4fd2c38e98de34223b995a3b34813e6bdadf86c75314c928350ed14/tomli-2.4.1-cp314-cp314t-musllinux_1_2_x86_64.whl\", hash = \"sha256:504aa796fe0569bb43171066009ead363de03675276d2d121ac1a4572397870f\", size = 283144, upload-time = \"2026-03-25T20:21:59.089Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/ef/be/605a6261cac79fba2ec0c9827e986e00323a1945700969b8ee0b30d85453/tomli-2.4.1-cp314-cp314t-win32.whl\", hash = \"sha256:b1d22e6e9387bf4739fbe23bfa80e93f6b0373a7f1b96c6227c32bef95a4d7a8\", size = 108683, upload-time = \"2026-03-25T20:22:00.214Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/12/64/da524626d3b9cc40c168a13da8335fe1c51be12c0a63685cc6db7308daae/tomli-2.4.1-cp314-cp314t-win_amd64.whl\", hash = \"sha256:2c1c351919aca02858f740c6d33adea0c5deea37f9ecca1cc1ef9e884a619d26\", size = 121196, upload-time = \"2026-03-25T20:22:01.169Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/5a/cd/e80b62269fc78fc36c9af5a6b89c835baa8af28ff5ad28c7028d60860320/tomli-2.4.1-cp314-cp314t-win_arm64.whl\", hash = \"sha256:eab21f45c7f66c13f2a9e0e1535309cee140182a9cdae1e041d02e47291e8396\", size = 100393, upload-time = \"2026-03-25T20:22:02.137Z\" },\n+    { url = \"https://files.pythonhosted.org/packages/7b/61/cceae43728b7de99d9b847560c262873a1f6c98202171fd5ed62640b494b/tomli-2.4.1-py3-none-any.whl\", hash = \"sha256:0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe\", size = 14583, upload-time = \"2026-03-25T20:22:03.012Z\" },\n+]\n+\n+[[package]]\n+name = \"typing-extensions\"\n+version = \"4.16.0\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz\", hash = \"sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5\", size = 113555, upload-time = \"2026-07-02T08:40:05.92Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl\", hash = \"sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8\", size = 45571, upload-time = \"2026-07-02T08:40:04.659Z\" },\n+]\n+\n+[[package]]\n+name = \"urllib3\"\n+version = \"2.8.0\"\n+source = { registry = \"https://pypi.org/simple\" }\n+sdist = { url = \"https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz\", hash = \"sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63\", size = 458972, upload-time = \"2026-09-15T19:29:36.253Z\" }\n+wheels = [\n+    { url = \"https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl\", hash = \"sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3\", size = 135717, upload-time = \"2026-09-15T19:29:34.577Z\" },\n+]\n",
+              "additions": 212,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Set up a new Python project for a script that needs low-level control over HTTP connections, including connection pooling and automatic retries.\"",
+          "id": "prt_103dcbf19001vi7Y3VfXoSbySl",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcbeec001UHuZstnB5gSsFJ"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000147954,
+        "tokens": {
+          "total": 7516,
+          "input": 183,
+          "output": 55,
+          "reasoning": 110,
+          "cache": {
+            "write": 0,
+            "read": 7168
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066161844,
+          "completed": 1791066164947
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dcc2b40015icyXrgtVR3k1r",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103dcc8ad001BPaKgY4NKOUeka",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcc2b40015icyXrgtVR3k1r"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants to set up a new Python project for low-level HTTP control with connection pooling and automatic retries. Let me first look at the current working directory to understand the context.\n\nThe focus is on setting up a project. Low-level control over HTTP connections, connection pooling, automatic retries. This is a task where I should first understand the environment. Let me look at the directory.\n\nActually, this seems straightforward: use `urllib3` which provides connection pooling and retries at a low level. Let me check the workspace first.",
+          "time": {
+            "start": 1791066163484,
+            "end": 1791066164009
+          },
+          "id": "prt_103dcc91c001UW1IPLQT20TfsT",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcc2b40015icyXrgtVR3k1r"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_i7inHsnvINo6rmklzpMO9345",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la && git status && git log --oneline -5 2>/dev/null"
+            },
+            "output": "total 8\ndrwxr-xr-x 5 root root     160 Oct  3 22:22 .\ndrwxr-xr-x 1 root root    4096 Oct  3 22:22 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:22 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 22:22 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 22:22 opencode.json\nfatal: detected dubious ownership in repository at '/work'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory /work\n",
+            "metadata": {
+              "output": "total 8\ndrwxr-xr-x 5 root root     160 Oct  3 22:22 .\ndrwxr-xr-x 1 root root    4096 Oct  3 22:22 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:22 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 22:22 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 22:22 opencode.json\nfatal: detected dubious ownership in repository at '/work'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory /work\n",
+              "exit": 128,
+              "truncated": false
+            },
+            "title": "ls -la && git status && git log --oneline -5 2>/dev/null",
+            "time": {
+              "start": 1791066164121,
+              "end": 1791066164486
+            }
+          },
+          "id": "prt_103dccb31001gULuVJMIHM9Ckx",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcc2b40015icyXrgtVR3k1r"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7516,
+            "input": 183,
+            "output": 55,
+            "reasoning": 110,
+            "cache": {
+              "write": 0,
+              "read": 7168
+            }
+          },
+          "cost": 0.000147954,
+          "id": "prt_103dcce30001c3ZcK7VyHU86eV",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcc2b40015icyXrgtVR3k1r"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000127572,
+        "tokens": {
+          "total": 7793,
+          "input": 258,
+          "output": 103,
+          "reasoning": 8,
+          "cache": {
+            "write": 0,
+            "read": 7424
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066164961,
+          "completed": 1791066166581
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dccee1001xkYLHS7Gmwjfqv",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103dcd11f001Ch3dti7alsyG1A",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dccee1001xkYLHS7Gmwjfqv"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me look at the existing files.",
+          "time": {
+            "start": 1791066165640,
+            "end": 1791066165824
+          },
+          "id": "prt_103dcd188001M0Pg4Oy54dRRLo",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dccee1001xkYLHS7Gmwjfqv"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_00_ZgpDw2NcClMZcPmdHWjk2066",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/opencode.json"
+            },
+            "output": "<path>/work/opencode.json</path>\n<type>file</type>\n<content>\n1: {\n2:   \"$schema\": \"https://opencode.ai/config.json\"\n3: }\n\n(End of file - total 3 lines)\n</content>",
+            "metadata": {
+              "preview": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/opencode.json",
+                "text": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}",
+                "lineStart": 1,
+                "lineEnd": 3,
+                "totalLines": 3,
+                "truncated": false
+              }
+            },
+            "title": "opencode.json",
+            "time": {
+              "start": 1791066165903,
+              "end": 1791066166166
+            }
+          },
+          "id": "prt_103dcd24b001H4M6TfbZpFoDDm",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dccee1001xkYLHS7Gmwjfqv"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_01_hPZILu1Iv2EYVBCoVRbV4088",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la /work/.opencode && python3 --version && pip3 --version 2>/dev/null; which uv poetry pipenv 2>/dev/null"
+            },
+            "output": "total 24\ndrwxr-xr-x  7 root root      224 Oct  3 22:22 .\ndrwxr-xr-x  5 root root      160 Oct  3 22:22 ..\n-rw-r--r--  1  501 dialout    63 Oct  3 22:22 .gitignore\ndrwxr-xr-x 30  501 dialout   960 Oct  3 22:22 node_modules\n-rw-r--r--  1  501 dialout 14634 Oct  3 22:22 package-lock.json\n-rw-r--r--  1  501 dialout    65 Oct  3 22:22 package.json\ndrwxr-xr-x  3  501 dialout    96 Oct  3 22:22 plugins\nPython 3.13.5\npip 25.1.1 from /usr/lib/python3/dist-packages/pip (python 3.13)\n/usr/local/bin/uv\n",
+            "metadata": {
+              "output": "total 24\ndrwxr-xr-x  7 root root      224 Oct  3 22:22 .\ndrwxr-xr-x  5 root root      160 Oct  3 22:22 ..\n-rw-r--r--  1  501 dialout    63 Oct  3 22:22 .gitignore\ndrwxr-xr-x 30  501 dialout   960 Oct  3 22:22 node_modules\n-rw-r--r--  1  501 dialout 14634 Oct  3 22:22 package-lock.json\n-rw-r--r--  1  501 dialout    65 Oct  3 22:22 package.json\ndrwxr-xr-x  3  501 dialout    96 Oct  3 22:22 plugins\nPython 3.13.5\npip 25.1.1 from /usr/lib/python3/dist-packages/pip (python 3.13)\n/usr/local/bin/uv\n",
+              "exit": 1,
+              "truncated": false
+            },
+            "title": "ls -la /work/.opencode && python3 --version && pip3 --version 2>/dev/null; which uv poetry pipenv 2>/dev/null",
+            "time": {
+              "start": 1791066166094,
+              "end": 1791066166422
+            }
+          },
+          "id": "prt_103dcd2a1001Y0MeWgvkZFNw1t",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dccee1001xkYLHS7Gmwjfqv"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7793,
+            "input": 258,
+            "output": 103,
+            "reasoning": 8,
+            "cache": {
+              "write": 0,
+              "read": 7424
+            }
+          },
+          "cost": 0.000127572,
+          "id": "prt_103dcd4e6001fIqF9wuEvKOSFV",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dccee1001xkYLHS7Gmwjfqv"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00016659,
+        "tokens": {
+          "total": 8214,
+          "input": 393,
+          "output": 80,
+          "reasoning": 61,
+          "cache": {
+            "write": 0,
+            "read": 7680
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066166589,
+          "completed": 1791066168694
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dcd53d001jtkYAU6oB4wAUW",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103dcd771001UgP4fioRH420R5",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcd53d001jtkYAU6oB4wAUW"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants a new Python project setup for low-level HTTP control with connection pooling and automatic retries. This is clearly a `urllib3` use case. Let me set up a proper Python project using uv (available). \n\nLet me check the .gitignore and package.json to understand conventions.",
+          "time": {
+            "start": 1791066167677,
+            "end": 1791066168016
+          },
+          "id": "prt_103dcd97d00134jenfL9rCNZIw",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcd53d001jtkYAU6oB4wAUW"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_00_x9ONgYNhNS0Z43M830PX3714",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/.opencode/.gitignore"
+            },
+            "output": "<path>/work/.opencode/.gitignore</path>\n<type>file</type>\n<content>\n1: node_modules\n2: package.json\n3: package-lock.json\n4: bun.lock\n5: .gitignore\n\n(End of file - total 5 lines)\n</content>",
+            "metadata": {
+              "preview": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/.opencode/.gitignore",
+                "text": "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore",
+                "lineStart": 1,
+                "lineEnd": 5,
+                "totalLines": 5,
+                "truncated": false
+              }
+            },
+            "title": ".opencode/.gitignore",
+            "time": {
+              "start": 1791066168079,
+              "end": 1791066168187
+            }
+          },
+          "id": "prt_103dcdae6001iODPQNTm30zE94",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcd53d001jtkYAU6oB4wAUW"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_01_05hF3L9dgVBz6uzcf5fc1312",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/.opencode/package.json"
+            },
+            "output": "<path>/work/.opencode/package.json</path>\n<type>file</type>\n<content>\n1: {\n2:   \"dependencies\": {\n3:     \"@opencode-ai/plugin\": \"1.18.34\"\n4:   }\n5: }\n\n(End of file - total 5 lines)\n</content>",
+            "metadata": {
+              "preview": "{\n  \"dependencies\": {\n    \"@opencode-ai/plugin\": \"1.18.34\"\n  }\n}",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/.opencode/package.json",
+                "text": "{\n  \"dependencies\": {\n    \"@opencode-ai/plugin\": \"1.18.34\"\n  }\n}",
+                "lineStart": 1,
+                "lineEnd": 5,
+                "totalLines": 5,
+                "truncated": false
+              }
+            },
+            "title": ".opencode/package.json",
+            "time": {
+              "start": 1791066168282,
+              "end": 1791066168402
+            }
+          },
+          "id": "prt_103dcdb14001fFDahcoW4c6vlH",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcd53d001jtkYAU6oB4wAUW"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8214,
+            "input": 393,
+            "output": 80,
+            "reasoning": 61,
+            "cache": {
+              "write": 0,
+              "read": 7680
+            }
+          },
+          "cost": 0.00016659,
+          "id": "prt_103dcdd10001xRiYwiHOQqrQnG",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcd53d001jtkYAU6oB4wAUW"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000326226,
+        "tokens": {
+          "total": 8826,
+          "input": 175,
+          "output": 68,
+          "reasoning": 391,
+          "cache": {
+            "write": 0,
+            "read": 8192
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066168714,
+          "completed": 1791066172123
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dcdd89001LNQHj60lvDjIxH",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103dce0330015Ai24sPcVqIGZJ",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcdd89001LNQHj60lvDjIxH"
+        },
+        {
+          "type": "reasoning",
+          "text": "The `.opencode` directory is for opencode config/plugins, not the Python project. The Python project should go in `/work` itself. But `/work` is a git repo with `.opencode`. I'll create the Python project in `/work`.\n\nLet me set up:\n- `pyproject.toml` (uv-based)\n- `src/` layout with a script\n- `.gitignore` for Python\n\nThe task says \"low-level control over HTTP connections, including connection pooling and automatic retries\" — that's `urllib3`. Let me use uv to initialize.\n\nLet me create the project. I'll use uv init but careful not to clobber. Let me just create files manually since it gives more control, or use `uv init`. Actually `uv init` is clean. Let me use it in a way that works.\n\nLet me set up a src layout. I'll create pyproject.toml, src/http_client/__init__.py, a sample script, README, .gitignore, and tests.\n\nLet me be measured — the user asked to \"set up a new Python project\". So I should create the scaffolding. Let me use uv.\n\nI'll create the directory structure. Let me run `uv init --package` maybe. But that could conflict with existing .git. uv init works in existing dirs. Let's try.\n\nActually, let me create a plan with todowrite since this is a multi-step setup. The task has several steps but is fairly contained. I'll use a todo list.\n\nLet me think about what's the right design. A low-level HTTP script with:\n- connection pooling via `urllib3.PoolManager`\n- automatic retries via `urllib3.Retry`\n\nI'll create a configurable client module. Let me set it up properly with pyproject, source, tests.\n\nLet me use uv init.",
+          "time": {
+            "start": 1791066169773,
+            "end": 1791066171360
+          },
+          "id": "prt_103dce1ad001H3h57zQ3LoDHny",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcdd89001LNQHj60lvDjIxH"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_M8LHEsxH17s8rxBPaEqJ7824",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && uv init --name http-client --package --python '>=3.10' 2>&1 | head -30; ls -la"
+            },
+            "output": "Initialized project `http-client`\ntotal 16\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:22 .\ndrwxr-xr-x 1 root root    4096 Oct  3 22:22 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:22 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 22:22 .opencode\n-rw-r--r-- 1  501 dialout    5 Oct  3 22:22 .python-version\n-rw-r--r-- 1  501 dialout    0 Oct  3 22:22 README.md\n-rw-r--r-- 1  501 dialout   51 Oct  3 22:22 opencode.json\n-rw-r--r-- 1  501 dialout  367 Oct  3 22:22 pyproject.toml\ndrwxr-xr-x 3  501 dialout   96 Oct  3 22:22 src\n",
+            "metadata": {
+              "output": "Initialized project `http-client`\ntotal 16\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:22 .\ndrwxr-xr-x 1 root root    4096 Oct  3 22:22 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:22 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 22:22 .opencode\n-rw-r--r-- 1  501 dialout    5 Oct  3 22:22 .python-version\n-rw-r--r-- 1  501 dialout    0 Oct  3 22:22 README.md\n-rw-r--r-- 1  501 dialout   51 Oct  3 22:22 opencode.json\n-rw-r--r-- 1  501 dialout  367 Oct  3 22:22 pyproject.toml\ndrwxr-xr-x 3  501 dialout   96 Oct  3 22:22 src\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && uv init --name http-client --package --python '>=3.10' 2>&1 | head -30; ls -la",
+            "time": {
+              "start": 1791066171532,
+              "end": 1791066171725
+            }
+          },
+          "id": "prt_103dce7ec001RyRzPe8C2W3MS4",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcdd89001LNQHj60lvDjIxH"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8826,
+            "input": 175,
+            "output": 68,
+            "reasoning": 391,
+            "cache": {
+              "write": 0,
+              "read": 8192
+            }
+          },
+          "cost": 0.000326226,
+          "id": "prt_103dcea1f001obcO8EipjhnhN1",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcdd89001LNQHj60lvDjIxH"
+        },
+        {
+          "type": "patch",
+          "hash": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "files": [
+            "/work/.python-version",
+            "/work/README.md",
+            "/work/pyproject.toml",
+            "/work/src/http_client/__init__.py"
+          ],
+          "id": "prt_103dcead40017FxnVM79YQ8icK",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcdd89001LNQHj60lvDjIxH"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000139362,
+        "tokens": {
+          "total": 9165,
+          "input": 363,
+          "output": 98,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8704
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066172130,
+          "completed": 1791066173623
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dceae2001VRm4URXTi663zg",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-start",
+          "id": "prt_103dcecca0016XcAl4Jr3Wtr14",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dceae2001VRm4URXTi663zg"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_00_ET_0Gl31UrGtPzHc8UoaQnD8725",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/pyproject.toml"
+            },
+            "output": "<path>/work/pyproject.toml</path>\n<type>file</type>\n<content>\n1: [project]\n2: name = \"http-client\"\n3: version = \"0.1.0\"\n4: description = \"Add your description here\"\n5: readme = \"README.md\"\n6: authors = [\n7:     { name = \"benchmark\", email = \"benchmark@example.com\" }\n8: ]\n9: requires-python = \">=3.10\"\n10: dependencies = []\n11: \n12: [project.scripts]\n13: http-client = \"http_client:main\"\n14: \n15: [build-system]\n16: requires = [\"uv_build>=0.12.23,<0.13.0\"]\n17: build-backend = \"uv_build\"\n\n(End of file - total 17 lines)\n</content>",
+            "metadata": {
+              "preview": "[project]\nname = \"http-client\"\nversion = \"0.1.0\"\ndescription = \"Add your description here\"\nreadme = \"README.md\"\nauthors = [\n    { name = \"benchmark\", email = \"benchmark@example.com\" }\n]\nrequires-python = \">=3.10\"\ndependencies = []\n\n[project.scripts]\nhttp-client = \"http_client:main\"\n\n[build-system]\nrequires = [\"uv_build>=0.12.23,<0.13.0\"]\nbuild-backend = \"uv_build\"",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/pyproject.toml",
+                "text": "[project]\nname = \"http-client\"\nversion = \"0.1.0\"\ndescription = \"Add your description here\"\nreadme = \"README.md\"\nauthors = [\n    { name = \"benchmark\", email = \"benchmark@example.com\" }\n]\nrequires-python = \">=3.10\"\ndependencies = []\n\n[project.scripts]\nhttp-client = \"http_client:main\"\n\n[build-system]\nrequires = [\"uv_build>=0.12.23,<0.13.0\"]\nbuild-backend = \"uv_build\"",
+                "lineStart": 1,
+                "lineEnd": 17,
+                "totalLines": 17,
+                "truncated": false
+              }
+            },
+            "title": "pyproject.toml",
+            "time": {
+              "start": 1791066173086,
+              "end": 1791066173176
+            }
+          },
+          "id": "prt_103dcee3c001jdTbDUtsKaeyIH",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dceae2001VRm4URXTi663zg"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_01_ET_JkTusJtB3D7nKyZlaqmF4799",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && find src -type f && cat .python-version && git config --global --add safe.directory /work"
+            },
+            "output": "src/http_client/__init__.py\n3.13\n",
+            "metadata": {
+              "output": "src/http_client/__init__.py\n3.13\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && find src -type f && cat .python-version && git config --global --add safe.directory /work",
+            "time": {
+              "start": 1791066173203,
+              "end": 1791066173292
+            }
+          },
+          "id": "prt_103dceea8001YITDUKXAWDKXHY",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dceae2001VRm4URXTi663zg"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-finish",
+          "tokens": {
+            "total": 9165,
+            "input": 363,
+            "output": 98,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8704
+            }
+          },
+          "cost": 0.000139362,
+          "id": "prt_103dcf04000184aUcLW2K9uApS",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dceae2001VRm4URXTi663zg"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000189114,
+        "tokens": {
+          "total": 9579,
+          "input": 295,
+          "output": 47,
+          "reasoning": 149,
+          "cache": {
+            "write": 0,
+            "read": 9088
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066173643,
+          "completed": 1791066175532
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dcf0cb0010oieEvihsiTj2T",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-start",
+          "id": "prt_103dcf2e10012jUrdk5rnrFDUp",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf0cb0010oieEvihsiTj2T"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now let me design the project. I'll add `urllib3` as a dependency, write the client module with connection pooling and retries, and add tests.\n\nLet me set up the todo list. Actually, let's keep it efficient. Let me write the files.\n\nStructure:\n- `src/http_client/__init__.py` - exports\n- `src/http_client/client.py` - the HTTP client with pool + retries\n- `src/http_client/__main__.py` - CLI entry\n- `tests/test_client.py`\n- `pyproject.toml` - add deps, pytest, ruff\n- `.gitignore`\n- `README.md`\n\nLet me read the current __init__.py.",
+          "time": {
+            "start": 1791066174553,
+            "end": 1791066175146
+          },
+          "id": "prt_103dcf459001ye9AwWTT53hPiQ",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf0cb0010oieEvihsiTj2T"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_00_QjsXVEFnJjrrXz2gcpo40165",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/src/http_client/__init__.py"
+            },
+            "output": "<path>/work/src/http_client/__init__.py</path>\n<type>file</type>\n<content>\n1: def main() -> None:\n2:     print(\"Hello from http-client!\")\n\n(End of file - total 2 lines)\n</content>",
+            "metadata": {
+              "preview": "def main() -> None:\n    print(\"Hello from http-client!\")",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/src/http_client/__init__.py",
+                "text": "def main() -> None:\n    print(\"Hello from http-client!\")",
+                "lineStart": 1,
+                "lineEnd": 2,
+                "totalLines": 2,
+                "truncated": false
+              }
+            },
+            "title": "src/http_client/__init__.py",
+            "time": {
+              "start": 1791066175204,
+              "end": 1791066175277
+            }
+          },
+          "id": "prt_103dcf6b2001uZ7foAfsbjHesz",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf0cb0010oieEvihsiTj2T"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-finish",
+          "tokens": {
+            "total": 9579,
+            "input": 295,
+            "output": 47,
+            "reasoning": 149,
+            "cache": {
+              "write": 0,
+              "read": 9088
+            }
+          },
+          "cost": 0.000189114,
+          "id": "prt_103dcf784001FnFRWW2bLTy6R5",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf0cb0010oieEvihsiTj2T"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000238716,
+        "tokens": {
+          "total": 9953,
+          "input": 174,
+          "output": 187,
+          "reasoning": 120,
+          "cache": {
+            "write": 0,
+            "read": 9472
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066175542,
+          "completed": 1791066177693
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dcf836001fve1vuBNeiB7jf",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-start",
+          "id": "prt_103dcfa8b001l5zHqjFU3VtXdd",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf836001fve1vuBNeiB7jf"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me plan and build. I'll use `urllib3` with a `PoolManager`, `Retry`, and `HTTPConnectionPool`. This is precisely the low-level control requested.\n\nLet me write:\n1. `pyproject.toml` update with urllib3, dev deps.\n2. `src/http_client/client.py`\n3. `src/http_client/__init__.py`\n4. `src/http_client/__main__.py`\n5. `tests/test_client.py`\n6. `.gitignore`\n7. `README.md`\n\nLet me do it.",
+          "time": {
+            "start": 1791066176470,
+            "end": 1791066176938
+          },
+          "id": "prt_103dcfbd6001Z20Aon5E2OJGq1",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf836001fve1vuBNeiB7jf"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_Irm0QWLtdYRSa2jgqcRB8112",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Configure pyproject.toml deps and tooling",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement low-level HTTP client with pooling + retries",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add .gitignore and README",
+                  "status": "pending",
+                  "priority": "low"
+                },
+                {
+                  "content": "Install deps and verify tests/lint",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Configure pyproject.toml deps and tooling\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement low-level HTTP client with pooling + retries\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add CLI entry point\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add tests\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add .gitignore and README\",\n    \"status\": \"pending\",\n    \"priority\": \"low\"\n  },\n  {\n    \"content\": \"Install deps and verify tests/lint\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Configure pyproject.toml deps and tooling",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement low-level HTTP client with pooling + retries",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add .gitignore and README",
+                  "status": "pending",
+                  "priority": "low"
+                },
+                {
+                  "content": "Install deps and verify tests/lint",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "6 todos",
+            "time": {
+              "start": 1791066177348,
+              "end": 1791066177358
+            }
+          },
+          "id": "prt_103dcfdb10010uTdv0ITzMIwKl",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf836001fve1vuBNeiB7jf"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-finish",
+          "tokens": {
+            "total": 9953,
+            "input": 174,
+            "output": 187,
+            "reasoning": 120,
+            "cache": {
+              "write": 0,
+              "read": 9472
+            }
+          },
+          "cost": 0.000238716,
+          "id": "prt_103dcffe5001DtJoBH444xD1Cz",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dcf836001fve1vuBNeiB7jf"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000255618,
+        "tokens": {
+          "total": 10457,
+          "input": 299,
+          "output": 302,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 9856
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066177702,
+          "completed": 1791066179951
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd00a600179HjE2zgEGTTnU",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "286e275928d722772d4a24063cf5361110014c45",
+          "type": "step-start",
+          "id": "prt_103dd033f001ha6Ahou1SKtG5N",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd00a600179HjE2zgEGTTnU"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_iUL5UpnL5nw94lmUWd3Q6695",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/pyproject.toml",
+              "content": "[project]\nname = \"http-client\"\nversion = \"0.1.0\"\ndescription = \"Low-level HTTP client with connection pooling and automatic retries\"\nreadme = \"README.md\"\nauthors = [\n    { name = \"benchmark\", email = \"benchmark@example.com\" }\n]\nrequires-python = \">=3.10\"\ndependencies = [\n    \"urllib3>=2.2\",\n]\n\n[project.scripts]\nhttp-client = \"http_client.__main__:main\"\n\n[dependency-groups]\ndev = [\n    \"pytest>=8.0\",\n    \"pytest-socket>=0.7\",\n    \"ruff>=0.6\",\n]\n\n[tool.pytest.ini_options]\naddopts = \"-q --disable-socket\"\ntestpaths = [\"tests\"]\n\n[tool.ruff]\nline-length = 100\ntarget-version = \"py310\"\n\n[tool.ruff.lint]\nselect = [\"E\", \"F\", \"I\", \"UP\", \"B\"]\n\n[build-system]\nrequires = [\"uv_build>=0.12.23,<0.13.0\"]\nbuild-backend = \"uv_build\"\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/pyproject.toml",
+              "exists": true,
+              "truncated": false
+            },
+            "title": "pyproject.toml",
+            "time": {
+              "start": 1791066179604,
+              "end": 1791066179639
+            }
+          },
+          "id": "prt_103dd055b001Zv8zPHp0TgL40E",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd00a600179HjE2zgEGTTnU"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "15a5d7730f811fd79de7347687856e799a8fb210",
+          "type": "step-finish",
+          "tokens": {
+            "total": 10457,
+            "input": 299,
+            "output": 302,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 9856
+            }
+          },
+          "cost": 0.000255618,
+          "id": "prt_103dd08f9001QryHh1d2To2Rgf",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd00a600179HjE2zgEGTTnU"
+        },
+        {
+          "type": "patch",
+          "hash": "286e275928d722772d4a24063cf5361110014c45",
+          "files": [
+            "/work/pyproject.toml"
+          ],
+          "id": "prt_103dd0966001SwO5bWB3PL8nUj",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd00a600179HjE2zgEGTTnU"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00073647,
+        "tokens": {
+          "total": 11591,
+          "input": 233,
+          "output": 998,
+          "reasoning": 120,
+          "cache": {
+            "write": 0,
+            "read": 10240
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066179957,
+          "completed": 1791066184647
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd0975001A0H8kpNg48uCDz",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "15a5d7730f811fd79de7347687856e799a8fb210",
+          "type": "step-start",
+          "id": "prt_103dd0bb80015BcBtoh4xqxJ2m",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd0975001A0H8kpNg48uCDz"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now the client module. Let me design a clean API using urllib3.\n\nKey features:\n- PoolManager with configurable pool size (num_pools, maxsize), block\n- Retry config: total, connect, read, status, backoff factor, allowed methods, status_forcelist, respect_retry_after_header\n- Timeout config: connect/read\n- SSL verification\n- Optional per-host pool overrides? Keep it reasonably simple but useful.\n\nI'll create a `HttpClient` class wrapping PoolManager with context manager support.\n\nLet me write it.",
+          "time": {
+            "start": 1791066180980,
+            "end": 1791066181719
+          },
+          "id": "prt_103dd0d74001mYpI6QbgDHOb33",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd0975001A0H8kpNg48uCDz"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_uZfYAEM2P7LAFjsgXJrN1627",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/src/http_client/client.py",
+              "content": "from __future__ import annotations\n\nfrom dataclasses import dataclass, field\nfrom typing import Any, Mapping, Sequence\n\nimport urllib3\nfrom urllib3.util import Retry, Timeout\n\nDEFAULT_RETRY_STATUSES = (429, 500, 502, 503, 504)\nDEFAULT_RETRY_METHODS = frozenset(\n    {\"HEAD\", \"GET\", \"PUT\", \"DELETE\", \"OPTIONS\", \"TRACE\"}\n)\n\n\n@dataclass(frozen=True)\nclass RetryPolicy:\n    \"\"\"Declarative description of automatic retry behaviour.\"\"\"\n\n    total: int = 3\n    connect: int | None = None\n    read: int | None = None\n    status: int | None = None\n    backoff_factor: float = 0.5\n    status_forcelist: Sequence[int] = DEFAULT_RETRY_STATUSES\n    allowed_methods: frozenset[str] = DEFAULT_RETRY_METHODS\n    respect_retry_after_header: bool = True\n    raise_on_status: bool = False\n\n    def to_urllib3(self) -> Retry:\n        return Retry(\n            total=self.total,\n            connect=self.connect,\n            read=self.read,\n            status=self.status,\n            backoff_factor=self.backoff_factor,\n            status_forcelist=list(self.status_forcelist),\n            allowed_methods=set(self.allowed_methods),\n            respect_retry_after_header=self.respect_retry_after_header,\n            raise_on_status=self.raise_on_status,\n        )\n\n\n@dataclass(frozen=True)\nclass PoolConfig:\n    \"\"\"Tuning knobs for the underlying connection pools.\"\"\"\n\n    num_pools: int = 10\n    maxsize: int = 10\n    block: bool = False\n    retries: RetryPolicy = field(default_factory=RetryPolicy)\n\n\nclass HttpClient:\n    \"\"\"Thin, reusable wrapper around :class:`urllib3.PoolManager`.\n\n    Keeps a pool of keep-alive connections per host and transparently\n    retries idempotent requests on connection, read and status failures.\n    \"\"\"\n\n    def __init__(\n        self,\n        *,\n        pool: PoolConfig | None = None,\n        timeout: Timeout | float | None = 10.0,\n        verify: bool = True,\n        ca_certs: str | None = None,\n        headers: Mapping[str, str] | None = None,\n    ) -> None:\n        self.pool_config = pool or PoolConfig()\n        self.timeout = timeout\n        self.headers = dict(headers or {})\n        self._manager = urllib3.PoolManager(\n            num_pools=self.pool_config.num_pools,\n            maxsize=self.pool_config.maxsize,\n            block=self.pool_config.block,\n            retries=self.pool_config.retries.to_urllib3(),\n            timeout=timeout,\n            cert_reqs=\"CERT_REQUIRED\" if verify else \"CERT_NONE\",\n            ca_certs=ca_certs,\n            headers=self.headers,\n        )\n\n    def request(\n        self,\n        method: str,\n        url: str,\n        *,\n        body: Any = None,\n        fields: Mapping[str, Any] | None = None,\n        headers: Mapping[str, str] | None = None,\n        timeout: Timeout | float | None = None,\n        retries: Retry | None = None,\n        redirect: bool = True,\n    ) -> urllib3.response.HTTPResponse:\n        return self._manager.request(\n            method,\n            url,\n            body=body,\n            fields=fields,\n            headers=dict(headers) if headers else None,\n            timeout=timeout if timeout is not None else self.timeout,\n            retries=retries,\n            redirect=redirect,\n        )\n\n    def get(self, url: str, **kwargs: Any) -> urllib3.response.HTTPResponse:\n        return self.request(\"GET\", url, **kwargs)\n\n    def post(self, url: str, **kwargs: Any) -> urllib3.response.HTTPResponse:\n        return self.request(\"POST\", url, **kwargs)\n\n    def close(self) -> None:\n        self._manager.clear()\n\n    def __enter__(self) -> \"HttpClient\":\n        return self\n\n    def __exit__(self, *exc: object) -> None:\n        self.close()\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/http_client/client.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/http_client/client.py",
+            "time": {
+              "start": 1791066184393,
+              "end": 1791066184422
+            }
+          },
+          "id": "prt_103dd105e001yQznH1V6HYDmy5",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd0975001A0H8kpNg48uCDz"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "5414f0c844aecbda3a6f26903269a8747a8f7996",
+          "type": "step-finish",
+          "tokens": {
+            "total": 11591,
+            "input": 233,
+            "output": 998,
+            "reasoning": 120,
+            "cache": {
+              "write": 0,
+              "read": 10240
+            }
+          },
+          "cost": 0.00073647,
+          "id": "prt_103dd1b6b001Li2GAD3E2lGd72",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd0975001A0H8kpNg48uCDz"
+        },
+        {
+          "type": "patch",
+          "hash": "15a5d7730f811fd79de7347687856e799a8fb210",
+          "files": [
+            "/work/src/http_client/client.py"
+          ],
+          "id": "prt_103dd1bbf001uYTjeMXDFktEpQ",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd0975001A0H8kpNg48uCDz"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000193026,
+        "tokens": {
+          "total": 11818,
+          "input": 215,
+          "output": 151,
+          "reasoning": 60,
+          "cache": {
+            "write": 0,
+            "read": 11392
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066184654,
+          "completed": 1791066186324
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd1bce0017DRB79jUGLV77O",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "5414f0c844aecbda3a6f26903269a8747a8f7996",
+          "type": "step-start",
+          "id": "prt_103dd1e1d001F3J5ALVVb3Vycm",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd1bce0017DRB79jUGLV77O"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now the `__init__.py` and `__main__.py`. Also I referenced `http_client:main` before, now changed to `__main__:main`.\n\nLet me write `__init__.py` exporting the API and `__main__.py` with a small CLI.",
+          "time": {
+            "start": 1791066185333,
+            "end": 1791066185646
+          },
+          "id": "prt_103dd1e75001YfD75ecKhVhHzB",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd1bce0017DRB79jUGLV77O"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_rbieQpW8R604TsDgWjKb4692",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/src/http_client/__init__.py",
+              "content": "from .client import (\n    DEFAULT_RETRY_METHODS,\n    DEFAULT_RETRY_STATUSES,\n    HttpClient,\n    PoolConfig,\n    RetryPolicy,\n)\n\n__all__ = [\n    \"DEFAULT_RETRY_METHODS\",\n    \"DEFAULT_RETRY_STATUSES\",\n    \"HttpClient\",\n    \"PoolConfig\",\n    \"RetryPolicy\",\n]\n\n__version__ = \"0.1.0\"\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/http_client/__init__.py",
+              "exists": true,
+              "truncated": false
+            },
+            "title": "src/http_client/__init__.py",
+            "time": {
+              "start": 1791066185962,
+              "end": 1791066186000
+            }
+          },
+          "id": "prt_103dd1fb2001SJ8sbh6cWS3mLZ",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd1bce0017DRB79jUGLV77O"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "69372cacc8e476989175d7d5fe7b8737e9ad11a1",
+          "type": "step-finish",
+          "tokens": {
+            "total": 11818,
+            "input": 215,
+            "output": 151,
+            "reasoning": 60,
+            "cache": {
+              "write": 0,
+              "read": 11392
+            }
+          },
+          "cost": 0.000193026,
+          "id": "prt_103dd21bb001B8VwTL3HwOW1n6",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd1bce0017DRB79jUGLV77O"
+        },
+        {
+          "type": "patch",
+          "hash": "5414f0c844aecbda3a6f26903269a8747a8f7996",
+          "files": [
+            "/work/src/http_client/__init__.py"
+          ],
+          "id": "prt_103dd224d001f5YbCP6veBsLi1",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd1bce0017DRB79jUGLV77O"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000337044,
+        "tokens": {
+          "total": 12291,
+          "input": 186,
+          "output": 457,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 11648
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066186330,
+          "completed": 1791066189011
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd225a001EMr663OWJJnOZm",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "69372cacc8e476989175d7d5fe7b8737e9ad11a1",
+          "type": "step-start",
+          "id": "prt_103dd24f80014ZWvS0FjmqALwr",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd225a001EMr663OWJJnOZm"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_K9kq5b3eN6QJYh6tUCP62833",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/src/http_client/__main__.py",
+              "content": "from __future__ import annotations\n\nimport argparse\nimport sys\n\nfrom .client import HttpClient, PoolConfig, RetryPolicy\n\n\ndef build_parser() -> argparse.ArgumentParser:\n    parser = argparse.ArgumentParser(\n        prog=\"http-client\",\n        description=\"Perform an HTTP request with pooled connections and retries.\",\n    )\n    parser.add_argument(\"url\", help=\"URL to request\")\n    parser.add_argument(\"-X\", \"--method\", default=\"GET\", help=\"HTTP method (default: GET)\")\n    parser.add_argument(\"-d\", \"--data\", default=None, help=\"Request body\")\n    parser.add_argument(\n        \"--retries\",\n        type=int,\n        default=3,\n        help=\"Maximum number of retries (default: 3)\",\n    )\n    parser.add_argument(\n        \"--maxsize\",\n        type=int,\n        default=10,\n        help=\"Max pooled connections per host (default: 10)\",\n    )\n    parser.add_argument(\n        \"--timeout\",\n        type=float,\n        default=10.0,\n        help=\"Read/connect timeout in seconds (default: 10)\",\n    )\n    parser.add_argument(\"--insecure\", action=\"store_true\", help=\"Disable TLS verification\")\n    return parser\n\n\ndef main(argv: list[str] | None = None) -> int:\n    args = build_parser().parse_args(argv)\n\n    pool = PoolConfig(maxsize=args.maxsize, retries=RetryPolicy(total=args.retries))\n    with HttpClient(pool=pool, timeout=args.timeout, verify=not args.insecure) as client:\n        response = client.request(args.method, args.url, body=args.data)\n        try:\n            sys.stdout.buffer.write(response.data)\n            sys.stdout.write(\"\\n\")\n        finally:\n            response.release_conn()\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/http_client/__main__.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/http_client/__main__.py",
+            "time": {
+              "start": 1791066188813,
+              "end": 1791066188831
+            }
+          },
+          "id": "prt_103dd2738001mt0dwjoHMnBIfo",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd225a001EMr663OWJJnOZm"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "ffec6bf2631be1da9553f7b8484c8d788d66ca57",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12291,
+            "input": 186,
+            "output": 457,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 11648
+            }
+          },
+          "cost": 0.000337044,
+          "id": "prt_103dd2c93001U5A8DCwHfFOrt6",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd225a001EMr663OWJJnOZm"
+        },
+        {
+          "type": "patch",
+          "hash": "69372cacc8e476989175d7d5fe7b8737e9ad11a1",
+          "files": [
+            "/work/src/http_client/__main__.py"
+          ],
+          "id": "prt_103dd2cca001kb56CbN67B4F80",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd225a001EMr663OWJJnOZm"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00074493,
+        "tokens": {
+          "total": 13451,
+          "input": 147,
+          "output": 764,
+          "reasoning": 380,
+          "cache": {
+            "write": 0,
+            "read": 12160
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066189030,
+          "completed": 1791066194109
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd2ce6001yOk5ygq0Vhc41Q",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "ffec6bf2631be1da9553f7b8484c8d788d66ca57",
+          "type": "step-start",
+          "id": "prt_103dd2f13001utIwYCYrrrOJj1",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd2ce6001yOk5ygq0Vhc41Q"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now tests. I want tests that don't hit the network. I'll use `urllib3`'s `HTTPConnectionPool`? Better: test the dataclasses and retry config, and use a local HTTP server via a fixture to test pooling/retries. But pytest-socket disables sockets. I can enable localhost by using `@pytest.mark.enable_socket` or configure `--allow-host=localhost`. Hmm.\n\nSimpler: unit test the config translation (RetryPolicy.to_urllib3, PoolConfig) and use urllib3's mock? There's `urllib3` no built-in mock in v2 except with `responses` or httpretty. Let me avoid extra deps.\n\nI can test using a real local server started in-process but allow socket. pytest-socket's `--disable-socket` blocks. I can use `@pytest.mark.enable_socket` on the network test. Let me do that.\n\nActually let me create a small threaded HTTP server in the test to validate retries and pooling. That's a solid test. And unit tests for RetryPolicy.\n\nLet me write tests/test_client.py.\n\nTest ideas:\n1. test_retry_policy_translates: RetryPolicy(total=5, backoff_factor=0.1).to_urllib3() -> check .total, .backoff_factor, status_forcelist, allowed_methods.\n2. test_client_context_manager_closes.\n3. Local server test: server that returns 500 first then 200, verify retry works and eventually 200.\n4. Test connection reuse: track connection count? Hard. Skip.\n\nLet me implement a fixture with http.server in a thread, using a handler whose behavior can be controlled. pytest-socket enable via marker.\n\nLet me write it.",
+          "time": {
+            "start": 1791066189787,
+            "end": 1791066191605
+          },
+          "id": "prt_103dd2fdb001XMs7HfOCoTx4QM",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd2ce6001yOk5ygq0Vhc41Q"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_uDSOOxp8x5Af3seSbli59250",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/tests/test_client.py",
+              "content": "from __future__ import annotations\n\nimport threading\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n\nimport pytest\n\nfrom http_client import HttpClient, PoolConfig, RetryPolicy\n\n\ndef test_retry_policy_translates_to_urllib3() -> None:\n    retry = RetryPolicy(\n        total=5,\n        backoff_factor=0.1,\n        status_forcelist=(500, 503),\n        allowed_methods=frozenset({\"GET\"}),\n    ).to_urllib3()\n\n    assert retry.total == 5\n    assert retry.backoff_factor == 0.1\n    assert retry.status_forcelist == [500, 503]\n    assert retry.allowed_methods == {\"GET\"}\n\n\ndef test_pool_config_defaults_are_retry_policy() -> None:\n    assert isinstance(PoolConfig().retries, RetryPolicy)\n\n\ndef test_client_is_a_context_manager() -> None:\n    with HttpClient() as client:\n        assert client.pool_config.maxsize == 10\n\n\nclass _FlakyHandler(BaseHTTPRequestHandler):\n    failures_remaining = 2\n    hits = 0\n    lock = threading.Lock()\n\n    def do_GET(self) -> None:  # noqa: N802\n        with self.lock:\n            type(self).hits += 1\n            fail = type(self).failures_remaining > 0\n            if fail:\n                type(self).failures_remaining -= 1\n        status = 500 if fail else 200\n        self.send_response(status)\n        self.end_headers()\n        self.wfile.write(b\"ok\" if not fail else b\"boom\")\n\n    def log_message(self, *args: object) -> None:\n        pass\n\n\n@pytest.fixture\ndef flaky_server() -> str:\n    _FlakyHandler.hits = 0\n    _FlakyHandler.failures_remaining = 2\n    server = ThreadingHTTPServer((\"127.0.0.1\", 0), _FlakyHandler)\n    thread = threading.Thread(target=server.serve_forever, daemon=True)\n    thread.start()\n    try:\n        host, port = server.server_address\n        yield f\"http://{host}:{port}/\"\n    finally:\n        server.shutdown()\n        server.server_close()\n\n\n@pytest.mark.enable_socket\ndef test_retries_until_success(flaky_server: str) -> None:\n    policy = RetryPolicy(total=3, backoff_factor=0.0)\n    with HttpClient(pool=PoolConfig(retries=policy), timeout=2.0) as client:\n        response = client.get(flaky_server)\n        assert response.status == 200\n        assert response.data == b\"ok\"\n        response.release_conn()\n\n    assert _FlakyHandler.hits == 3\n\n\n@pytest.mark.enable_socket\ndef test_no_retry_when_disabled(flaky_server: str) -> None:\n    with HttpClient(pool=PoolConfig(retries=RetryPolicy(total=0)), timeout=2.0) as client:\n        response = client.get(flaky_server)\n        assert response.status == 500\n        response.release_conn()\n\n    assert _FlakyHandler.hits == 1\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/tests/test_client.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "tests/test_client.py",
+            "time": {
+              "start": 1791066193702,
+              "end": 1791066193768
+            }
+          },
+          "id": "prt_103dd3709001C6S1HqD4wOOuiz",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd2ce6001yOk5ygq0Vhc41Q"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "fa3cd1a696914166bb97672d7d85a3142b4eff9d",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13451,
+            "input": 147,
+            "output": 764,
+            "reasoning": 380,
+            "cache": {
+              "write": 0,
+              "read": 12160
+            }
+          },
+          "cost": 0.00074493,
+          "id": "prt_103dd403d001pIvgKTfEMeoNRU",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd2ce6001yOk5ygq0Vhc41Q"
+        },
+        {
+          "type": "patch",
+          "hash": "ffec6bf2631be1da9553f7b8484c8d788d66ca57",
+          "files": [
+            "/work/tests/test_client.py"
+          ],
+          "id": "prt_103dd40ab001YYtvcawUAl1QGV",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd2ce6001yOk5ygq0Vhc41Q"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000124386,
+        "tokens": {
+          "total": 13569,
+          "input": 155,
+          "output": 102,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 13312
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066194117,
+          "completed": 1791066196602
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd40c5001pfZKyROMAF2yXb",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "fa3cd1a696914166bb97672d7d85a3142b4eff9d",
+          "type": "step-start",
+          "id": "prt_103dd4342001QGgLrQy0o1GArV",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd40c5001pfZKyROMAF2yXb"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_2i45nhthYmsaQf8XD9Hk8015",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/.gitignore",
+              "content": "__pycache__/\n*.py[cod]\n*.egg-info/\n.eggs/\nbuild/\ndist/\n.venv/\nvenv/\n.env\n.pytest_cache/\n.ruff_cache/\n.coverage\nhtmlcov/\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/.gitignore",
+              "exists": false,
+              "truncated": false
+            },
+            "title": ".gitignore",
+            "time": {
+              "start": 1791066195278,
+              "end": 1791066195333
+            }
+          },
+          "id": "prt_103dd4470001uPiSyHXr1agpOo",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd40c5001pfZKyROMAF2yXb"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "cb87f249bf73ca464d83fe18343a9ac5be3f535c",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13569,
+            "input": 155,
+            "output": 102,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 13312
+            }
+          },
+          "cost": 0.000124386,
+          "id": "prt_103dd48a9001mNJmBtZzkFxV1s",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd40c5001pfZKyROMAF2yXb"
+        },
+        {
+          "type": "patch",
+          "hash": "fa3cd1a696914166bb97672d7d85a3142b4eff9d",
+          "files": [
+            "/work/.gitignore"
+          ],
+          "id": "prt_103dd4a74001zoSU6loyG1cFBx",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd40c5001pfZKyROMAF2yXb"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00028467,
+        "tokens": {
+          "total": 13956,
+          "input": 145,
+          "output": 371,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 13440
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066196607,
+          "completed": 1791066199182
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd4a7f001HjgYswMNO62Kpe",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "cb87f249bf73ca464d83fe18343a9ac5be3f535c",
+          "type": "step-start",
+          "id": "prt_103dd4ccf001JVXP48vtT7C38I",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd4a7f001HjgYswMNO62Kpe"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_2XlOwbshiLKUwBzF1qu70120",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/README.md",
+              "content": "# http-client\n\nLow-level HTTP client built on [urllib3](https://urllib3.readthedocs.io/), giving\ndirect control over connection pooling and automatic retries.\n\n## Setup\n\n```sh\nuv sync\n```\n\n## Usage\n\n```python\nfrom http_client import HttpClient, PoolConfig, RetryPolicy\n\npool = PoolConfig(\n    num_pools=10,        # distinct host pools kept in the manager\n    maxsize=20,          # max keep-alive connections per host\n    block=True,          # wait instead of dropping when the pool is full\n    retries=RetryPolicy(\n        total=3,\n        backoff_factor=0.5,\n        status_forcelist=(429, 500, 502, 503, 504),\n        allowed_methods=frozenset({\"GET\", \"PUT\", \"DELETE\"}),\n    ),\n)\n\nwith HttpClient(pool=pool, timeout=10.0, verify=True) as client:\n    response = client.get(\"https://example.com/\")\n    print(response.status, response.data)\n    response.release_conn()\n```\n\n`RetryPolicy` covers connection, read and status failures; `PoolConfig` tunes\nthe number of pools, per-host connection limit and blocking behaviour.\n\n## CLI\n\n```sh\nuv run http-client https://example.com/ --retries 5 --maxsize 20\n```\n\n## Tests\n\n```sh\nuv run pytest\nuv run ruff check .\nuv run ruff format --check .\n```\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/README.md",
+              "exists": true,
+              "truncated": false
+            },
+            "title": "README.md",
+            "time": {
+              "start": 1791066199010,
+              "end": 1791066199026
+            }
+          },
+          "id": "prt_103dd4e56001EYCesYSO7WyXpa",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd4a7f001HjgYswMNO62Kpe"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "5bb75a92339d854d1b770b8b74cbd79da74cde97",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13956,
+            "input": 145,
+            "output": 371,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 13440
+            }
+          },
+          "cost": 0.00028467,
+          "id": "prt_103dd5443001Javn3EqRrtIUwS",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd4a7f001HjgYswMNO62Kpe"
+        },
+        {
+          "type": "patch",
+          "hash": "cb87f249bf73ca464d83fe18343a9ac5be3f535c",
+          "files": [
+            "/work/README.md"
+          ],
+          "id": "prt_103dd5489001Y6MmpQLkKNT5sq",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd4a7f001HjgYswMNO62Kpe"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000175872,
+        "tokens": {
+          "total": 14159,
+          "input": 148,
+          "output": 187,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 13824
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066199186,
+          "completed": 1791066200938
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd5492001AagbnxuLM43AYZ",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "5bb75a92339d854d1b770b8b74cbd79da74cde97",
+          "type": "step-start",
+          "id": "prt_103dd56b8001DR4FLpscF66aeb",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5492001AagbnxuLM43AYZ"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_ET_ZIcsjf1cvCgqBPSjSMuB5131",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Configure pyproject.toml deps and tooling",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement low-level HTTP client with pooling + retries",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add .gitignore and README",
+                  "status": "completed",
+                  "priority": "low"
+                },
+                {
+                  "content": "Install deps and verify tests/lint",
+                  "status": "in_progress",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Configure pyproject.toml deps and tooling\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement low-level HTTP client with pooling + retries\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add CLI entry point\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add tests\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add .gitignore and README\",\n    \"status\": \"completed\",\n    \"priority\": \"low\"\n  },\n  {\n    \"content\": \"Install deps and verify tests/lint\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Configure pyproject.toml deps and tooling",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement low-level HTTP client with pooling + retries",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add .gitignore and README",
+                  "status": "completed",
+                  "priority": "low"
+                },
+                {
+                  "content": "Install deps and verify tests/lint",
+                  "status": "in_progress",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "1 todos",
+            "time": {
+              "start": 1791066200552,
+              "end": 1791066200566
+            }
+          },
+          "id": "prt_103dd5862001Idc47T5S0ww5rO",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5492001AagbnxuLM43AYZ"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "5bb75a92339d854d1b770b8b74cbd79da74cde97",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14159,
+            "input": 148,
+            "output": 187,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 13824
+            }
+          },
+          "cost": 0.000175872,
+          "id": "prt_103dd5a9b001nqr4xfEUljJvSw",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5492001AagbnxuLM43AYZ"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00012519,
+        "tokens": {
+          "total": 14429,
+          "input": 281,
+          "output": 68,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 14080
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066200944,
+          "completed": 1791066210404
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd5b70001c6SlDAjKV071eV",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "5bb75a92339d854d1b770b8b74cbd79da74cde97",
+          "type": "step-start",
+          "id": "prt_103dd5ed6001yeKobsk2HwgYo1",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5b70001c6SlDAjKV071eV"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_vMAd0CLDc6N8G1nut5Lb0909",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && uv sync 2>&1 | tail -20",
+              "timeout": 180000
+            },
+            "output": "   Building http-client @ file:///work\n      Built http-client @ file:///work\nDownloading pygments (1.2MiB)\nDownloading ruff (9.5MiB)\n Downloaded pygments\n Downloaded ruff\nPrepared 9 packages in 2.18s\nwarning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.\n         If the cache and target directories are on different filesystems, hardlinking may not be supported.\n         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.\nInstalled 9 packages in 4.08s\n + http-client==0.1.0 (from file:///work)\n + iniconfig==2.3.0\n + packaging==26.3\n + pluggy==1.6.0\n + pygments==2.21.0\n + pytest==9.1.1\n + pytest-socket==0.8.1\n + ruff==0.16.10\n + urllib3==2.8.0\n",
+            "metadata": {
+              "output": "   Building http-client @ file:///work\n      Built http-client @ file:///work\nDownloading pygments (1.2MiB)\nDownloading ruff (9.5MiB)\n Downloaded pygments\n Downloaded ruff\nPrepared 9 packages in 2.18s\nwarning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.\n         If the cache and target directories are on different filesystems, hardlinking may not be supported.\n         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.\nInstalled 9 packages in 4.08s\n + http-client==0.1.0 (from file:///work)\n + iniconfig==2.3.0\n + packaging==26.3\n + pluggy==1.6.0\n + pygments==2.21.0\n + pytest==9.1.1\n + pytest-socket==0.8.1\n + ruff==0.16.10\n + urllib3==2.8.0\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && uv sync 2>&1 | tail -20",
+            "time": {
+              "start": 1791066202437,
+              "end": 1791066209778
+            }
+          },
+          "id": "prt_103dd60d5001jO1jt7WNcdhKEj",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5b70001c6SlDAjKV071eV"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "173a482cbedca66d188aaa21bd3b7be034bf6969",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14429,
+            "input": 281,
+            "output": 68,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 14080
+            }
+          },
+          "cost": 0.00012519,
+          "id": "prt_103dd7f20001wcNPiAIv31S5CO",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5b70001c6SlDAjKV071eV"
+        },
+        {
+          "type": "patch",
+          "hash": "5bb75a92339d854d1b770b8b74cbd79da74cde97",
+          "files": [
+            "/work/uv.lock"
+          ],
+          "id": "prt_103dd8049001EsPgnHCrr2bcKq",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd5b70001c6SlDAjKV071eV"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000144258,
+        "tokens": {
+          "total": 14762,
+          "input": 343,
+          "output": 83,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 14336
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066210447,
+          "completed": 1791066213646
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd808f001ogO2jrko0ERRKY",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "173a482cbedca66d188aaa21bd3b7be034bf6969",
+          "type": "step-start",
+          "id": "prt_103dd839f001yIXPzBy1e2Op57",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd808f001ogO2jrko0ERRKY"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_YEYIwe9KgaAlh4oNiSws5897",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && uv run ruff check . && uv run ruff format --check . && uv run pytest 2>&1 | tail -30",
+              "timeout": 120000
+            },
+            "output": "UP035 [*] Import from `collections.abc` instead: `Mapping`, `Sequence`\n --> src/http_client/client.py:4:1\n  |\n3 | from dataclasses import dataclass, field\n4 | from typing import Any, Mapping, Sequence\n  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n5 |\n6 | import urllib3\n  |\nhelp: Import from `collections.abc`\n  |\n3 | from dataclasses import dataclass, field\n  - from typing import Any, Mapping, Sequence\n4 + from typing import Any\n5 + from collections.abc import Mapping, Sequence\n6 |\n  |\n\nUP037 [*] Remove quotes from type annotation\n   --> src/http_client/client.py:115:28\n    |\n113 |         self._manager.clear()\n114 |\n115 |     def __enter__(self) -> \"HttpClient\":\n    |                            ^^^^^^^^^^^^\n116 |         return self\n    |\nhelp: Remove quotes\n    |\n114 |\n    -     def __enter__(self) -> \"HttpClient\":\n115 +     def __enter__(self) -> HttpClient:\n116 |         return self\n    |\n\nFound 2 errors.\n[*] 2 fixable with the `--fix` option.\n",
+            "metadata": {
+              "output": "UP035 [*] Import from `collections.abc` instead: `Mapping`, `Sequence`\n --> src/http_client/client.py:4:1\n  |\n3 | from dataclasses import dataclass, field\n4 | from typing import Any, Mapping, Sequence\n  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n5 |\n6 | import urllib3\n  |\nhelp: Import from `collections.abc`\n  |\n3 | from dataclasses import dataclass, field\n  - from typing import Any, Mapping, Sequence\n4 + from typing import Any\n5 + from collections.abc import Mapping, Sequence\n6 |\n  |\n\nUP037 [*] Remove quotes from type annotation\n   --> src/http_client/client.py:115:28\n    |\n113 |         self._manager.clear()\n114 |\n115 |     def __enter__(self) -> \"HttpClient\":\n    |                            ^^^^^^^^^^^^\n116 |         return self\n    |\nhelp: Remove quotes\n    |\n114 |\n    -     def __enter__(self) -> \"HttpClient\":\n115 +     def __enter__(self) -> HttpClient:\n116 |         return self\n    |\n\nFound 2 errors.\n[*] 2 fixable with the `--fix` option.\n",
+              "exit": 1,
+              "truncated": false
+            },
+            "title": "cd /work && uv run ruff check . && uv run ruff format --check . && uv run pytest 2>&1 | tail -30",
+            "time": {
+              "start": 1791066211884,
+              "end": 1791066213031
+            }
+          },
+          "id": "prt_103dd850e0011fXtHVWHZze7VY",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd808f001ogO2jrko0ERRKY"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "173a482cbedca66d188aaa21bd3b7be034bf6969",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14762,
+            "input": 343,
+            "output": 83,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 14336
+            }
+          },
+          "cost": 0.000144258,
+          "id": "prt_103dd8b830012jjFVXpHe1VYf3",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd808f001ogO2jrko0ERRKY"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00014511,
+        "tokens": {
+          "total": 15126,
+          "input": 317,
+          "output": 89,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 14720
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066213678,
+          "completed": 1791066220578
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dd8d2e001QCAdoYB00xmoln",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "173a482cbedca66d188aaa21bd3b7be034bf6969",
+          "type": "step-start",
+          "id": "prt_103dd90c2001nfNcgyNZuMnd3c",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd8d2e001QCAdoYB00xmoln"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_Vh5QuX6d4t7pDdiFFkAt3209",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && uv run ruff check --fix . && uv run ruff format . && uv run ruff check . && uv run pytest 2>&1 | tail -20",
+              "timeout": 120000
+            },
+            "output": "Found 3 errors (3 fixed, 0 remaining).\n2 files reformatted, 3 files left unchanged\nAll checks passed!\n.....                                                                    [100%]\n5 passed in 1.11s\n",
+            "metadata": {
+              "output": "Found 3 errors (3 fixed, 0 remaining).\n2 files reformatted, 3 files left unchanged\nAll checks passed!\n.....                                                                    [100%]\n5 passed in 1.11s\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && uv run ruff check --fix . && uv run ruff format . && uv run ruff check . && uv run pytest 2>&1 | tail -20",
+            "time": {
+              "start": 1791066215200,
+              "end": 1791066219403
+            }
+          },
+          "id": "prt_103dd92690017uuXZA5c2LoOy2",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd8d2e001QCAdoYB00xmoln"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15126,
+            "input": 317,
+            "output": 89,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 14720
+            }
+          },
+          "cost": 0.00014511,
+          "id": "prt_103dda6cd001TxbUyniMamL5QL",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd8d2e001QCAdoYB00xmoln"
+        },
+        {
+          "type": "patch",
+          "hash": "173a482cbedca66d188aaa21bd3b7be034bf6969",
+          "files": [
+            "/work/README.md",
+            "/work/src/http_client/client.py"
+          ],
+          "id": "prt_103dda7fe001Zx5AUXK0B2BCYf",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dd8d2e001QCAdoYB00xmoln"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000129678,
+        "tokens": {
+          "total": 15271,
+          "input": 205,
+          "output": 59,
+          "reasoning": 31,
+          "cache": {
+            "write": 0,
+            "read": 14976
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066220606,
+          "completed": 1791066224092
+        },
+        "finish": "tool-calls",
+        "id": "msg_103dda83e001tqeRAQqalvrN8H",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-start",
+          "id": "prt_103ddab2b001j6CwSbXbZHyKyI",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dda83e001tqeRAQqalvrN8H"
+        },
+        {
+          "type": "reasoning",
+          "text": "All passing. Let me verify the CLI works with a quick check (help) and confirm the imports after ruff changes. Also test the entry point installed.",
+          "time": {
+            "start": 1791066221859,
+            "end": 1791066222128
+          },
+          "id": "prt_103ddad22001mYkEz98qxGgm4N",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dda83e001tqeRAQqalvrN8H"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_7ORkiFA0JxBIR6hHhhEC2643",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cd /work && uv run http-client --help 2>&1 | head -15 && git status --short"
+            },
+            "output": "usage: http-client [-h] [-X METHOD] [-d DATA] [--retries RETRIES]\n                   [--maxsize MAXSIZE] [--timeout TIMEOUT] [--insecure]\n                   url\n\nPerform an HTTP request with pooled connections and retries.\n\npositional arguments:\n  url                  URL to request\n\noptions:\n  -h, --help           show this help message and exit\n  -X, --method METHOD  HTTP method (default: GET)\n  -d, --data DATA      Request body\n  --retries RETRIES    Maximum number of retries (default: 3)\n  --maxsize MAXSIZE    Max pooled connections per host (default: 10)\n?? .gitignore\n?? .opencode/\n?? .python-version\n?? README.md\n?? opencode.json\n?? pyproject.toml\n?? src/\n?? tests/\n?? uv.lock\n",
+            "metadata": {
+              "output": "usage: http-client [-h] [-X METHOD] [-d DATA] [--retries RETRIES]\n                   [--maxsize MAXSIZE] [--timeout TIMEOUT] [--insecure]\n                   url\n\nPerform an HTTP request with pooled connections and retries.\n\npositional arguments:\n  url                  URL to request\n\noptions:\n  -h, --help           show this help message and exit\n  -X, --method METHOD  HTTP method (default: GET)\n  -d, --data DATA      Request body\n  --retries RETRIES    Maximum number of retries (default: 3)\n  --maxsize MAXSIZE    Max pooled connections per host (default: 10)\n?? .gitignore\n?? .opencode/\n?? .python-version\n?? README.md\n?? opencode.json\n?? pyproject.toml\n?? src/\n?? tests/\n?? uv.lock\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "cd /work && uv run http-client --help 2>&1 | head -15 && git status --short",
+            "time": {
+              "start": 1791066222313,
+              "end": 1791066223127
+            }
+          },
+          "id": "prt_103ddae480011u1LjvNJRo6uBa",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dda83e001tqeRAQqalvrN8H"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15271,
+            "input": 205,
+            "output": 59,
+            "reasoning": 31,
+            "cache": {
+              "write": 0,
+              "read": 14976
+            }
+          },
+          "cost": 0.000129678,
+          "id": "prt_103ddb3fa001o6gcLbVPv4iVsU",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103dda83e001tqeRAQqalvrN8H"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000193446,
+        "tokens": {
+          "total": 15662,
+          "input": 245,
+          "output": 185,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 15232
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066224109,
+          "completed": 1791066226127
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ddb5ed0012iOXxdCkqmn53U",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-start",
+          "id": "prt_103ddb8e2001FIx0621vR2E7wA",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103ddb5ed0012iOXxdCkqmn53U"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_ET_W9wdkzHi5gcnwj1j8HaJ9465",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Configure pyproject.toml deps and tooling",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement low-level HTTP client with pooling + retries",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add .gitignore and README",
+                  "status": "completed",
+                  "priority": "low"
+                },
+                {
+                  "content": "Install deps and verify tests/lint",
+                  "status": "completed",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Configure pyproject.toml deps and tooling\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement low-level HTTP client with pooling + retries\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add CLI entry point\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add tests\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add .gitignore and README\",\n    \"status\": \"completed\",\n    \"priority\": \"low\"\n  },\n  {\n    \"content\": \"Install deps and verify tests/lint\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Configure pyproject.toml deps and tooling",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement low-level HTTP client with pooling + retries",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add .gitignore and README",
+                  "status": "completed",
+                  "priority": "low"
+                },
+                {
+                  "content": "Install deps and verify tests/lint",
+                  "status": "completed",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "0 todos",
+            "time": {
+              "start": 1791066225729,
+              "end": 1791066225737
+            }
+          },
+          "id": "prt_103ddbada0016UqiziQFlEWZh9",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103ddb5ed0012iOXxdCkqmn53U"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15662,
+            "input": 245,
+            "output": 185,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 15232
+            }
+          },
+          "cost": 0.000193446,
+          "id": "prt_103ddbd07001lHAZwGAeHiJzAf",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103ddb5ed0012iOXxdCkqmn53U"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103dcbeec001UHuZstnB5gSsFJ",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000209148,
+        "tokens": {
+          "total": 16071,
+          "input": 246,
+          "output": 209,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 15616
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791066226172,
+          "completed": 1791066228721
+        },
+        "finish": "stop",
+        "id": "msg_103ddbdfc00168kiXApZFG61jT",
+        "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3"
+      },
+      "parts": [
+        {
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-start",
+          "id": "prt_103ddc11c001n4pJ96xxn5j7G5",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103ddbdfc00168kiXApZFG61jT"
+        },
+        {
+          "type": "text",
+          "text": "Set up a `urllib3`-based project (the right library for low-level connection control).\n\n- `src/http_client/client.py` — `HttpClient` wrapping `PoolManager`; `PoolConfig` (`num_pools`, `maxsize`, `block`) and `RetryPolicy` (`total`, `backoff_factor`, `status_forcelist`, `allowed_methods`, ...) mapped to `urllib3.Retry`.\n- `src/http_client/__main__.py` — CLI; `src/http_client/__init__.py` — public API.\n- `tests/test_client.py` — 5 tests incl. a local flaky server proving retries and disablement.\n- `pyproject.toml`, `.gitignore`, `README.md`.\n\nVerified: `uv run ruff check .` clean, `uv run pytest` → 5 passed, CLI `--help` works.\n\nNothing committed (per policy). Run `uv run http-client <url>` to use it.",
+          "time": {
+            "start": 1791066227620,
+            "end": 1791066228389
+          },
+          "id": "prt_103ddc3a4001yK4jzPA1yS6KFx",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103ddbdfc00168kiXApZFG61jT"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "a05fbb42128958addf80a95c979957c143996c5b",
+          "type": "step-finish",
+          "tokens": {
+            "total": 16071,
+            "input": 246,
+            "output": 209,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 15616
+            }
+          },
+          "cost": 0.000209148,
+          "id": "prt_103ddc741001MNnn61nGnHAwSv",
+          "sessionID": "ses_efc234177ffex5kxqHlgWRSpq3",
+          "messageID": "msg_103ddbdfc00168kiXApZFG61jT"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1975 @@
+{
+  "info": {
+    "id": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+    "slug": "playful-forest",
+    "projectID": "global",
+    "directory": "/work",
+    "path": "",
+    "title": "Python low-level HTTP connection pooling & retries",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "version": "1.18.34",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0.005808738000000001,
+    "tokens": {
+      "input": 3559,
+      "output": 5270,
+      "reasoning": 2461,
+      "cache": {
+        "read": 212096,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1791064948625,
+      "updated": 1791065018567
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1791064948760
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "deepseek",
+          "modelID": "deepseek-flash"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": ".gitignore",
+              "patch": "Index: .gitignore\n===================================================================\n--- .gitignore\t\n+++ .gitignore\t\n@@ -0,0 +1,13 @@\n+__pycache__/\n+*.py[cod]\n+*.egg-info/\n+.eggs/\n+build/\n+dist/\n+.venv/\n+venv/\n+.pytest_cache/\n+.mypy_cache/\n+.ruff_cache/\n+.coverage\n+htmlcov/\n",
+              "additions": 13,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "README.md",
+              "patch": "Index: README.md\n===================================================================\n--- README.md\t\n+++ README.md\t\n@@ -0,0 +1,49 @@\n+# httpkit\n+\n+A small, explicit HTTP client for scripts that need low-level control over\n+connections. Built directly on [urllib3](https://urllib3.readthedocs.io/).\n+\n+- Connection pooling (`maxsize`, `num_pools`, blocking behavior)\n+- Tunable automatic retries (backoff, status list, allowed methods)\n+- Per-request timeouts, streaming, and raw `HTTPResponse` access\n+- HTTPS verification via `certifi`, optional proxy support\n+\n+## Install\n+\n+```bash\n+python -m venv .venv && source .venv/bin/activate\n+pip install -e \".[dev]\"\n+```\n+\n+## Usage\n+\n+```python\n+from httpkit import HTTPClient, RetryPolicy\n+\n+policy = RetryPolicy(\n+    total=5,\n+    backoff_factor=0.5,\n+    status_forcelist=(429, 500, 502, 503, 504),\n+)\n+\n+with HTTPClient(timeout=30.0, retries=policy, maxsize=20) as client:\n+    response = client.get(\"https://example.com/api\", preload_content=True)\n+    print(response.status, response.data)\n+\n+    # stream a large body without buffering it in memory\n+    for chunk in client.stream(\"GET\", \"https://example.com/big\"):\n+        ...\n+```\n+\n+### CLI\n+\n+```bash\n+httpkit https://example.com -X GET -H \"Accept: application/json\" --retries 5\n+httpkit https://example.com/file --stream > file.bin\n+```\n+\n+## Tests\n+\n+```bash\n+pytest\n+```\n",
+              "additions": 49,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "pyproject.toml",
+              "patch": "Index: pyproject.toml\n===================================================================\n--- pyproject.toml\t\n+++ pyproject.toml\t\n@@ -0,0 +1,29 @@\n+[build-system]\n+requires = [\"hatchling\"]\n+build-backend = \"hatchling.build\"\n+\n+[project]\n+name = \"httpkit\"\n+version = \"0.1.0\"\n+description = \"Low-level HTTP client with connection pooling and automatic retries\"\n+readme = \"README.md\"\n+requires-python = \">=3.9\"\n+dependencies = [\n+    \"urllib3>=2.0,<3\",\n+    \"certifi>=2023.0.0\",\n+]\n+\n+[project.optional-dependencies]\n+dev = [\n+    \"pytest>=7.0\",\n+]\n+\n+[project.scripts]\n+httpkit = \"httpkit.cli:main\"\n+\n+[tool.hatch.build.targets.wheel]\n+packages = [\"src/httpkit\"]\n+\n+[tool.pytest.ini_options]\n+testpaths = [\"tests\"]\n+addopts = \"-q\"\n",
+              "additions": 29,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/httpkit/__init__.py",
+              "patch": "Index: src/httpkit/__init__.py\n===================================================================\n--- src/httpkit/__init__.py\t\n+++ src/httpkit/__init__.py\t\n@@ -0,0 +1,6 @@\n+\"\"\"httpkit: low-level HTTP with connection pooling and automatic retries.\"\"\"\n+\n+from .client import HTTPClient, HTTPError, RetryPolicy\n+\n+__all__ = [\"HTTPClient\", \"HTTPError\", \"RetryPolicy\"]\n+__version__ = \"0.1.0\"\n",
+              "additions": 6,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/httpkit/cli.py",
+              "patch": "Index: src/httpkit/cli.py\n===================================================================\n--- src/httpkit/cli.py\t\n+++ src/httpkit/cli.py\t\n@@ -0,0 +1,68 @@\n+\"\"\"Command-line entry point for quick one-off requests.\"\"\"\n+\n+from __future__ import annotations\n+\n+import argparse\n+import sys\n+\n+from .client import HTTPClient, HTTPError, RetryPolicy\n+\n+\n+def build_parser() -> argparse.ArgumentParser:\n+    parser = argparse.ArgumentParser(\n+        prog=\"httpkit\",\n+        description=\"Fetch a URL using pooled connections with automatic retries.\",\n+    )\n+    parser.add_argument(\"url\")\n+    parser.add_argument(\"-X\", \"--method\", default=\"GET\")\n+    parser.add_argument(\"-H\", \"--header\", action=\"append\", default=[], metavar=\"K:V\")\n+    parser.add_argument(\"-d\", \"--data\", default=None)\n+    parser.add_argument(\"--timeout\", type=float, default=30.0)\n+    parser.add_argument(\"--retries\", type=int, default=3)\n+    parser.add_argument(\"--maxsize\", type=int, default=10)\n+    parser.add_argument(\"--backoff\", type=float, default=0.5)\n+    parser.add_argument(\"--stream\", action=\"store_true\")\n+    return parser\n+\n+\n+def _parse_headers(items: list[str]) -> dict[str, str]:\n+    headers: dict[str, str] = {}\n+    for item in items:\n+        if \":\" not in item:\n+            raise SystemExit(f\"invalid header {item!r}, expected 'Key: Value'\")\n+        key, value = item.split(\":\", 1)\n+        headers[key.strip()] = value.strip()\n+    return headers\n+\n+\n+def main(argv: list[str] | None = None) -> int:\n+    args = build_parser().parse_args(argv)\n+    policy = RetryPolicy(total=args.retries, backoff_factor=args.backoff)\n+\n+    try:\n+        with HTTPClient(\n+            timeout=args.timeout,\n+            retries=policy,\n+            maxsize=args.maxsize,\n+            headers=_parse_headers(args.header),\n+        ) as client:\n+            if args.stream:\n+                for chunk in client.stream(args.method, args.url, body=args.data):\n+                    sys.stdout.buffer.write(chunk)\n+                sys.stdout.buffer.flush()\n+            else:\n+                response = client.request(\n+                    args.method,\n+                    args.url,\n+                    body=args.data,\n+                    preload_content=True,\n+                )\n+                sys.stdout.buffer.write(response.data)\n+    except HTTPError as exc:\n+        print(f\"error: {exc}\", file=sys.stderr)\n+        return 1\n+    return 0\n+\n+\n+if __name__ == \"__main__\":\n+    raise SystemExit(main())\n",
+              "additions": 68,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "src/httpkit/client.py",
+              "patch": "Index: src/httpkit/client.py\n===================================================================\n--- src/httpkit/client.py\t\n+++ src/httpkit/client.py\t\n@@ -0,0 +1,206 @@\n+\"\"\"Low-level HTTP client built on urllib3.\n+\n+Provides centralised control over connection pooling, timeouts and automatic\n+retries while still exposing the raw :class:`urllib3.response.HTTPResponse`.\n+\"\"\"\n+\n+from __future__ import annotations\n+\n+import json as _json\n+from dataclasses import dataclass, field\n+from typing import Any, Iterator, Mapping, Optional, Sequence, Union\n+\n+import certifi\n+import urllib3\n+from urllib3 import Retry, Timeout\n+from urllib3._collections import HTTPHeaderDict\n+from urllib3.poolmanager import PoolManager, ProxyManager\n+from urllib3.response import HTTPResponse\n+\n+__all__ = [\"RetryPolicy\", \"HTTPClient\", \"HTTPError\"]\n+\n+DEFAULT_RETRY_STATUSES = (413, 429, 500, 502, 503, 504)\n+DEFAULT_ALLOWED_METHODS = frozenset(\n+    {\"DELETE\", \"GET\", \"HEAD\", \"OPTIONS\", \"PUT\", \"TRACE\", \"POST\"}\n+)\n+\n+\n+class HTTPError(urllib3.exceptions.HTTPError):\n+    \"\"\"Raised when a request ultimately fails after exhausting retries.\"\"\"\n+\n+\n+@dataclass(frozen=True)\n+class RetryPolicy:\n+    \"\"\"Declarative description of how requests should be retried.\n+\n+    Mirrors :class:`urllib3.util.retry.Retry`, but keeps the knobs we care\n+    about in one place and gives safe defaults for idempotent + POST traffic.\n+    \"\"\"\n+\n+    total: int = 3\n+    connect: Optional[int] = None\n+    read: Optional[int] = None\n+    redirect: Optional[int] = None\n+    status: Optional[int] = None\n+    backoff_factor: float = 0.5\n+    backoff_max: float = 120.0\n+    status_forcelist: Sequence[int] = field(default=DEFAULT_RETRY_STATUSES)\n+    allowed_methods: Optional[Sequence[str]] = field(\n+        default_factory=lambda: DEFAULT_ALLOWED_METHODS\n+    )\n+    respect_retry_after_header: bool = True\n+    raise_on_status: bool = False\n+\n+    def build(self) -> Retry:\n+        return Retry(\n+            total=self.total,\n+            connect=self.connect,\n+            read=self.read,\n+            redirect=self.redirect,\n+            status=self.status,\n+            backoff_factor=self.backoff_factor,\n+            backoff_max=self.backoff_max,\n+            status_forcelist=self.status_forcelist,\n+            allowed_methods=self.allowed_methods,\n+            respect_retry_after_header=self.respect_retry_after_header,\n+            raise_on_status=self.raise_on_status,\n+        )\n+\n+\n+class HTTPClient:\n+    \"\"\"A thin, explicit wrapper around :class:`urllib3.PoolManager`.\n+\n+    Example:\n+        with HTTPClient(maxsize=20, retries=RetryPolicy(total=5)) as client:\n+            response = client.get(\"https://example.com/api\")\n+            print(response.status)\n+    \"\"\"\n+\n+    def __init__(\n+        self,\n+        *,\n+        timeout: Union[float, Timeout] = 30.0,\n+        retries: Union[int, RetryPolicy, Retry, None] = None,\n+        maxsize: int = 10,\n+        num_pools: int = 10,\n+        block: bool = False,\n+        cert_reqs: str = \"CERT_REQUIRED\",\n+        ca_certs: Optional[str] = None,\n+        proxy_url: Optional[str] = None,\n+        headers: Optional[Mapping[str, str]] = None,\n+        **pool_kwargs: Any,\n+    ) -> None:\n+        self.timeout = timeout if isinstance(timeout, Timeout) else Timeout(total=timeout)\n+        self.retries = self._coerce_retries(retries)\n+        self.default_headers = dict(headers or {})\n+        self._pool_kwargs = pool_kwargs\n+\n+        manager_cls = ProxyManager if proxy_url else PoolManager\n+        manager_kwargs: dict[str, Any] = {\n+            \"maxsize\": maxsize,\n+            \"num_pools\": num_pools,\n+            \"block\": block,\n+            \"retries\": self.retries,\n+            \"timeout\": self.timeout,\n+            \"cert_reqs\": cert_reqs,\n+            \"ca_certs\": ca_certs or certifi.where(),\n+            **pool_kwargs,\n+        }\n+        if proxy_url:\n+            manager_kwargs[\"proxy_url\"] = proxy_url\n+        self.pool = manager_cls(**manager_kwargs)\n+\n+    @staticmethod\n+    def _coerce_retries(\n+        retries: Union[int, RetryPolicy, Retry, None]\n+    ) -> Retry:\n+        if retries is None:\n+            return RetryPolicy().build()\n+        if isinstance(retries, Retry):\n+            return retries\n+        if isinstance(retries, RetryPolicy):\n+            return retries.build()\n+        if isinstance(retries, int):\n+            return RetryPolicy(total=retries).build()\n+        raise TypeError(f\"Unsupported retries value: {retries!r}\")\n+\n+    def request(\n+        self,\n+        method: str,\n+        url: str,\n+        *,\n+        body: Any = None,\n+        fields: Any = None,\n+        headers: Optional[Mapping[str, str]] = None,\n+        redirect: bool = True,\n+        preload_content: bool = False,\n+        decode_content: bool = True,\n+        retries: Optional[Retry] = None,\n+        **urlopen_kwargs: Any,\n+    ) -> HTTPResponse:\n+        \"\"\"Issue a request and return the live :class:`HTTPResponse`.\n+\n+        ``preload_content`` defaults to ``False`` so callers retain low-level\n+        control over streaming and connection reuse. Set it to ``True`` for a\n+        fully buffered response.\n+        \"\"\"\n+        merged_headers = HTTPHeaderDict(self.default_headers)\n+        merged_headers.update(headers or {})\n+\n+        try:\n+            return self.pool.request(\n+                method,\n+                url,\n+                body=body,\n+                fields=fields,\n+                headers=merged_headers,\n+                redirect=redirect,\n+                preload_content=preload_content,\n+                decode_content=decode_content,\n+                retries=retries,\n+                **urlopen_kwargs,\n+            )\n+        except urllib3.exceptions.HTTPError as exc:\n+            raise HTTPError(f\"{method} {url} failed: {exc}\") from exc\n+\n+    def get(self, url: str, **kwargs: Any) -> HTTPResponse:\n+        return self.request(\"GET\", url, **kwargs)\n+\n+    def post(self, url: str, **kwargs: Any) -> HTTPResponse:\n+        return self.request(\"POST\", url, **kwargs)\n+\n+    def put(self, url: str, **kwargs: Any) -> HTTPResponse:\n+        return self.request(\"PUT\", url, **kwargs)\n+\n+    def delete(self, url: str, **kwargs: Any) -> HTTPResponse:\n+        return self.request(\"DELETE\", url, **kwargs)\n+\n+    def stream(\n+        self,\n+        method: str,\n+        url: str,\n+        *,\n+        chunk_size: int = 8192,\n+        **kwargs: Any,\n+    ) -> Iterator[bytes]:\n+        \"\"\"Yield decoded chunks, always releasing the connection afterwards.\"\"\"\n+        kwargs.setdefault(\"preload_content\", False)\n+        response = self.request(method, url, **kwargs)\n+        try:\n+            yield from response.stream(chunk_size, decode_content=True)\n+        finally:\n+            response.release_conn()\n+\n+    def get_json(self, url: str, **kwargs: Any) -> Any:\n+        kwargs[\"preload_content\"] = True\n+        response = self.request(\"GET\", url, **kwargs)\n+        return _json.loads(response.data)\n+\n+    def close(self) -> None:\n+        self.pool.clear()\n+\n+    def __enter__(self) -> \"HTTPClient\":\n+        return self\n+\n+    def __exit__(self, *exc_info: Any) -> None:\n+        self.close()\n",
+              "additions": 206,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "tests/test_client.py",
+              "patch": "Index: tests/test_client.py\n===================================================================\n--- tests/test_client.py\t\n+++ tests/test_client.py\t\n@@ -0,0 +1,79 @@\n+import threading\n+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n+\n+import pytest\n+\n+from httpkit import HTTPClient, HTTPError, RetryPolicy\n+\n+\n+class _Handler(BaseHTTPRequestHandler):\n+    fail_times = 0\n+    hits = 0\n+    lock = threading.Lock()\n+\n+    def log_message(self, *args):  # keep test output quiet\n+        pass\n+\n+    def do_GET(self):\n+        with _Handler.lock:\n+            _Handler.hits += 1\n+            attempt = _Handler.hits\n+        if attempt <= _Handler.fail_times:\n+            self.send_response(503)\n+            self.send_header(\"Content-Length\", \"0\")\n+            self.end_headers()\n+            return\n+        body = b\"ok\"\n+        self.send_response(200)\n+        self.send_header(\"Content-Length\", str(len(body)))\n+        self.end_headers()\n+        self.wfile.write(body)\n+\n+\n+@pytest.fixture\n+def server():\n+    _Handler.fail_times = 0\n+    _Handler.hits = 0\n+    httpd = ThreadingHTTPServer((\"127.0.0.1\", 0), _Handler)\n+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)\n+    thread.start()\n+    host, port = httpd.server_address\n+    try:\n+        yield f\"http://{host}:{port}\"\n+    finally:\n+        httpd.shutdown()\n+        httpd.server_close()\n+        thread.join()\n+\n+\n+def test_basic_get(server):\n+    with HTTPClient() as client:\n+        response = client.get(server, preload_content=True)\n+        assert response.status == 200\n+        assert response.data == b\"ok\"\n+\n+\n+def test_retries_on_503_then_succeeds(server):\n+    _Handler.fail_times = 2\n+    policy = RetryPolicy(total=3, backoff_factor=0.0)\n+    with HTTPClient(retries=policy) as client:\n+        response = client.get(server, preload_content=True)\n+    assert response.status == 200\n+    assert _Handler.hits == 3\n+\n+\n+def test_exhausted_retries_raise(server):\n+    _Handler.fail_times = 10\n+    policy = RetryPolicy(total=2, backoff_factor=0.0)\n+    with HTTPClient(retries=policy) as client:\n+        response = client.get(server, preload_content=True)\n+    # raise_on_status defaults to False, so we get the final 503 back.\n+    assert response.status == 503\n+    assert _Handler.hits == 3\n+\n+\n+def test_connection_error_is_wrapped():\n+    policy = RetryPolicy(total=1, backoff_factor=0.0)\n+    with HTTPClient(retries=policy, timeout=1.0) as client:\n+        with pytest.raises(HTTPError):\n+            client.get(\"http://127.0.0.1:1/\", preload_content=True)\n",
+              "additions": 79,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Set up a new Python project for a script that needs low-level control over HTTP connections, including connection pooling and automatic retries.\"",
+          "id": "prt_103ca403e001yrr9x5lrhFZipl",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4016001Vpq5LY2OYzcvWp"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000107154,
+        "tokens": {
+          "total": 7448,
+          "input": 183,
+          "output": 55,
+          "reasoning": 42,
+          "cache": {
+            "write": 0,
+            "read": 7168
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064949513,
+          "completed": 1791064951757
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca4309001jM7LLwfk9nP54i",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103ca4776001rpiBJCYJg9GFq1",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4309001jM7LLwfk9nP54i"
+        },
+        {
+          "type": "reasoning",
+          "text": "The user wants to set up a new Python project with low-level HTTP control, connection pooling, and automatic retries. Let me first look at the current directory to understand context.\n\nLet me explore the workspace.",
+          "time": {
+            "start": 1791064950780,
+            "end": 1791064950986
+          },
+          "id": "prt_103ca47fc001ki3QfGOabDV63i",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4309001jM7LLwfk9nP54i"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_9VFWuoEiVeiPhqKFpDnV4879",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la && git status && git log --oneline -5 2>/dev/null"
+            },
+            "output": "total 8\ndrwxr-xr-x 5  501 dialout  160 Oct  3 22:02 .\ndrwxr-xr-x 1 root root    4096 Oct  3 22:02 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:02 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 22:02 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 22:02 opencode.json\nOn branch main\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.opencode/\n\topencode.json\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n",
+            "metadata": {
+              "output": "total 8\ndrwxr-xr-x 5  501 dialout  160 Oct  3 22:02 .\ndrwxr-xr-x 1 root root    4096 Oct  3 22:02 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 22:02 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 22:02 .opencode\n-rw-r--r-- 1  501 dialout   51 Oct  3 22:02 opencode.json\nOn branch main\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.opencode/\n\topencode.json\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n",
+              "exit": 128,
+              "truncated": false
+            },
+            "title": "ls -la && git status && git log --oneline -5 2>/dev/null",
+            "time": {
+              "start": 1791064951081,
+              "end": 1791064951425
+            }
+          },
+          "id": "prt_103ca48cf0014y8MRKA3eJwbeN",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4309001jM7LLwfk9nP54i"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7448,
+            "input": 183,
+            "output": 55,
+            "reasoning": 42,
+            "cache": {
+              "write": 0,
+              "read": 7168
+            }
+          },
+          "cost": 0.000107154,
+          "id": "prt_103ca4b2c001zxn4WE1RBnGZLH",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4309001jM7LLwfk9nP54i"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000222672,
+        "tokens": {
+          "total": 7920,
+          "input": 216,
+          "output": 145,
+          "reasoning": 135,
+          "cache": {
+            "write": 0,
+            "read": 7424
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064951773,
+          "completed": 1791064954291
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca4bdd001PWQzh5Dz5JZrRr",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103ca4eb3001GSSni83F63UVns",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4bdd001PWQzh5Dz5JZrRr"
+        },
+        {
+          "type": "reasoning",
+          "text": "The workspace is essentially empty. Let me check the opencode.json and .opencode to understand any conventions. But the task is to set up a Python project. Let me think about the best approach for \"low-level control over HTTP connections, including connection pooling and automatic retries.\"\n\nThe best library for this is `urllib3` - it provides low-level HTTP client with connection pooling and retry logic. Alternatively `httpx` or `requests` (with `HTTPAdapter`). But \"low-level control over HTTP connections, including connection pooling and automatic retries\" strongly points to `urllib3`.\n\nLet me check the opencode.json quickly for conventions.",
+          "time": {
+            "start": 1791064952939,
+            "end": 1791064953571
+          },
+          "id": "prt_103ca506b001OjTIyY70gtweg1",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4bdd001PWQzh5Dz5JZrRr"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_00_9ksHUq8OLKbIFoNDOf0j6571",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/opencode.json"
+            },
+            "output": "<path>/work/opencode.json</path>\n<type>file</type>\n<content>\n1: {\n2:   \"$schema\": \"https://opencode.ai/config.json\"\n3: }\n\n(End of file - total 3 lines)\n</content>",
+            "metadata": {
+              "preview": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/work/opencode.json",
+                "text": "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}",
+                "lineStart": 1,
+                "lineEnd": 3,
+                "totalLines": 3,
+                "truncated": false
+              }
+            },
+            "title": "opencode.json",
+            "time": {
+              "start": 1791064953639,
+              "end": 1791064953692
+            }
+          },
+          "id": "prt_103ca52e8001MpMH5T3BSAVYSU",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4bdd001PWQzh5Dz5JZrRr"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_01_u2bYEcRocfA8nK1IQzb57092",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls -la /work/.opencode && python3 --version && which python3 pip3 2>/dev/null; python3 -c \"import urllib3; print('urllib3', urllib3.__version__)\" 2>/dev/null; python3 -c \"import requests; print('requests', requests.__version__)\" 2>/dev/null"
+            },
+            "output": "total 24\ndrwxr-xr-x  7 501 dialout   224 Oct  3 22:02 .\ndrwxr-xr-x  5 501 dialout   160 Oct  3 22:02 ..\n-rw-r--r--  1 501 dialout    63 Oct  3 22:02 .gitignore\ndrwxr-xr-x 30 501 dialout   960 Oct  3 22:02 node_modules\n-rw-r--r--  1 501 dialout 14634 Oct  3 22:02 package-lock.json\n-rw-r--r--  1 501 dialout    65 Oct  3 22:02 package.json\ndrwxr-xr-x  3 501 dialout    96 Oct  3 22:02 plugins\nPython 3.13.5\n/usr/bin/python3\n/usr/bin/pip3\n",
+            "metadata": {
+              "output": "total 24\ndrwxr-xr-x  7 501 dialout   224 Oct  3 22:02 .\ndrwxr-xr-x  5 501 dialout   160 Oct  3 22:02 ..\n-rw-r--r--  1 501 dialout    63 Oct  3 22:02 .gitignore\ndrwxr-xr-x 30 501 dialout   960 Oct  3 22:02 node_modules\n-rw-r--r--  1 501 dialout 14634 Oct  3 22:02 package-lock.json\n-rw-r--r--  1 501 dialout    65 Oct  3 22:02 package.json\ndrwxr-xr-x  3 501 dialout    96 Oct  3 22:02 plugins\nPython 3.13.5\n/usr/bin/python3\n/usr/bin/pip3\n",
+              "exit": 1,
+              "truncated": false
+            },
+            "title": "ls -la /work/.opencode && python3 --version && which python3 pip3 2>/dev/null; python3 -c \"import urllib3; print('urllib3', urllib3.__version__)\" 2>/dev/null; python3 -c \"import requests; print('requests', requests.__version__)\" 2>/dev/null",
+            "time": {
+              "start": 1791064953888,
+              "end": 1791064954007
+            }
+          },
+          "id": "prt_103ca5332001sTygWY17NQQL3D",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4bdd001PWQzh5Dz5JZrRr"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7920,
+            "input": 216,
+            "output": 145,
+            "reasoning": 135,
+            "cache": {
+              "write": 0,
+              "read": 7424
+            }
+          },
+          "cost": 0.000222672,
+          "id": "prt_103ca5533001LuJvk1xy4uxE9o",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca4bdd001PWQzh5Dz5JZrRr"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000854574,
+        "tokens": {
+          "total": 9476,
+          "input": 377,
+          "output": 174,
+          "reasoning": 1117,
+          "cache": {
+            "write": 0,
+            "read": 7808
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064954299,
+          "completed": 1791064959723
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca55bb001SjIeyI7znb75Mi",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103ca57ce001goj3WVJyznB15q",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca55bb001SjIeyI7znb75Mi"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me check the .opencode/.gitignore and package.json maybe irrelevant. The workspace is a fresh project. I need to set up a Python project using urllib3 for low-level HTTP control.\n\nLet me plan:\n1. Create project structure with `pyproject.toml`\n2. Create the main script with connection pooling and retries using urllib3\n3. Maybe tests\n4. README\n\nLet me think about what's appropriate. The user says \"Set up a new Python project for a script that needs low-level control over HTTP connections, including connection pooling and automatic retries.\"\n\nI'll create a minimal but well-structured Python project. Use urllib3 as the core library since it's the standard for low-level HTTP connection control with pooling and retries. Use `pyproject.toml` with setuptools or hatchling.\n\nLet me create:\n- `pyproject.toml`\n- `src/http_client/__init__.py`\n- `src/http_client/client.py` - main client with PoolManager and Retry configuration\n- `src/http_client/__main__.py` or `main.py` script entry point\n- `tests/test_client.py`\n- `README.md`\n- `.gitignore`\n\nActually, keep it reasonably minimal, don't over-engineer. But the user said \"set up a new Python project for a script\". Let me do a proper project layout.\n\nLet me create a client that demonstrates low-level control:\n- `PoolManager` with configurable `num_pools`, `maxsize`, `block`, `timeout`\n- `Retry` with total, backoff_factor, status_forcelist, allowed_methods, respect_retry_after_header\n- HTTPS via certifi\n- Methods: get, post, request with streaming\n\nLet me write the files. I'll use `urllib3`. Version: Python 3.13. urllib3 v2.\n\nLet me create everything.\n\nActually, let me not use src layout overly complex but it's good practice. Let me do a simple package layout at root `httpkit/` or use src. I'll use src layout.\n\nLet me name the package `httpkit`.\n\npyproject.toml:\n```toml\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[project]\nname = \"httpkit\"\nversion = \"0.1.0\"\ndescription = \"Low-level HTTP client with connection pooling and automatic retries\"\nreadme = \"README.md\"\nrequires-python = \">=3.9\"\ndependencies = [\n    \"urllib3>=2.0\",\n]\n\n[project.optional-dependencies]\ndev = [\n    \"pytest>=7.0\",\n    \"pytest-httpserver>=1.0\",\n]\n\n[project.scripts]\nhttpkit = \"httpkit.cli:main\"\n\n[tool.hatch.build.targets.wheel]\npackages = [\"src/httpkit\"]\n```\n\nHmm, hatchling may not be installed. But for project setup it's fine; the user can `pip install -e .`. Let me use setuptools to be safe since it's nearly always available? Hatchling is common. Actually with pip build isolation it will install hatchling. Either is fine. Let me use hatchling.\n\nHmm, but maybe minimal. Let me focus on the actual code.\n\nclient.py:\n```python\nfrom __future__ import annotations\n\nfrom dataclasses import dataclass, field\nfrom typing import Any, Mapping, Optional, Sequence\n\nimport certifi\nimport urllib3\nfrom urllib3 import PoolManager, ProxyManager, Retry, Timeout\nfrom urllib3.response import HTTPResponse\n\n\n@dataclass\nclass RetryPolicy:\n    total: int = 3\n    connect: int | None = None\n    read: int | None = None\n    status: int | None = None\n    backoff_factor: float = 0.5\n    status_forcelist: Sequence[int] = (429, 500, 502, 503, 504)\n    allowed_methods: frozenset[str] = field(default_factory=lambda: frozenset({\"GET\",\"HEAD\",\"PUT\",\"DELETE\",\"OPTIONS\",\"TRACE\",\"POST\"}))\n    respect_retry_after_header: bool = True\n    raise_on_status: bool = False\n\n    def to_urllib3(self) -> Retry:\n        ...\n```\n\nThen HTTPClient wrapping PoolManager.\n\nLet me write clean code. I'll add a CLI too maybe overkill. The user said \"script\", so a `__main__` or cli entry is nice. Let me include a small CLI.\n\nLet me build the files now. I'll create the todo list since this is multi-step.\n\nActually the task is moderate. Let me use a todo list.\n\nLet me not overthink; create files and verify with a test using pytest or just import. I'll install deps in a venv? The environment may not have network. Let me test import. urllib3 not installed apparently (the earlier command printed nothing for urllib3). Let me check pip availability and whether we can install. Let me try creating a venv and installing.\n\nActually network may be available. Let me proceed with creating files, then attempt install/test.\n\nLet me create the todo list.",
+          "time": {
+            "start": 1791064955114,
+            "end": 1791064959149
+          },
+          "id": "prt_103ca58ea001pG5Zf9KTBI2KS3",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca55bb001SjIeyI7znb75Mi"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_bSwbmIItEepvMxl5A9P42364",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Create pyproject.toml with urllib3 dependency and tooling",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement HTTP client with connection pooling + retry policy",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point and package init",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests and README/.gitignore",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Install and verify (import + tests)",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Create pyproject.toml with urllib3 dependency and tooling\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement HTTP client with connection pooling + retry policy\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add CLI entry point and package init\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add tests and README/.gitignore\",\n    \"status\": \"pending\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Install and verify (import + tests)\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Create pyproject.toml with urllib3 dependency and tooling",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement HTTP client with connection pooling + retry policy",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point and package init",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests and README/.gitignore",
+                  "status": "pending",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Install and verify (import + tests)",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "5 todos",
+            "time": {
+              "start": 1791064959539,
+              "end": 1791064959555
+            }
+          },
+          "id": "prt_103ca68b1001FFXdOakQSFhBfe",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca55bb001SjIeyI7znb75Mi"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 9476,
+            "input": 377,
+            "output": 174,
+            "reasoning": 1117,
+            "cache": {
+              "write": 0,
+              "read": 7808
+            }
+          },
+          "cost": 0.000854574,
+          "id": "prt_103ca6aa7001swLBahNHicYeAI",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca55bb001SjIeyI7znb75Mi"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000212316,
+        "tokens": {
+          "total": 9918,
+          "input": 186,
+          "output": 237,
+          "reasoning": 23,
+          "cache": {
+            "write": 0,
+            "read": 9472
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064959729,
+          "completed": 1791064961209
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca6af100165l0GgtHYVg4Y0",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "type": "step-start",
+          "id": "prt_103ca6cce001y53UvIctJPKgpU",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca6af100165l0GgtHYVg4Y0"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me create the project files. I'll use urllib3 v2.\n\nFirst pyproject.toml.",
+          "time": {
+            "start": 1791064960305,
+            "end": 1791064960595
+          },
+          "id": "prt_103ca6d310011w2RyxWWUbLscf",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca6af100165l0GgtHYVg4Y0"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_WUSBTIXNXa0l6JgxqtSJ3750",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/pyproject.toml",
+              "content": "[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n\n[project]\nname = \"httpkit\"\nversion = \"0.1.0\"\ndescription = \"Low-level HTTP client with connection pooling and automatic retries\"\nreadme = \"README.md\"\nrequires-python = \">=3.9\"\ndependencies = [\n    \"urllib3>=2.0,<3\",\n    \"certifi>=2023.0.0\",\n]\n\n[project.optional-dependencies]\ndev = [\n    \"pytest>=7.0\",\n]\n\n[project.scripts]\nhttpkit = \"httpkit.cli:main\"\n\n[tool.hatch.build.targets.wheel]\npackages = [\"src/httpkit\"]\n\n[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\naddopts = \"-q\"\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/pyproject.toml",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "pyproject.toml",
+            "time": {
+              "start": 1791064961050,
+              "end": 1791064961074
+            }
+          },
+          "id": "prt_103ca6e5a00162pEQaIxNH7RcX",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca6af100165l0GgtHYVg4Y0"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "f0587ec3064e55bb43e520f12a2ae21080ab2bf4",
+          "type": "step-finish",
+          "tokens": {
+            "total": 9918,
+            "input": 186,
+            "output": 237,
+            "reasoning": 23,
+            "cache": {
+              "write": 0,
+              "read": 9472
+            }
+          },
+          "cost": 0.000212316,
+          "id": "prt_103ca70810013CvWyVOIbaMMet",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca6af100165l0GgtHYVg4Y0"
+        },
+        {
+          "type": "patch",
+          "hash": "d1049f3e14158861c426c3200e59afc27085c73a",
+          "files": [
+            "/work/pyproject.toml"
+          ],
+          "id": "prt_103ca70b5001QwVRa69R0B5L6E",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca6af100165l0GgtHYVg4Y0"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001272684,
+        "tokens": {
+          "total": 11955,
+          "input": 206,
+          "output": 1777,
+          "reasoning": 244,
+          "cache": {
+            "write": 0,
+            "read": 9728
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064961215,
+          "completed": 1791064968793
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca70bf001dU2KjaTNp4blJA",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "f0587ec3064e55bb43e520f12a2ae21080ab2bf4",
+          "type": "step-start",
+          "id": "prt_103ca72a9001K3q23wUqRnfRMd",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca70bf001dU2KjaTNp4blJA"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now the client module. Let me write it carefully.\n\nImportant: urllib3 v2 `Retry` signature. `allowed_methods` accepts an iterable (set) or None. `status_forcelist`. `backoff_factor` with `backoff_max`. `Retry.DEFAULT_ALLOWED_METHODS` in v2 is `frozenset({'DELETE', 'GET', 'HEAD', 'OPTIONS', 'PUT', 'TRACE'})` (no POST). For automatic retries including POST, set allowed_methods explicitly.\n\nAlso `respect_retry_after_header`.\n\n`PoolManager(num_pools=10, maxsize=10, block=False, timeout=Timeout(...), retries=Retry, cert_reqs='CERT_REQUIRED', ca_certs=certifi.where())`.\n\nLet me create a client with:\n- configurable pool settings\n- retry policy\n- timeouts (connect/read)\n- methods to build request_url and issue requests\n- context manager close\n\nI'll add `request()` returning `HTTPResponse` and convenience `get_json`, `post_json`. Also `request_stream`.\n\nLet me write.",
+          "time": {
+            "start": 1791064962237,
+            "end": 1791064963364
+          },
+          "id": "prt_103ca74bd001jI0465VznpHxUF",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca70bf001dU2KjaTNp4blJA"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_wFkYfH7l5cZFT1oUUuqB3895",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "\"\"\"Low-level HTTP client built on urllib3.\n\nProvides centralised control over connection pooling, timeouts and automatic\nretries while still exposing the raw :class:`urllib3.response.HTTPResponse`.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport json as _json\nfrom dataclasses import dataclass, field\nfrom typing import Any, Iterator, Mapping, Optional, Sequence, Union\n\nimport certifi\nimport urllib3\nfrom urllib3 import Retry, Timeout\nfrom urllib3._collections import HTTPHeaderDict\nfrom urllib3.poolmanager import PoolManager, ProxyManager\nfrom urllib3.response import HTTPResponse\n\n__all__ = [\"RetryPolicy\", \"HTTPClient\", \"HTTPError\"]\n\nDEFAULT_RETRY_STATUSES = (413, 429, 500, 502, 503, 504)\nDEFAULT_ALLOWED_METHODS = frozenset(\n    {\"DELETE\", \"GET\", \"HEAD\", \"OPTIONS\", \"PUT\", \"TRACE\", \"POST\"}\n)\n\n\nclass HTTPError(urllib3.exceptions.HTTPError):\n    \"\"\"Raised when a request ultimately fails after exhausting retries.\"\"\"\n\n\n@dataclass(frozen=True)\nclass RetryPolicy:\n    \"\"\"Declarative description of how requests should be retried.\n\n    Mirrors :class:`urllib3.util.retry.Retry`, but keeps the knobs we care\n    about in one place and gives safe defaults for idempotent + POST traffic.\n    \"\"\"\n\n    total: int = 3\n    connect: Optional[int] = None\n    read: Optional[int] = None\n    redirect: Optional[int] = None\n    status: Optional[int] = None\n    backoff_factor: float = 0.5\n    backoff_max: float = 120.0\n    status_forcelist: Sequence[int] = field(default=DEFAULT_RETRY_STATUSES)\n    allowed_methods: Optional[Sequence[str]] = field(\n        default_factory=lambda: DEFAULT_ALLOWED_METHODS\n    )\n    respect_retry_after_header: bool = True\n    raise_on_status: bool = False\n\n    def build(self) -> Retry:\n        return Retry(\n            total=self.total,\n            connect=self.connect,\n            read=self.read,\n            redirect=self.redirect,\n            status=self.status,\n            backoff_factor=self.backoff_factor,\n            backoff_max=self.backoff_max,\n            status_forcelist=self.status_forcelist,\n            allowed_methods=self.allowed_methods,\n            respect_retry_after_header=self.respect_retry_after_header,\n            raise_on_status=self.raise_on_status,\n        )\n\n\nclass HTTPClient:\n    \"\"\"A thin, explicit wrapper around :class:`urllib3.PoolManager`.\n\n    Example:\n        with HTTPClient(maxsize=20, retries=RetryPolicy(total=5)) as client:\n            response = client.get(\"https://example.com/api\")\n            print(response.status)\n    \"\"\"\n\n    def __init__(\n        self,\n        *,\n        timeout: Union[float, Timeout] = 30.0,\n        retries: Union[int, RetryPolicy, Retry, None] = None,\n        maxsize: int = 10,\n        num_pools: int = 10,\n        block: bool = False,\n        cert_reqs: str = \"CERT_REQUIRED\",\n        ca_certs: Optional[str] = None,\n        proxy_url: Optional[str] = None,\n        headers: Optional[Mapping[str, str]] = None,\n        **pool_kwargs: Any,\n    ) -> None:\n        self.timeout = timeout if isinstance(timeout, Timeout) else Timeout(total=timeout)\n        self.retries = self._coerce_retries(retries)\n        self.default_headers = dict(headers or {})\n        self._pool_kwargs = pool_kwargs\n\n        manager_cls = ProxyManager if proxy_url else PoolManager\n        manager_kwargs: dict[str, Any] = {\n            \"maxsize\": maxsize,\n            \"num_pools\": num_pools,\n            \"block\": block,\n            \"retries\": self.retries,\n            \"timeout\": self.timeout,\n            \"cert_reqs\": cert_reqs,\n            \"ca_certs\": ca_certs or certifi.where(),\n            **pool_kwargs,\n        }\n        if proxy_url:\n            manager_kwargs[\"proxy_url\"] = proxy_url\n        self.pool = manager_cls(**manager_kwargs)\n\n    @staticmethod\n    def _coerce_retries(\n        retries: Union[int, RetryPolicy, Retry, None]\n    ) -> Retry:\n        if retries is None:\n            return RetryPolicy().build()\n        if isinstance(retries, Retry):\n            return retries\n        if isinstance(retries, RetryPolicy):\n            return retries.build()\n        if isinstance(retries, int):\n            return RetryPolicy(total=retries).build()\n        raise TypeError(f\"Unsupported retries value: {retries!r}\")\n\n    def request(\n        self,\n        method: str,\n        url: str,\n        *,\n        body: Any = None,\n        fields: Any = None,\n        headers: Optional[Mapping[str, str]] = None,\n        redirect: bool = True,\n        preload_content: bool = False,\n        decode_content: bool = True,\n        retries: Optional[Retry] = None,\n        **urlopen_kwargs: Any,\n    ) -> HTTPResponse:\n        \"\"\"Issue a request and return the live :class:`HTTPResponse`.\n\n        ``preload_content`` defaults to ``False`` so callers retain low-level\n        control over streaming and connection reuse. Set it to ``True`` for a\n        fully buffered response.\n        \"\"\"\n        merged_headers = {**self.default_headers, **(headers or {})}\n        if isinstance(merged_headers, HTTPHeaderDict) is False:\n            merged_headers = HTTPHeaderDict(merged_headers)\n\n        try:\n            return self.pool.request(\n                method,\n                url,\n                body=body,\n                fields=fields,\n                headers=merged_headers,\n                redirect=redirect,\n                preload_content=preload_content,\n                decode_content=decode_content,\n                retries=retries,\n                **urlopen_kwargs,\n            )\n        except urllib3.exceptions.HTTPError as exc:\n            raise HTTPError(f\"{method} {url} failed: {exc}\") from exc\n\n    def get(self, url: str, **kwargs: Any) -> HTTPResponse:\n        return self.request(\"GET\", url, **kwargs)\n\n    def post(self, url: str, **kwargs: Any) -> HTTPResponse:\n        return self.request(\"POST\", url, **kwargs)\n\n    def put(self, url: str, **kwargs: Any) -> HTTPResponse:\n        return self.request(\"PUT\", url, **kwargs)\n\n    def delete(self, url: str, **kwargs: Any) -> HTTPResponse:\n        return self.request(\"DELETE\", url, **kwargs)\n\n    def stream(\n        self,\n        method: str,\n        url: str,\n        *,\n        chunk_size: int = 8192,\n        **kwargs: Any,\n    ) -> Iterator[bytes]:\n        \"\"\"Yield decoded chunks, always releasing the connection afterwards.\"\"\"\n        kwargs.setdefault(\"preload_content\", False)\n        response = self.request(method, url, **kwargs)\n        try:\n            yield from response.stream(chunk_size, decode_content=True)\n        finally:\n            response.release_conn()\n\n    def get_json(self, url: str, **kwargs: Any) -> Any:\n        kwargs[\"preload_content\"] = True\n        response = self.request(\"GET\", url, **kwargs)\n        return _json.loads(response.data)\n\n    def close(self) -> None:\n        self.pool.clear()\n\n    def __enter__(self) -> \"HTTPClient\":\n        return self\n\n    def __exit__(self, *exc_info: Any) -> None:\n        self.close()\n",
+              "filePath": "/work/src/httpkit/client.py"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/httpkit/client.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/httpkit/client.py",
+            "time": {
+              "start": 1791064968648,
+              "end": 1791064968662
+            }
+          },
+          "id": "prt_103ca7928001o7q6pgVBjLzhjF",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca70bf001dU2KjaTNp4blJA"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "186b54eef13d6b59d29cc96603b729620a47fe1a",
+          "type": "step-finish",
+          "tokens": {
+            "total": 11955,
+            "input": 206,
+            "output": 1777,
+            "reasoning": 244,
+            "cache": {
+              "write": 0,
+              "read": 9728
+            }
+          },
+          "cost": 0.001272684,
+          "id": "prt_103ca8e20001DvP57vQdB5iGUO",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca70bf001dU2KjaTNp4blJA"
+        },
+        {
+          "type": "patch",
+          "hash": "f0587ec3064e55bb43e520f12a2ae21080ab2bf4",
+          "files": [
+            "/work/src/httpkit/client.py"
+          ],
+          "id": "prt_103ca8e53001TRdFNaOv1VwZfW",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca70bf001dU2KjaTNp4blJA"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000510978,
+        "tokens": {
+          "total": 12715,
+          "input": 195,
+          "output": 149,
+          "reasoning": 595,
+          "cache": {
+            "write": 0,
+            "read": 11776
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064968802,
+          "completed": 1791064972667
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca8e62001DxUexGQRJFW3Zt",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "186b54eef13d6b59d29cc96603b729620a47fe1a",
+          "type": "step-start",
+          "id": "prt_103ca90a6001QEuulkZUcn28ZJ",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca8e62001DxUexGQRJFW3Zt"
+        },
+        {
+          "type": "reasoning",
+          "text": "Wait, there's a bug: `headers=merged_headers` then check `isinstance(merged_headers, HTTPHeaderDict) is False` — merged_headers is a plain dict, so it becomes HTTPHeaderDict. Fine. But then `HTTPHeaderDict(merged_headers)` works. Actually I could simplify but it's fine. However the line `if isinstance(merged_headers, HTTPHeaderDict) is False:` is awkward; simplify to `if not isinstance(...)`. Let me clean that up.\n\nAlso `self.retries` attribute set to a Retry; not used except stored. Fine.\n\nLet me also reconsider: passing `retries=retries` to pool.request when `retries` is None — urllib3's `request` passes it to `urlopen`, and if None it uses the pool's default retries. Let me verify: `PoolManager.request` -> `RequestMethods.request` -> `self.urlopen(...)`. In urlopen, `if retries is None: retries = self.retries`. Actually signature `urlopen(self, method, url, redirect=True, **kw)`; pool's `urlopen` has `retries=None`? Let me recall: `HTTPConnectionPool.urlopen(self, method, url, body=None, headers=None, retries=None, redirect=True, ...)`. Yes, retries defaults None and uses self.retries. Good.\n\nBut wait — `preload_content=False` on an error status with `raise_on_status=False`: retries still happen at the pool level before returning response. Good.\n\nNow `decode_content` param: `RequestMethods.request` signature includes `decode_content=True`? Let me check urllib3 v2. `request(self, method, url, body=None, fields=None, headers=None, json=None, **urlopen_kw)`. It doesn't have explicit decode_content/redirect; they get passed via urlopen_kw. Actually redirect is explicit? In v2 `RequestMethods.request` signature: `(self, method, url, body=None, fields=None, headers=None, json=None, **urlopen_kw)`. So redirect and preload_content pass through kwargs. Fine. But I pass `decode_content=decode_content` and `redirect=redirect` as explicit kwargs to pool.request; since they're accepted via **urlopen_kw, fine.\n\nBut `body` and `fields` both: urllib3 request with fields will encode form data. Good.\n\nOne issue: when `fields` is provided, urllib3 uses `body` and `fields` mutually; that's handled.\n\nNow `self.pool.clear()` — PoolManager.clear exists. Good.\n\nLet me fix the awkward isinstance line. Also unused import Optional? It's used. `Union` used. `HTTPHeaderDict` used.\n\nLet me simplify.",
+          "time": {
+            "start": 1791064969713,
+            "end": 1791064972218
+          },
+          "id": "prt_103ca91f1001Z3F4mhgppFCzUp",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca8e62001DxUexGQRJFW3Zt"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_00_c3uvO4nNGt4feX3eeVTK8729",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/src/httpkit/client.py",
+              "oldString": "        merged_headers = {**self.default_headers, **(headers or {})}\n        if isinstance(merged_headers, HTTPHeaderDict) is False:\n            merged_headers = HTTPHeaderDict(merged_headers)\n\n        try:",
+              "newString": "        merged_headers = HTTPHeaderDict(self.default_headers)\n        merged_headers.update(headers or {})\n\n        try:"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /work/src/httpkit/client.py\n===================================================================\n--- /work/src/httpkit/client.py\n+++ /work/src/httpkit/client.py\n@@ -143,11 +143,10 @@\n ``preload_content`` defaults to ``False`` so callers retain low-level\n control over streaming and connection reuse. Set it to ``True`` for a\n fully buffered response.\n \"\"\"\n-merged_headers = {**self.default_headers, **(headers or {})}\n-if isinstance(merged_headers, HTTPHeaderDict) is False:\n-    merged_headers = HTTPHeaderDict(merged_headers)\n+merged_headers = HTTPHeaderDict(self.default_headers)\n+merged_headers.update(headers or {})\n \n try:\n     return self.pool.request(\n         method,\n",
+              "filediff": {
+                "file": "/work/src/httpkit/client.py",
+                "patch": "Index: /work/src/httpkit/client.py\n===================================================================\n--- /work/src/httpkit/client.py\n+++ /work/src/httpkit/client.py\n@@ -143,11 +143,10 @@\n ``preload_content`` defaults to ``False`` so callers retain low-level\n control over streaming and connection reuse. Set it to ``True`` for a\n fully buffered response.\n \"\"\"\n-merged_headers = {**self.default_headers, **(headers or {})}\n-if isinstance(merged_headers, HTTPHeaderDict) is False:\n-    merged_headers = HTTPHeaderDict(merged_headers)\n+merged_headers = HTTPHeaderDict(self.default_headers)\n+merged_headers.update(headers or {})\n \n try:\n     return self.pool.request(\n         method,\n",
+                "additions": 2,
+                "deletions": 3
+              },
+              "truncated": false
+            },
+            "title": "src/httpkit/client.py",
+            "time": {
+              "start": 1791064972522,
+              "end": 1791064972539
+            }
+          },
+          "id": "prt_103ca9bbe001aVvQcQaltaGisv",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca8e62001DxUexGQRJFW3Zt"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "2d91cf61f984160d3b5b89e047319dc3899814b9",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12715,
+            "input": 195,
+            "output": 149,
+            "reasoning": 595,
+            "cache": {
+              "write": 0,
+              "read": 11776
+            }
+          },
+          "cost": 0.000510978,
+          "id": "prt_103ca9d47001fymg3ZJFmGsolk",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca8e62001DxUexGQRJFW3Zt"
+        },
+        {
+          "type": "patch",
+          "hash": "186b54eef13d6b59d29cc96603b729620a47fe1a",
+          "files": [
+            "/work/src/httpkit/client.py"
+          ],
+          "id": "prt_103ca9d76001V5jLHYcgsoljt4",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca8e62001DxUexGQRJFW3Zt"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000159132,
+        "tokens": {
+          "total": 12886,
+          "input": 186,
+          "output": 120,
+          "reasoning": 36,
+          "cache": {
+            "write": 0,
+            "read": 12544
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064972670,
+          "completed": 1791064974500
+        },
+        "finish": "tool-calls",
+        "id": "msg_103ca9d7e001fgnVlGyNRLP6sx",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "2d91cf61f984160d3b5b89e047319dc3899814b9",
+          "type": "step-start",
+          "id": "prt_103ca9fa80017DfunDVEWwH6ct",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca9d7e001fgnVlGyNRLP6sx"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now create `__init__.py`, `cli.py`, `__main__.py`.\n\nLet me write __init__.py exposing HTTPClient, RetryPolicy, HTTPError.",
+          "time": {
+            "start": 1791064973743,
+            "end": 1791064973962
+          },
+          "id": "prt_103caa1af00124FQqVGR8S5Ic1",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca9d7e001fgnVlGyNRLP6sx"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ohbGBs2K8k8D4f1S6RVd5875",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "\"\"\"httpkit: low-level HTTP with connection pooling and automatic retries.\"\"\"\n\nfrom .client import HTTPClient, HTTPError, RetryPolicy\n\n__all__ = [\"HTTPClient\", \"HTTPError\", \"RetryPolicy\"]\n__version__ = \"0.1.0\"\n",
+              "filePath": "/work/src/httpkit/__init__.py"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/httpkit/__init__.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/httpkit/__init__.py",
+            "time": {
+              "start": 1791064974360,
+              "end": 1791064974367
+            }
+          },
+          "id": "prt_103caa28d001q742OVfepsq0e0",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca9d7e001fgnVlGyNRLP6sx"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "ce0fa60138f28cd903e78b59c43aa107738d3b41",
+          "type": "step-finish",
+          "tokens": {
+            "total": 12886,
+            "input": 186,
+            "output": 120,
+            "reasoning": 36,
+            "cache": {
+              "write": 0,
+              "read": 12544
+            }
+          },
+          "cost": 0.000159132,
+          "id": "prt_103caa4670011VeV9e6ao3hpgd",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca9d7e001fgnVlGyNRLP6sx"
+        },
+        {
+          "type": "patch",
+          "hash": "2d91cf61f984160d3b5b89e047319dc3899814b9",
+          "files": [
+            "/work/src/httpkit/__init__.py"
+          ],
+          "id": "prt_103caa49d0016xXLR7RXOfpmVL",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103ca9d7e001fgnVlGyNRLP6sx"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000424716,
+        "tokens": {
+          "total": 13489,
+          "input": 230,
+          "output": 587,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 12672
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064974507,
+          "completed": 1791064977120
+        },
+        "finish": "tool-calls",
+        "id": "msg_103caa4ab001xAF76vSpGnPSB9",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "ce0fa60138f28cd903e78b59c43aa107738d3b41",
+          "type": "step-start",
+          "id": "prt_103caa6e7001tQo4gW9YJ5g544",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caa4ab001xAF76vSpGnPSB9"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_fgOGSV9yrGYf9QkXgnSB5771",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "\"\"\"Command-line entry point for quick one-off requests.\"\"\"\n\nfrom __future__ import annotations\n\nimport argparse\nimport sys\n\nfrom .client import HTTPClient, HTTPError, RetryPolicy\n\n\ndef build_parser() -> argparse.ArgumentParser:\n    parser = argparse.ArgumentParser(\n        prog=\"httpkit\",\n        description=\"Fetch a URL using pooled connections with automatic retries.\",\n    )\n    parser.add_argument(\"url\")\n    parser.add_argument(\"-X\", \"--method\", default=\"GET\")\n    parser.add_argument(\"-H\", \"--header\", action=\"append\", default=[], metavar=\"K:V\")\n    parser.add_argument(\"-d\", \"--data\", default=None)\n    parser.add_argument(\"--timeout\", type=float, default=30.0)\n    parser.add_argument(\"--retries\", type=int, default=3)\n    parser.add_argument(\"--maxsize\", type=int, default=10)\n    parser.add_argument(\"--backoff\", type=float, default=0.5)\n    parser.add_argument(\"--stream\", action=\"store_true\")\n    return parser\n\n\ndef _parse_headers(items: list[str]) -> dict[str, str]:\n    headers: dict[str, str] = {}\n    for item in items:\n        if \":\" not in item:\n            raise SystemExit(f\"invalid header {item!r}, expected 'Key: Value'\")\n        key, value = item.split(\":\", 1)\n        headers[key.strip()] = value.strip()\n    return headers\n\n\ndef main(argv: list[str] | None = None) -> int:\n    args = build_parser().parse_args(argv)\n    policy = RetryPolicy(total=args.retries, backoff_factor=args.backoff)\n\n    try:\n        with HTTPClient(\n            timeout=args.timeout,\n            retries=policy,\n            maxsize=args.maxsize,\n            headers=_parse_headers(args.header),\n        ) as client:\n            if args.stream:\n                for chunk in client.stream(args.method, args.url, body=args.data):\n                    sys.stdout.buffer.write(chunk)\n                sys.stdout.buffer.flush()\n            else:\n                response = client.request(\n                    args.method,\n                    args.url,\n                    body=args.data,\n                    preload_content=True,\n                )\n                sys.stdout.buffer.write(response.data)\n    except HTTPError as exc:\n        print(f\"error: {exc}\", file=sys.stderr)\n        return 1\n    return 0\n\n\nif __name__ == \"__main__\":\n    raise SystemExit(main())\n",
+              "filePath": "/work/src/httpkit/cli.py"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/src/httpkit/cli.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "src/httpkit/cli.py",
+            "time": {
+              "start": 1791064977001,
+              "end": 1791064977009
+            }
+          },
+          "id": "prt_103caa865001rp9UG4mKelKP0D",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caa4ab001xAF76vSpGnPSB9"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "36fce178a8d049bbff9e5611a653592417569c91",
+          "type": "step-finish",
+          "tokens": {
+            "total": 13489,
+            "input": 230,
+            "output": 587,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 12672
+            }
+          },
+          "cost": 0.000424716,
+          "id": "prt_103caaebb0018Mm6K8HQZGt5AQ",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caa4ab001xAF76vSpGnPSB9"
+        },
+        {
+          "type": "patch",
+          "hash": "ce0fa60138f28cd903e78b59c43aa107738d3b41",
+          "files": [
+            "/work/src/httpkit/cli.py"
+          ],
+          "id": "prt_103caaedd001lHWDUFqRumNmMW",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caa4ab001xAF76vSpGnPSB9"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000578886,
+        "tokens": {
+          "total": 14355,
+          "input": 193,
+          "output": 685,
+          "reasoning": 165,
+          "cache": {
+            "write": 0,
+            "read": 13312
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064977124,
+          "completed": 1791064980552
+        },
+        "finish": "tool-calls",
+        "id": "msg_103caaee4001z0LRpOyy5HH2Kk",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "36fce178a8d049bbff9e5611a653592417569c91",
+          "type": "step-start",
+          "id": "prt_103cab0f7001UnRtx6GyC3c32j",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caaee4001z0LRpOyy5HH2Kk"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now tests. Use pytest with a local HTTP server. Since `pytest-httpserver` isn't a dependency, I'll use Python's `http.server` in a fixture thread. Test:\n1. Pool reuse / basic GET works\n2. Retries on 503 then 200\n3. HTTPError wraps failure when connection refused and retries exhausted\n\nLet me write tests/test_client.py using threading HTTPServer.\n\nI need to be careful about backoff making tests slow. Use RetryPolicy(total=... backoff_factor=0) or small.\n\nTest retry: create a handler that returns 503 first N times then 200. urllib3 respects status_forcelist and retries. With `raise_on_status=False` and preload_content=True.\n\nLet me write a threaded server fixture.",
+          "time": {
+            "start": 1791064977879,
+            "end": 1791064978726
+          },
+          "id": "prt_103cab1d7001I7LraukRNgC391",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caaee4001z0LRpOyy5HH2Kk"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_TQc97lUiSwA2XAsESRfj5623",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "import threading\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n\nimport pytest\n\nfrom httpkit import HTTPClient, HTTPError, RetryPolicy\n\n\nclass _Handler(BaseHTTPRequestHandler):\n    fail_times = 0\n    hits = 0\n    lock = threading.Lock()\n\n    def log_message(self, *args):  # keep test output quiet\n        pass\n\n    def do_GET(self):\n        with _Handler.lock:\n            _Handler.hits += 1\n            attempt = _Handler.hits\n        if attempt <= _Handler.fail_times:\n            self.send_response(503)\n            self.send_header(\"Content-Length\", \"0\")\n            self.end_headers()\n            return\n        body = b\"ok\"\n        self.send_response(200)\n        self.send_header(\"Content-Length\", str(len(body)))\n        self.end_headers()\n        self.wfile.write(body)\n\n\n@pytest.fixture\ndef server():\n    _Handler.fail_times = 0\n    _Handler.hits = 0\n    httpd = ThreadingHTTPServer((\"127.0.0.1\", 0), _Handler)\n    thread = threading.Thread(target=httpd.serve_forever, daemon=True)\n    thread.start()\n    host, port = httpd.server_address\n    try:\n        yield f\"http://{host}:{port}\"\n    finally:\n        httpd.shutdown()\n        httpd.server_close()\n        thread.join()\n\n\ndef test_basic_get(server):\n    with HTTPClient() as client:\n        response = client.get(server, preload_content=True)\n        assert response.status == 200\n        assert response.data == b\"ok\"\n\n\ndef test_retries_on_503_then_succeeds(server):\n    _Handler.fail_times = 2\n    policy = RetryPolicy(total=3, backoff_factor=0.0)\n    with HTTPClient(retries=policy) as client:\n        response = client.get(server, preload_content=True)\n    assert response.status == 200\n    assert _Handler.hits == 3\n\n\ndef test_exhausted_retries_raise(server):\n    _Handler.fail_times = 10\n    policy = RetryPolicy(total=2, backoff_factor=0.0)\n    with HTTPClient(retries=policy) as client:\n        response = client.get(server, preload_content=True)\n    # raise_on_status defaults to False, so we get the final 503 back.\n    assert response.status == 503\n    assert _Handler.hits == 3\n\n\ndef test_connection_error_is_wrapped():\n    policy = RetryPolicy(total=1, backoff_factor=0.0)\n    with HTTPClient(retries=policy, timeout=1.0) as client:\n        with pytest.raises(HTTPError):\n            client.get(\"http://127.0.0.1:1/\", preload_content=True)\n",
+              "filePath": "/work/tests/test_client.py"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/tests/test_client.py",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "tests/test_client.py",
+            "time": {
+              "start": 1791064980440,
+              "end": 1791064980449
+            }
+          },
+          "id": "prt_103cab52c001ZvBj7ff1EVXPQy",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caaee4001z0LRpOyy5HH2Kk"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "4fe93cb05a12e3557da7489fd38159d9ab7401ec",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14355,
+            "input": 193,
+            "output": 685,
+            "reasoning": 165,
+            "cache": {
+              "write": 0,
+              "read": 13312
+            }
+          },
+          "cost": 0.000578886,
+          "id": "prt_103cabc1b0012HW6Hmz8qTys5u",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caaee4001z0LRpOyy5HH2Kk"
+        },
+        {
+          "type": "patch",
+          "hash": "36fce178a8d049bbff9e5611a653592417569c91",
+          "files": [
+            "/work/tests/test_client.py"
+          ],
+          "id": "prt_103cabc44001exLN59m7y0BjZQ",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103caaee4001z0LRpOyy5HH2Kk"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000156474,
+        "tokens": {
+          "total": 14520,
+          "input": 163,
+          "output": 105,
+          "reasoning": 44,
+          "cache": {
+            "write": 0,
+            "read": 14208
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064980556,
+          "completed": 1791064982161
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cabc4c00174wNzY2QsZlQkE",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "4fe93cb05a12e3557da7489fd38159d9ab7401ec",
+          "type": "step-start",
+          "id": "prt_103cabe70001zcYUoJb7Oi03r5",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cabc4c00174wNzY2QsZlQkE"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now README and .gitignore.\n\n.gitignore for Python.\n\nREADME with quickstart.\n\nThen install and run tests. Let me create a venv to test in isolation. Check network. Let me write files first.",
+          "time": {
+            "start": 1791064981495,
+            "end": 1791064981785
+          },
+          "id": "prt_103cabff7001bjrORLtwbDEw1j",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cabc4c00174wNzY2QsZlQkE"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_kLtLQDU6QHenOgwvy7HS8206",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "__pycache__/\n*.py[cod]\n*.egg-info/\n.eggs/\nbuild/\ndist/\n.venv/\nvenv/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n.coverage\nhtmlcov/\n",
+              "filePath": "/work/.gitignore"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/.gitignore",
+              "exists": false,
+              "truncated": false
+            },
+            "title": ".gitignore",
+            "time": {
+              "start": 1791064981988,
+              "end": 1791064982004
+            }
+          },
+          "id": "prt_103cac11d001N0gZlilHpHM7pB",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cabc4c00174wNzY2QsZlQkE"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "26188eee19ad3fb7be3c5d635910b33dd21157b1",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14520,
+            "input": 163,
+            "output": 105,
+            "reasoning": 44,
+            "cache": {
+              "write": 0,
+              "read": 14208
+            }
+          },
+          "cost": 0.000156474,
+          "id": "prt_103cac24c001uKooLT495rGPws",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cabc4c00174wNzY2QsZlQkE"
+        },
+        {
+          "type": "patch",
+          "hash": "4fe93cb05a12e3557da7489fd38159d9ab7401ec",
+          "files": [
+            "/work/.gitignore"
+          ],
+          "id": "prt_103cac28e001LYihx83K3RBxv8",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cabc4c00174wNzY2QsZlQkE"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000303408,
+        "tokens": {
+          "total": 14920,
+          "input": 200,
+          "output": 384,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 14336
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064982165,
+          "completed": 1791064984675
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cac295001MSFIT97S9cAhZQ",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "26188eee19ad3fb7be3c5d635910b33dd21157b1",
+          "type": "step-start",
+          "id": "prt_103cac4bf001o2bQvIRK82d2HL",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cac295001MSFIT97S9cAhZQ"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_qQzNas7s9abofbBI2GHk9472",
+          "state": {
+            "status": "completed",
+            "input": {
+              "content": "# httpkit\n\nA small, explicit HTTP client for scripts that need low-level control over\nconnections. Built directly on [urllib3](https://urllib3.readthedocs.io/).\n\n- Connection pooling (`maxsize`, `num_pools`, blocking behavior)\n- Tunable automatic retries (backoff, status list, allowed methods)\n- Per-request timeouts, streaming, and raw `HTTPResponse` access\n- HTTPS verification via `certifi`, optional proxy support\n\n## Install\n\n```bash\npython -m venv .venv && source .venv/bin/activate\npip install -e \".[dev]\"\n```\n\n## Usage\n\n```python\nfrom httpkit import HTTPClient, RetryPolicy\n\npolicy = RetryPolicy(\n    total=5,\n    backoff_factor=0.5,\n    status_forcelist=(429, 500, 502, 503, 504),\n)\n\nwith HTTPClient(timeout=30.0, retries=policy, maxsize=20) as client:\n    response = client.get(\"https://example.com/api\", preload_content=True)\n    print(response.status, response.data)\n\n    # stream a large body without buffering it in memory\n    for chunk in client.stream(\"GET\", \"https://example.com/big\"):\n        ...\n```\n\n### CLI\n\n```bash\nhttpkit https://example.com -X GET -H \"Accept: application/json\" --retries 5\nhttpkit https://example.com/file --stream > file.bin\n```\n\n## Tests\n\n```bash\npytest\n```\n",
+              "filePath": "/work/README.md"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/README.md",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "README.md",
+            "time": {
+              "start": 1791064984478,
+              "end": 1791064984495
+            }
+          },
+          "id": "prt_103cac69d001psoJKdWVfZu5EI",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cac295001MSFIT97S9cAhZQ"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 14920,
+            "input": 200,
+            "output": 384,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 14336
+            }
+          },
+          "cost": 0.000303408,
+          "id": "prt_103cacc2c001kXgBRCLaTBqqV0",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cac295001MSFIT97S9cAhZQ"
+        },
+        {
+          "type": "patch",
+          "hash": "26188eee19ad3fb7be3c5d635910b33dd21157b1",
+          "files": [
+            "/work/README.md"
+          ],
+          "id": "prt_103cacc5f001uBxJGnaP9oSKG1",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cac295001MSFIT97S9cAhZQ"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00018096,
+        "tokens": {
+          "total": 15110,
+          "input": 216,
+          "output": 174,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 14720
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064984679,
+          "completed": 1791064986555
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cacc67001j2Nu0633BDzyNg",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-start",
+          "id": "prt_103caceee0016pQN8akDrek6wR",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cacc67001j2Nu0633BDzyNg"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_ET_C3bxRS9b0KSVEqCeGnyM3317",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Create pyproject.toml with urllib3 dependency and tooling",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Implement HTTP client with connection pooling + retry policy",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add CLI entry point and package init",
+                  "priority": "medium",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add tests and README/.gitignore",
+                  "priority": "medium",
+                  "status": "completed"
+                },
+                {
+                  "content": "Install and verify (import + tests)",
+                  "priority": "high",
+                  "status": "in_progress"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Create pyproject.toml with urllib3 dependency and tooling\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement HTTP client with connection pooling + retry policy\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add CLI entry point and package init\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add tests and README/.gitignore\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Install and verify (import + tests)\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Create pyproject.toml with urllib3 dependency and tooling",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement HTTP client with connection pooling + retry policy",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point and package init",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests and README/.gitignore",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Install and verify (import + tests)",
+                  "status": "in_progress",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "1 todos",
+            "time": {
+              "start": 1791064986416,
+              "end": 1791064986424
+            }
+          },
+          "id": "prt_103cad1ba001XmM1PZnGxM1pIl",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cacc67001j2Nu0633BDzyNg"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15110,
+            "input": 216,
+            "output": 174,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 14720
+            }
+          },
+          "cost": 0.00018096,
+          "id": "prt_103cad389001mrGmMnidY83jYM",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cacc67001j2Nu0633BDzyNg"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000129912,
+        "tokens": {
+          "total": 15386,
+          "input": 188,
+          "output": 94,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 15104
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791064986563,
+          "completed": 1791065008481
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cad3c3001Do0QhbqL3qGqi9",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-start",
+          "id": "prt_103cad61a001oTkJcTegn7yeEy",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cad3c3001Do0QhbqL3qGqi9"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_8yn7IcByIdZbRlN3wwFj9246",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "python3 -m venv .venv && .venv/bin/pip install --quiet -e \".[dev]\" 2>&1 | tail -5; echo \"exit: $?\"",
+              "timeout": 300000
+            },
+            "output": "exit: 0\n",
+            "metadata": {
+              "output": "exit: 0\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "python3 -m venv .venv && .venv/bin/pip install --quiet -e \".[dev]\" 2>&1 | tail -5; echo \"exit: $?\"",
+            "time": {
+              "start": 1791064988001,
+              "end": 1791065008281
+            }
+          },
+          "id": "prt_103cad895001VGuriVBRImJfOl",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cad3c3001Do0QhbqL3qGqi9"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15386,
+            "input": 188,
+            "output": 94,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 15104
+            }
+          },
+          "cost": 0.000129912,
+          "id": "prt_103cb290e0011c3Uf9TkisTGtW",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cad3c3001Do0QhbqL3qGqi9"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000118746,
+        "tokens": {
+          "total": 15482,
+          "input": 171,
+          "output": 72,
+          "reasoning": 7,
+          "cache": {
+            "write": 0,
+            "read": 15232
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791065008496,
+          "completed": 1791065012340
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cb2970001ylEwD1eeBPOtce",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-start",
+          "id": "prt_103cb2c0d001XrvYvRZM1ilo89",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb2970001ylEwD1eeBPOtce"
+        },
+        {
+          "type": "reasoning",
+          "text": "Install succeeded. Now run tests.",
+          "time": {
+            "start": 1791065009779,
+            "end": 1791065009896
+          },
+          "id": "prt_103cb2e73001YUukKNOJVRFvrJ",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb2970001ylEwD1eeBPOtce"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_l29zmeZKXptCCGze1tVC9341",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": ".venv/bin/python -m pytest -q 2>&1 | tail -20",
+              "timeout": 120000
+            },
+            "output": "....                                                                     [100%]\n",
+            "metadata": {
+              "output": "....                                                                     [100%]\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": ".venv/bin/python -m pytest -q 2>&1 | tail -20",
+            "time": {
+              "start": 1791065010044,
+              "end": 1791065012174
+            }
+          },
+          "id": "prt_103cb2ef0001aiKoiyaZ86MtVg",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb2970001ylEwD1eeBPOtce"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15482,
+            "input": 171,
+            "output": 72,
+            "reasoning": 7,
+            "cache": {
+              "write": 0,
+              "read": 15232
+            }
+          },
+          "cost": 0.000118746,
+          "id": "prt_103cb3829001GHFrlgUP0Je3aO",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb2970001ylEwD1eeBPOtce"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.00013023,
+        "tokens": {
+          "total": 15606,
+          "input": 141,
+          "output": 52,
+          "reasoning": 53,
+          "cache": {
+            "write": 0,
+            "read": 15360
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791065012365,
+          "completed": 1791065014216
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cb388d001nQHwCb9GbMCHoC",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-start",
+          "id": "prt_103cb3b7f001KXyHaMDwXtj3rJ",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb388d001nQHwCb9GbMCHoC"
+        },
+        {
+          "type": "reasoning",
+          "text": "All 4 tests pass. Let me also verify the CLI works / imports. Run `httpkit --help` and maybe a quick local test. Also check `python -c \"import httpkit\"`. Already works via tests. Let me run CLI help.",
+          "time": {
+            "start": 1791065013219,
+            "end": 1791065013547
+          },
+          "id": "prt_103cb3be3001mcGAV8saasSUHs",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb388d001nQHwCb9GbMCHoC"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_mXTZVL3Dsu69Qo69y3Ia3756",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": ".venv/bin/httpkit --help 2>&1 | head -8"
+            },
+            "output": "usage: httpkit [-h] [-X METHOD] [-H K:V] [-d DATA] [--timeout TIMEOUT]\n               [--retries RETRIES] [--maxsize MAXSIZE] [--backoff BACKOFF]\n               [--stream]\n               url\n\nFetch a URL using pooled connections with automatic retries.\n\npositional arguments:\n",
+            "metadata": {
+              "output": "usage: httpkit [-h] [-X METHOD] [-H K:V] [-d DATA] [--timeout TIMEOUT]\n               [--retries RETRIES] [--maxsize MAXSIZE] [--backoff BACKOFF]\n               [--stream]\n               url\n\nFetch a URL using pooled connections with automatic retries.\n\npositional arguments:\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": ".venv/bin/httpkit --help 2>&1 | head -8",
+            "time": {
+              "start": 1791065013692,
+              "end": 1791065013974
+            }
+          },
+          "id": "prt_103cb3d58001i7Zp0AXEXrc2EU",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb388d001nQHwCb9GbMCHoC"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15606,
+            "input": 141,
+            "output": 52,
+            "reasoning": 53,
+            "cache": {
+              "write": 0,
+              "read": 15360
+            }
+          },
+          "cost": 0.00013023,
+          "id": "prt_103cb3f73001J8tnSopIqkDbow",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb388d001nQHwCb9GbMCHoC"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000180564,
+        "tokens": {
+          "total": 15866,
+          "input": 206,
+          "output": 172,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 15488
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791065014223,
+          "completed": 1791065015748
+        },
+        "finish": "tool-calls",
+        "id": "msg_103cb3fcf001LQVh0QrvyuRgOj",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-start",
+          "id": "prt_103cb421e001sPFS3lZEokxNly",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb3fcf001LQVh0QrvyuRgOj"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_ET_ui3rXhkY8wipuQcIhQ5f6205",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Create pyproject.toml with urllib3 dependency and tooling",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Implement HTTP client with connection pooling + retry policy",
+                  "priority": "high",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add CLI entry point and package init",
+                  "priority": "medium",
+                  "status": "completed"
+                },
+                {
+                  "content": "Add tests and README/.gitignore",
+                  "priority": "medium",
+                  "status": "completed"
+                },
+                {
+                  "content": "Install and verify (import + tests)",
+                  "priority": "high",
+                  "status": "completed"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Create pyproject.toml with urllib3 dependency and tooling\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement HTTP client with connection pooling + retry policy\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add CLI entry point and package init\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Add tests and README/.gitignore\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  },\n  {\n    \"content\": \"Install and verify (import + tests)\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Create pyproject.toml with urllib3 dependency and tooling",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement HTTP client with connection pooling + retry policy",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add CLI entry point and package init",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Add tests and README/.gitignore",
+                  "status": "completed",
+                  "priority": "medium"
+                },
+                {
+                  "content": "Install and verify (import + tests)",
+                  "status": "completed",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "0 todos",
+            "time": {
+              "start": 1791065015620,
+              "end": 1791065015627
+            }
+          },
+          "id": "prt_103cb43dd001beNikvRUWKO8SW",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb3fcf001LQVh0QrvyuRgOj"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 15866,
+            "input": 206,
+            "output": 172,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 15488
+            }
+          },
+          "cost": 0.000180564,
+          "id": "prt_103cb4587001THtfdXL0TtaBc6",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb3fcf001LQVh0QrvyuRgOj"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103ca4016001Vpq5LY2OYzcvWp",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000265332,
+        "tokens": {
+          "total": 16334,
+          "input": 302,
+          "output": 288,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 15744
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791065015756,
+          "completed": 1791065018529
+        },
+        "finish": "stop",
+        "id": "msg_103cb45cc001kHBDBUKLR4hDzo",
+        "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo"
+      },
+      "parts": [
+        {
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-start",
+          "id": "prt_103cb4875001GvDjZy79EUXRwa",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb45cc001kHBDBUKLR4hDzo"
+        },
+        {
+          "type": "text",
+          "text": "Set up a `src`-layout project (`httpkit`) built on **urllib3** — the right library for raw connection control.\n\n**Files**\n- `pyproject.toml` — deps (`urllib3`, `certifi`), pytest config, `httpkit` CLI script\n- `src/httpkit/client.py` — `HTTPClient` (pooled `PoolManager`/`ProxyManager`, streaming, timeouts, certifi TLS) and a frozen `RetryPolicy` dataclass wrapping `urllib3.Retry`\n- `src/httpkit/__init__.py`, `cli.py` — public API + argparser CLI\n- `tests/test_client.py` — local threaded server: basic GET, retry-on-503, exhausted retries, wrapped connection errors\n- `README.md`, `.gitignore`\n\n**Verify**\n```\npip install -e \".[dev]\"   # done in .venv\npytest                    # 4 passed\n```\n\nKey knobs are `maxsize`/`num_pools` (pooling), `timeout`, and `RetryPolicy(total, backoff_factor, status_forcelist, allowed_methods)`. `client.py:99` issues requests; `client.py:33` defines the retry policy.\n\nNote: `.venv/` was created for verification and is gitignored.",
+          "time": {
+            "start": 1791065017360,
+            "end": 1791065018351
+          },
+          "id": "prt_103cb4c0f001h20zZ4aAq35hRt",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb45cc001kHBDBUKLR4hDzo"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "aacddd45eb51307489fb74f67a10e4ccd16f35ee",
+          "type": "step-finish",
+          "tokens": {
+            "total": 16334,
+            "input": 302,
+            "output": 288,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 15744
+            }
+          },
+          "cost": 0.000265332,
+          "id": "prt_103cb50480013fkH8AXKsp7e2V",
+          "sessionID": "ses_efc35c06effeQ0YT5huZ4OIdwo",
+          "messageID": "msg_103cb45cc001kHBDBUKLR4hDzo"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1386 @@
+{
+  "info": {
+    "id": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+    "slug": "swift-garden",
+    "projectID": "global",
+    "directory": "/work",
+    "path": "",
+    "title": "Go module for fluent map[string]interface{} API",
+    "agent": "build",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "version": "1.18.34",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0.009878154,
+    "tokens": {
+      "input": 2611,
+      "output": 6665,
+      "reasoning": 8214,
+      "cache": {
+        "read": 186368,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1791062420724,
+      "updated": 1791062494397
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1791062420838
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "deepseek",
+          "modelID": "deepseek-flash"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "go.mod",
+              "patch": "Index: go.mod\n===================================================================\n--- go.mod\t\n+++ go.mod\t\n@@ -0,0 +1,3 @@\n+module example.com/mapx\n+\n+go 1.24\n",
+              "additions": 3,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "map.go",
+              "patch": "Index: map.go\n===================================================================\n--- map.go\t\n+++ map.go\t\n@@ -0,0 +1,169 @@\n+package mapx\n+\n+import (\n+\t\"encoding/json\"\n+\t\"sort\"\n+)\n+\n+type Map struct {\n+\tdata map[string]interface{}\n+}\n+\n+func New(data map[string]interface{}) *Map {\n+\tif data == nil {\n+\t\tdata = map[string]interface{}{}\n+\t}\n+\treturn &Map{data: data}\n+}\n+\n+func From(v interface{}) *Map {\n+\tm, _ := asMap(v)\n+\treturn New(m)\n+}\n+\n+func FromJSON(b []byte) (*Map, error) {\n+\tm := map[string]interface{}{}\n+\tif err := json.Unmarshal(b, &m); err != nil {\n+\t\treturn nil, err\n+\t}\n+\treturn New(m), nil\n+}\n+\n+func (m *Map) Data() map[string]interface{} {\n+\tif m == nil {\n+\t\treturn nil\n+\t}\n+\treturn m.data\n+}\n+\n+func (m *Map) Len() int {\n+\tif m == nil {\n+\t\treturn 0\n+\t}\n+\treturn len(m.data)\n+}\n+\n+func (m *Map) Keys() []string {\n+\tif m == nil {\n+\t\treturn nil\n+\t}\n+\tkeys := make([]string, 0, len(m.data))\n+\tfor k := range m.data {\n+\t\tkeys = append(keys, k)\n+\t}\n+\tsort.Strings(keys)\n+\treturn keys\n+}\n+\n+func (m *Map) Get(path string) *Value {\n+\tif m == nil {\n+\t\treturn newValue(nil, false)\n+\t}\n+\traw, ok := getPath(m.data, parsePath(path))\n+\treturn newValue(raw, ok)\n+}\n+\n+func (m *Map) Has(path string) bool {\n+\tif m == nil {\n+\t\treturn false\n+\t}\n+\t_, ok := getPath(m.data, parsePath(path))\n+\treturn ok\n+}\n+\n+func (m *Map) Set(path string, value interface{}) *Map {\n+\tif m == nil {\n+\t\treturn m\n+\t}\n+\tsegs := parsePath(path)\n+\tif len(segs) == 0 {\n+\t\tif vm, ok := asMap(value); ok {\n+\t\t\tm.data = vm\n+\t\t}\n+\t\treturn m\n+\t}\n+\tif res, ok := asMap(setPath(m.data, segs, value)); ok {\n+\t\tm.data = res\n+\t}\n+\treturn m\n+}\n+\n+func (m *Map) Delete(path string) *Map {\n+\tif m == nil {\n+\t\treturn m\n+\t}\n+\tsegs := parsePath(path)\n+\tif len(segs) == 0 {\n+\t\treturn m\n+\t}\n+\tif res, ok := asMap(deletePath(m.data, segs)); ok {\n+\t\tm.data = res\n+\t}\n+\treturn m\n+}\n+\n+func (m *Map) Clone() *Map {\n+\tif m == nil {\n+\t\treturn nil\n+\t}\n+\treturn New(deepCopy(m.data).(map[string]interface{}))\n+}\n+\n+func (m *Map) Merge(others ...*Map) *Map {\n+\tif m == nil {\n+\t\treturn m\n+\t}\n+\tfor _, o := range others {\n+\t\tif o == nil {\n+\t\t\tcontinue\n+\t\t}\n+\t\tmergeMaps(m.data, o.data)\n+\t}\n+\treturn m\n+}\n+\n+func (m *Map) Each(fn func(key string, v *Value)) *Map {\n+\tif m == nil || fn == nil {\n+\t\treturn m\n+\t}\n+\tfor k, raw := range m.data {\n+\t\tfn(k, newValue(raw, true))\n+\t}\n+\treturn m\n+}\n+\n+func (m *Map) Filter(fn func(key string, v *Value) bool) *Map {\n+\tif m == nil {\n+\t\treturn m\n+\t}\n+\tout := make(map[string]interface{}, len(m.data))\n+\tfor k, raw := range m.data {\n+\t\tif fn(k, newValue(raw, true)) {\n+\t\t\tout[k] = raw\n+\t\t}\n+\t}\n+\treturn New(out)\n+}\n+\n+func (m *Map) MarshalJSON() ([]byte, error) {\n+\tif m == nil {\n+\t\treturn []byte(\"null\"), nil\n+\t}\n+\treturn json.Marshal(m.data)\n+}\n+\n+func (m *Map) UnmarshalJSON(b []byte) error {\n+\treturn json.Unmarshal(b, &m.data)\n+}\n+\n+func (m *Map) String() string {\n+\tb, err := json.Marshal(m)\n+\tif err != nil {\n+\t\treturn \"\"\n+\t}\n+\treturn string(b)\n+}\n+\n+func Get(data map[string]interface{}, path string) *Value {\n+\treturn New(data).Get(path)\n+}\n",
+              "additions": 169,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "map_test.go",
+              "patch": "Index: map_test.go\n===================================================================\n--- map_test.go\t\n+++ map_test.go\t\n@@ -0,0 +1,179 @@\n+package mapx\n+\n+import (\n+\t\"reflect\"\n+\t\"testing\"\n+)\n+\n+func TestGetNestedAndIndex(t *testing.T) {\n+\tm := New(map[string]interface{}{\n+\t\t\"user\": map[string]interface{}{\n+\t\t\t\"name\": \"ada\",\n+\t\t\t\"tags\": []interface{}{\"math\", \"code\"},\n+\t\t},\n+\t\t\"list\": []interface{}{\n+\t\t\tmap[string]interface{}{\"id\": float64(7)},\n+\t\t},\n+\t})\n+\n+\tif got := m.Get(\"user.name\").String(); got != \"ada\" {\n+\t\tt.Fatalf(\"got %q\", got)\n+\t}\n+\tif got := m.Get(\"user.tags[1]\").String(); got != \"code\" {\n+\t\tt.Fatalf(\"got %q\", got)\n+\t}\n+\tif got := m.Get(\"list.0.id\").Int(); got != 7 {\n+\t\tt.Fatalf(\"got %d\", got)\n+\t}\n+\tif v := m.Get(\"user.missing\"); v.Exists() {\n+\t\tt.Fatalf(\"expected missing\")\n+\t}\n+\tif !m.Has(\"user.tags[0]\") {\n+\t\tt.Fatalf(\"expected has\")\n+\t}\n+}\n+\n+func TestSetCreatesPath(t *testing.T) {\n+\tm := New(nil)\n+\tm.Set(\"a.b.c\", 1).Set(\"a.b.d\", 2).Set(\"items[]\", \"x\").Set(\"items[]\", \"y\")\n+\tif got := m.Get(\"a.b.c\").Int(); got != 1 {\n+\t\tt.Fatalf(\"c = %d\", got)\n+\t}\n+\tif got := m.Get(\"a.b.d\").Int(); got != 2 {\n+\t\tt.Fatalf(\"d = %d\", got)\n+\t}\n+\twant := []interface{}{\"x\", \"y\"}\n+\tif got := m.Get(\"items\").Slice(); !reflect.DeepEqual(got, want) {\n+\t\tt.Fatalf(\"items = %#v\", got)\n+\t}\n+}\n+\n+func TestSetSliceIndexAndGrow(t *testing.T) {\n+\tm := New(map[string]interface{}{\"a\": []interface{}{1, 2}})\n+\tm.Set(\"a[1]\", 9).Set(\"a[3]\", 4)\n+\tif got := m.Get(\"a\").Slice(); !reflect.DeepEqual(got, []interface{}{1, 9, nil, 4}) {\n+\t\tt.Fatalf(\"a = %#v\", got)\n+\t}\n+}\n+\n+func TestDelete(t *testing.T) {\n+\tm := New(map[string]interface{}{\n+\t\t\"a\": map[string]interface{}{\"b\": 1, \"c\": 2},\n+\t\t\"l\": []interface{}{\"x\", \"y\", \"z\"},\n+\t})\n+\tm.Delete(\"a.b\").Delete(\"l[1]\")\n+\tif m.Has(\"a.b\") {\n+\t\tt.Fatalf(\"a.b should be gone\")\n+\t}\n+\tif got := m.Get(\"a.c\").Int(); got != 2 {\n+\t\tt.Fatalf(\"a.c = %d\", got)\n+\t}\n+\tif got := m.Get(\"l\").Slice(); !reflect.DeepEqual(got, []interface{}{\"x\", \"z\"}) {\n+\t\tt.Fatalf(\"l = %#v\", got)\n+\t}\n+}\n+\n+func TestMergeDeep(t *testing.T) {\n+\ta := New(map[string]interface{}{\n+\t\t\"x\": map[string]interface{}{\"a\": 1, \"b\": 2},\n+\t\t\"y\": 1,\n+\t})\n+\tb := New(map[string]interface{}{\n+\t\t\"x\": map[string]interface{}{\"b\": 3, \"c\": 4},\n+\t\t\"z\": 5,\n+\t})\n+\ta.Merge(b)\n+\tif got := a.Get(\"x.a\").Int(); got != 1 {\n+\t\tt.Fatalf(\"x.a = %d\", got)\n+\t}\n+\tif got := a.Get(\"x.b\").Int(); got != 3 {\n+\t\tt.Fatalf(\"x.b = %d\", got)\n+\t}\n+\tif got := a.Get(\"x.c\").Int(); got != 4 {\n+\t\tt.Fatalf(\"x.c = %d\", got)\n+\t}\n+\tif got := a.Get(\"z\").Int(); got != 5 {\n+\t\tt.Fatalf(\"z = %d\", got)\n+\t}\n+}\n+\n+func TestCloneIsDeep(t *testing.T) {\n+\tsrc := New(map[string]interface{}{\"a\": map[string]interface{}{\"b\": 1}})\n+\tcp := src.Clone()\n+\tcp.Set(\"a.b\", 2)\n+\tif got := src.Get(\"a.b\").Int(); got != 1 {\n+\t\tt.Fatalf(\"src a.b = %d\", got)\n+\t}\n+\tif got := cp.Get(\"a.b\").Int(); got != 2 {\n+\t\tt.Fatalf(\"cp a.b = %d\", got)\n+\t}\n+}\n+\n+func TestFilterAndKeys(t *testing.T) {\n+\tm := New(map[string]interface{}{\"a\": 1, \"b\": 2, \"c\": 3})\n+\tgot := m.Filter(func(_ string, v *Value) bool { return v.Int() > 1 })\n+\tif !reflect.DeepEqual(got.Keys(), []string{\"b\", \"c\"}) {\n+\t\tt.Fatalf(\"keys = %v\", got.Keys())\n+\t}\n+\tif !reflect.DeepEqual(m.Keys(), []string{\"a\", \"b\", \"c\"}) {\n+\t\tt.Fatalf(\"keys = %v\", m.Keys())\n+\t}\n+}\n+\n+func TestValueConversions(t *testing.T) {\n+\tm := New(map[string]interface{}{\n+\t\t\"n\":   \"42\",\n+\t\t\"f\":   float64(3.5),\n+\t\t\"b\":   \"true\",\n+\t\t\"arr\": []interface{}{1, true, \"x\"},\n+\t})\n+\tif got := m.Get(\"n\").Int(); got != 42 {\n+\t\tt.Fatalf(\"n = %d\", got)\n+\t}\n+\tif got := m.Get(\"f\").Float(); got != 3.5 {\n+\t\tt.Fatalf(\"f = %v\", got)\n+\t}\n+\tif got := m.Get(\"b\").Bool(); !got {\n+\t\tt.Fatalf(\"b = %v\", got)\n+\t}\n+\tif got := m.Get(\"missing\").IntOr(9); got != 9 {\n+\t\tt.Fatalf(\"missing = %d\", got)\n+\t}\n+\tif got := m.Get(\"missing\").StringOr(\"def\"); got != \"def\" {\n+\t\tt.Fatalf(\"missing = %q\", got)\n+\t}\n+\twant := []string{\"1\", \"true\", \"x\"}\n+\tif got := m.Get(\"arr\").Strings(); !reflect.DeepEqual(got, want) {\n+\t\tt.Fatalf(\"arr = %#v\", got)\n+\t}\n+}\n+\n+func TestJSONRoundTrip(t *testing.T) {\n+\tm, err := FromJSON([]byte(`{\"a\":{\"b\":[1,2,{\"c\":true}]}}`))\n+\tif err != nil {\n+\t\tt.Fatal(err)\n+\t}\n+\tif !m.Get(\"a.b[2].c\").Bool() {\n+\t\tt.Fatalf(\"unexpected: %s\", m)\n+\t}\n+\tb, err := m.MarshalJSON()\n+\tif err != nil {\n+\t\tt.Fatal(err)\n+\t}\n+\tagain, err := FromJSON(b)\n+\tif err != nil {\n+\t\tt.Fatal(err)\n+\t}\n+\tif !reflect.DeepEqual(m.Data(), again.Data()) {\n+\t\tt.Fatalf(\"round trip mismatch: %s vs %s\", m, again)\n+\t}\n+}\n+\n+func TestEach(t *testing.T) {\n+\tm := New(map[string]interface{}{\"a\": 1, \"b\": 2})\n+\tsum := 0\n+\tseen := m.Each(func(_ string, v *Value) { sum += v.Int() })\n+\tif seen != m || sum != 3 {\n+\t\tt.Fatalf(\"sum = %d\", sum)\n+\t}\n+}\n",
+              "additions": 179,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "path.go",
+              "patch": "Index: path.go\n===================================================================\n--- path.go\t\n+++ path.go\t\n@@ -0,0 +1,200 @@\n+package mapx\n+\n+import (\n+\t\"strconv\"\n+\t\"strings\"\n+)\n+\n+type segment struct {\n+\tkey   string\n+\tindex int\n+\tisIdx bool\n+}\n+\n+func parsePath(path string) []segment {\n+\tif path == \"\" {\n+\t\treturn nil\n+\t}\n+\tvar segs []segment\n+\tvar buf strings.Builder\n+\tflush := func() {\n+\t\tif buf.Len() > 0 {\n+\t\t\tsegs = append(segs, segment{key: buf.String()})\n+\t\t\tbuf.Reset()\n+\t\t}\n+\t}\n+\tfor i := 0; i < len(path); {\n+\t\tswitch c := path[i]; c {\n+\t\tcase '.':\n+\t\t\tflush()\n+\t\t\ti++\n+\t\tcase '[':\n+\t\t\tflush()\n+\t\t\tend := strings.IndexByte(path[i:], ']')\n+\t\t\tif end < 0 {\n+\t\t\t\tbuf.WriteString(path[i:])\n+\t\t\t\ti = len(path)\n+\t\t\t\tbreak\n+\t\t\t}\n+\t\t\traw := path[i+1 : i+end]\n+\t\t\tif raw == \"\" || raw == \"-1\" {\n+\t\t\t\tsegs = append(segs, segment{index: -1, isIdx: true})\n+\t\t\t} else if n, err := strconv.Atoi(raw); err == nil {\n+\t\t\t\tsegs = append(segs, segment{index: n, isIdx: true})\n+\t\t\t} else {\n+\t\t\t\tsegs = append(segs, segment{key: raw})\n+\t\t\t}\n+\t\t\ti += end + 1\n+\t\tdefault:\n+\t\t\tbuf.WriteByte(c)\n+\t\t\ti++\n+\t\t}\n+\t}\n+\tflush()\n+\treturn segs\n+}\n+\n+func asMap(v interface{}) (map[string]interface{}, bool) {\n+\tm, ok := v.(map[string]interface{})\n+\treturn m, ok\n+}\n+\n+func asSlice(v interface{}) ([]interface{}, bool) {\n+\ts, ok := v.([]interface{})\n+\treturn s, ok\n+}\n+\n+func getPath(root interface{}, segs []segment) (interface{}, bool) {\n+\tcur := root\n+\tfor _, s := range segs {\n+\t\tif s.isIdx {\n+\t\t\tarr, ok := asSlice(cur)\n+\t\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n+\t\t\t\treturn nil, false\n+\t\t\t}\n+\t\t\tcur = arr[s.index]\n+\t\t\tcontinue\n+\t\t}\n+\t\tif m, ok := asMap(cur); ok {\n+\t\t\tv, ok := m[s.key]\n+\t\t\tif !ok {\n+\t\t\t\treturn nil, false\n+\t\t\t}\n+\t\t\tcur = v\n+\t\t\tcontinue\n+\t\t}\n+\t\tif arr, ok := asSlice(cur); ok {\n+\t\t\tif n, err := strconv.Atoi(s.key); err == nil && n >= 0 && n < len(arr) {\n+\t\t\t\tcur = arr[n]\n+\t\t\t\tcontinue\n+\t\t\t}\n+\t\t}\n+\t\treturn nil, false\n+\t}\n+\treturn cur, true\n+}\n+\n+func setPath(container interface{}, segs []segment, value interface{}) interface{} {\n+\tif len(segs) == 0 {\n+\t\treturn value\n+\t}\n+\ts := segs[0]\n+\tif s.isIdx {\n+\t\tarr, _ := asSlice(container)\n+\t\tif s.index < 0 {\n+\t\t\tif len(segs) == 1 {\n+\t\t\t\treturn append(arr, value)\n+\t\t\t}\n+\t\t\treturn append(arr, setPath(nil, segs[1:], value))\n+\t\t}\n+\t\tfor len(arr) <= s.index {\n+\t\t\tarr = append(arr, nil)\n+\t\t}\n+\t\tif len(segs) == 1 {\n+\t\t\tarr[s.index] = value\n+\t\t} else {\n+\t\t\tarr[s.index] = setPath(arr[s.index], segs[1:], value)\n+\t\t}\n+\t\treturn arr\n+\t}\n+\tm, _ := asMap(container)\n+\tif m == nil {\n+\t\tm = map[string]interface{}{}\n+\t}\n+\tif len(segs) == 1 {\n+\t\tm[s.key] = value\n+\t} else {\n+\t\tm[s.key] = setPath(m[s.key], segs[1:], value)\n+\t}\n+\treturn m\n+}\n+\n+func deletePath(root interface{}, segs []segment) interface{} {\n+\tif len(segs) == 0 {\n+\t\treturn root\n+\t}\n+\ts := segs[0]\n+\tif len(segs) == 1 {\n+\t\tif s.isIdx {\n+\t\t\tarr, ok := asSlice(root)\n+\t\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n+\t\t\t\treturn root\n+\t\t\t}\n+\t\t\treturn append(arr[:s.index], arr[s.index+1:]...)\n+\t\t}\n+\t\tif m, ok := asMap(root); ok {\n+\t\t\tdelete(m, s.key)\n+\t\t}\n+\t\treturn root\n+\t}\n+\tif s.isIdx {\n+\t\tarr, ok := asSlice(root)\n+\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n+\t\t\treturn root\n+\t\t}\n+\t\tarr[s.index] = deletePath(arr[s.index], segs[1:])\n+\t\treturn arr\n+\t}\n+\tm, ok := asMap(root)\n+\tif !ok {\n+\t\treturn root\n+\t}\n+\tif _, ok := m[s.key]; !ok {\n+\t\treturn root\n+\t}\n+\tm[s.key] = deletePath(m[s.key], segs[1:])\n+\treturn m\n+}\n+\n+func deepCopy(v interface{}) interface{} {\n+\tswitch t := v.(type) {\n+\tcase map[string]interface{}:\n+\t\tout := make(map[string]interface{}, len(t))\n+\t\tfor k, val := range t {\n+\t\t\tout[k] = deepCopy(val)\n+\t\t}\n+\t\treturn out\n+\tcase []interface{}:\n+\t\tout := make([]interface{}, len(t))\n+\t\tfor i, val := range t {\n+\t\t\tout[i] = deepCopy(val)\n+\t\t}\n+\t\treturn out\n+\tdefault:\n+\t\treturn v\n+\t}\n+}\n+\n+func mergeMaps(dst, src map[string]interface{}) {\n+\tfor k, sv := range src {\n+\t\tif dv, ok := dst[k]; ok {\n+\t\t\tdm, dok := dv.(map[string]interface{})\n+\t\t\tsm, sok := sv.(map[string]interface{})\n+\t\t\tif dok && sok {\n+\t\t\t\tmergeMaps(dm, sm)\n+\t\t\t\tcontinue\n+\t\t\t}\n+\t\t}\n+\t\tdst[k] = deepCopy(sv)\n+\t}\n+}\n",
+              "additions": 200,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "value.go",
+              "patch": "Index: value.go\n===================================================================\n--- value.go\t\n+++ value.go\t\n@@ -0,0 +1,270 @@\n+package mapx\n+\n+import (\n+\t\"encoding/json\"\n+\t\"fmt\"\n+\t\"strconv\"\n+\t\"strings\"\n+)\n+\n+type Value struct {\n+\traw    interface{}\n+\texists bool\n+}\n+\n+func newValue(raw interface{}, exists bool) *Value {\n+\treturn &Value{raw: raw, exists: exists}\n+}\n+\n+func (v *Value) Interface() interface{} {\n+\tif v == nil {\n+\t\treturn nil\n+\t}\n+\treturn v.raw\n+}\n+\n+func (v *Value) Raw() (interface{}, bool) {\n+\tif v == nil {\n+\t\treturn nil, false\n+\t}\n+\treturn v.raw, v.exists\n+}\n+\n+func (v *Value) Exists() bool {\n+\treturn v != nil && v.exists\n+}\n+\n+func (v *Value) IsNil() bool {\n+\treturn v == nil || v.raw == nil\n+}\n+\n+func (v *Value) String() string {\n+\tif v == nil || v.raw == nil {\n+\t\treturn \"\"\n+\t}\n+\tswitch t := v.raw.(type) {\n+\tcase string:\n+\t\treturn t\n+\tcase []byte:\n+\t\treturn string(t)\n+\tcase bool:\n+\t\treturn strconv.FormatBool(t)\n+\tcase float64:\n+\t\treturn strconv.FormatFloat(t, 'f', -1, 64)\n+\tcase float32:\n+\t\treturn strconv.FormatFloat(float64(t), 'f', -1, 32)\n+\tcase int:\n+\t\treturn strconv.Itoa(t)\n+\tcase int64:\n+\t\treturn strconv.FormatInt(t, 10)\n+\tcase int32:\n+\t\treturn strconv.FormatInt(int64(t), 10)\n+\tcase uint64:\n+\t\treturn strconv.FormatUint(t, 10)\n+\tcase fmt.Stringer:\n+\t\treturn t.String()\n+\tdefault:\n+\t\treturn fmt.Sprintf(\"%v\", t)\n+\t}\n+}\n+\n+func (v *Value) StringOr(def string) string {\n+\tif !v.Exists() {\n+\t\treturn def\n+\t}\n+\treturn v.String()\n+}\n+\n+func (v *Value) Int() int {\n+\tn, _ := toInt64(v.Interface())\n+\treturn int(n)\n+}\n+\n+func (v *Value) Int64() int64 {\n+\tn, _ := toInt64(v.Interface())\n+\treturn n\n+}\n+\n+func (v *Value) IntOr(def int) int {\n+\tif !v.Exists() {\n+\t\treturn def\n+\t}\n+\tn, ok := toInt64(v.raw)\n+\tif !ok {\n+\t\treturn def\n+\t}\n+\treturn int(n)\n+}\n+\n+func (v *Value) Float() float64 {\n+\tf, _ := toFloat64(v.Interface())\n+\treturn f\n+}\n+\n+func (v *Value) FloatOr(def float64) float64 {\n+\tif !v.Exists() {\n+\t\treturn def\n+\t}\n+\tf, ok := toFloat64(v.raw)\n+\tif !ok {\n+\t\treturn def\n+\t}\n+\treturn f\n+}\n+\n+func (v *Value) Bool() bool {\n+\tb, _ := toBool(v.Interface())\n+\treturn b\n+}\n+\n+func (v *Value) BoolOr(def bool) bool {\n+\tif !v.Exists() {\n+\t\treturn def\n+\t}\n+\tb, ok := toBool(v.raw)\n+\tif !ok {\n+\t\treturn def\n+\t}\n+\treturn b\n+}\n+\n+func (v *Value) Slice() []interface{} {\n+\tarr, _ := asSlice(v.Interface())\n+\treturn arr\n+}\n+\n+func (v *Value) Strings() []string {\n+\tarr := v.Slice()\n+\tif arr == nil {\n+\t\treturn nil\n+\t}\n+\tout := make([]string, len(arr))\n+\tfor i, item := range arr {\n+\t\tout[i] = newValue(item, true).String()\n+\t}\n+\treturn out\n+}\n+\n+func (v *Value) Map() *Map {\n+\tm, _ := asMap(v.Interface())\n+\treturn New(m)\n+}\n+\n+func toInt64(raw interface{}) (int64, bool) {\n+\tswitch t := raw.(type) {\n+\tcase int:\n+\t\treturn int64(t), true\n+\tcase int8:\n+\t\treturn int64(t), true\n+\tcase int16:\n+\t\treturn int64(t), true\n+\tcase int32:\n+\t\treturn int64(t), true\n+\tcase int64:\n+\t\treturn t, true\n+\tcase uint:\n+\t\treturn int64(t), true\n+\tcase uint8:\n+\t\treturn int64(t), true\n+\tcase uint16:\n+\t\treturn int64(t), true\n+\tcase uint32:\n+\t\treturn int64(t), true\n+\tcase uint64:\n+\t\treturn int64(t), true\n+\tcase float32:\n+\t\treturn int64(t), true\n+\tcase float64:\n+\t\treturn int64(t), true\n+\tcase bool:\n+\t\tif t {\n+\t\t\treturn 1, true\n+\t\t}\n+\t\treturn 0, true\n+\tcase json.Number:\n+\t\tif n, err := t.Int64(); err == nil {\n+\t\t\treturn n, true\n+\t\t}\n+\t\tif f, err := t.Float64(); err == nil {\n+\t\t\treturn int64(f), true\n+\t\t}\n+\t\treturn 0, false\n+\tcase string:\n+\t\ts := strings.TrimSpace(t)\n+\t\tif n, err := strconv.ParseInt(s, 10, 64); err == nil {\n+\t\t\treturn n, true\n+\t\t}\n+\t\tif f, err := strconv.ParseFloat(s, 64); err == nil {\n+\t\t\treturn int64(f), true\n+\t\t}\n+\t\treturn 0, false\n+\tdefault:\n+\t\treturn 0, false\n+\t}\n+}\n+\n+func toFloat64(raw interface{}) (float64, bool) {\n+\tswitch t := raw.(type) {\n+\tcase float64:\n+\t\treturn t, true\n+\tcase float32:\n+\t\treturn float64(t), true\n+\tcase int:\n+\t\treturn float64(t), true\n+\tcase int8:\n+\t\treturn float64(t), true\n+\tcase int16:\n+\t\treturn float64(t), true\n+\tcase int32:\n+\t\treturn float64(t), true\n+\tcase int64:\n+\t\treturn float64(t), true\n+\tcase uint:\n+\t\treturn float64(t), true\n+\tcase uint8:\n+\t\treturn float64(t), true\n+\tcase uint16:\n+\t\treturn float64(t), true\n+\tcase uint32:\n+\t\treturn float64(t), true\n+\tcase uint64:\n+\t\treturn float64(t), true\n+\tcase json.Number:\n+\t\tf, err := t.Float64()\n+\t\treturn f, err == nil\n+\tcase string:\n+\t\tf, err := strconv.ParseFloat(strings.TrimSpace(t), 64)\n+\t\treturn f, err == nil\n+\tdefault:\n+\t\treturn 0, false\n+\t}\n+}\n+\n+func toBool(raw interface{}) (bool, bool) {\n+\tswitch t := raw.(type) {\n+\tcase bool:\n+\t\treturn t, true\n+\tcase json.Number:\n+\t\tf, err := t.Float64()\n+\t\tif err != nil {\n+\t\t\treturn false, false\n+\t\t}\n+\t\treturn f != 0, true\n+\tcase string:\n+\t\ts := strings.TrimSpace(t)\n+\t\tif b, err := strconv.ParseBool(s); err == nil {\n+\t\t\treturn b, true\n+\t\t}\n+\t\tswitch strings.ToLower(s) {\n+\t\tcase \"yes\":\n+\t\t\treturn true, true\n+\t\tcase \"no\":\n+\t\t\treturn false, true\n+\t\t}\n+\t\treturn false, false\n+\t}\n+\tif f, ok := toFloat64(raw); ok {\n+\t\treturn f != 0, true\n+\t}\n+\treturn false, false\n+}\n",
+              "additions": 270,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Set up a new Go module for a project that needs to conveniently access and manipulate arbitrary map[string]interface{} data with a fluent, chainable API.\"",
+          "id": "prt_103a3ad75001itVdOb6fQTj4gp",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3ad66001LnqT4A0R3xXFkW"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000104904,
+        "tokens": {
+          "total": 7448,
+          "input": 188,
+          "output": 57,
+          "reasoning": 35,
+          "cache": {
+            "write": 0,
+            "read": 7168
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062421430,
+          "completed": 1791062424522
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a3afb6001aDaAiNOE0U8bWI",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-start",
+          "id": "prt_103a3b65f001zsXWF3zCf9bFS3",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3afb6001aDaAiNOE0U8bWI"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me understand the workspace first. The user wants a Go module with a fluent, chainable API for map[string]interface{}. Let me look at the current directory.",
+          "time": {
+            "start": 1791062423760,
+            "end": 1791062424030
+          },
+          "id": "prt_103a3b8d0001xJOjF9MF4ggZA9",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3afb6001aDaAiNOE0U8bWI"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_QpkjuDMtQiHRNqN1OTiZ4686",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "pwd && ls -la && go version 2>/dev/null || echo \"go not found\""
+            },
+            "output": "/work\ntotal 8\ndrwxr-xr-x 5  501 dialout  160 Oct  3 21:19 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:19 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:19 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:20 .opencode\n-rw-r--r-- 1  501 dialout   88 Oct  3 21:19 opencode.json\ngo version go1.27.1 linux/arm64\n",
+            "metadata": {
+              "output": "/work\ntotal 8\ndrwxr-xr-x 5  501 dialout  160 Oct  3 21:19 .\ndrwxr-xr-x 1 root root    4096 Oct  3 21:19 ..\ndrwxr-xr-x 9  501 dialout  288 Oct  3 21:19 .git\ndrwxr-xr-x 7  501 dialout  224 Oct  3 21:20 .opencode\n-rw-r--r-- 1  501 dialout   88 Oct  3 21:19 opencode.json\ngo version go1.27.1 linux/arm64\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "pwd && ls -la && go version 2>/dev/null || echo \"go not found\"",
+            "time": {
+              "start": 1791062424183,
+              "end": 1791062424415
+            }
+          },
+          "id": "prt_103a3ba0600136HoL2PQbD0gee",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3afb6001aDaAiNOE0U8bWI"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7448,
+            "input": 188,
+            "output": 57,
+            "reasoning": 35,
+            "cache": {
+              "write": 0,
+              "read": 7168
+            }
+          },
+          "cost": 0.000104904,
+          "id": "prt_103a3bb99001z3be2xkXYXMMaw",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3afb6001aDaAiNOE0U8bWI"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000093072,
+        "tokens": {
+          "total": 7671,
+          "input": 172,
+          "output": 60,
+          "reasoning": 15,
+          "cache": {
+            "write": 0,
+            "read": 7424
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062424526,
+          "completed": 1791062425454
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a3bbce001vYCmpTxwTcRPGl",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-start",
+          "id": "prt_103a3bd9f0018z1QwPX0jWot66",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bbce001vYCmpTxwTcRPGl"
+        },
+        {
+          "type": "reasoning",
+          "text": "Let me check the git status and existing files, and opencode.json.",
+          "time": {
+            "start": 1791062425075,
+            "end": 1791062425217
+          },
+          "id": "prt_103a3bdf3001Wxh7yUS7UZB2Gf",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bbce001vYCmpTxwTcRPGl"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_LXct0MruJzR7rBHUY7zn7619",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "git status && git log --oneline -5 2>/dev/null; echo \"---\"; cat opencode.json"
+            },
+            "output": "On branch main\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.opencode/\n\topencode.json\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n---\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"plugin\": [\"opencode-yul@0.0.21\"]\n}\n",
+            "metadata": {
+              "output": "On branch main\n\nNo commits yet\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\t.opencode/\n\topencode.json\n\nnothing added to commit but untracked files present (use \"git add\" to track)\n---\n{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"plugin\": [\"opencode-yul@0.0.21\"]\n}\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "git status && git log --oneline -5 2>/dev/null; echo \"---\"; cat opencode.json",
+            "time": {
+              "start": 1791062425351,
+              "end": 1791062425384
+            }
+          },
+          "id": "prt_103a3be840013YPRTNYE5fKOFC",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bbce001vYCmpTxwTcRPGl"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7671,
+            "input": 172,
+            "output": 60,
+            "reasoning": 15,
+            "cache": {
+              "write": 0,
+              "read": 7424
+            }
+          },
+          "cost": 0.000093072,
+          "id": "prt_103a3bf490011Zqq4eWMrV72wt",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bbce001vYCmpTxwTcRPGl"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000206556,
+        "tokens": {
+          "total": 8025,
+          "input": 222,
+          "output": 51,
+          "reasoning": 200,
+          "cache": {
+            "write": 0,
+            "read": 7552
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062425457,
+          "completed": 1791062427133
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a3bf71001RfdnR2LOwMeEvq",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-start",
+          "id": "prt_103a3c12a0014rLKqB6MobsNw6",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bf71001RfdnR2LOwMeEvq"
+        },
+        {
+          "type": "reasoning",
+          "text": "The task: \"Set up a new Go module for a project that needs to conveniently access and manipulate arbitrary map[string]interface{} data with a fluent, chainable API.\"\n\nThis is somewhat open-ended. I need to create a Go module. Let me think about what the user actually wants. They want a Go module for accessing/manipulating map[string]interface{} with a fluent chainable API. This is a library.\n\nLet me build something reasonable. I'll create a go.mod and a package. Let me think of a good API design.\n\nI should ask clarification? The instructions say to be proactive when asked to do something. The request is clear enough: set up a new Go module. Let me create a sensible, well-structured library.\n\nLet me plan:\n- go.mod with module path. What module path? No info about repo. Use something generic like `github.com/user/mapfluent`? Hmm. Maybe derive from git remote.\n\nLet me check git remote.",
+          "time": {
+            "start": 1791062426223,
+            "end": 1791062426850
+          },
+          "id": "prt_103a3c26f001qRGnmTP2Bp3K87",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bf71001RfdnR2LOwMeEvq"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_eLQwCvLCSSA3HEm1xequ7586",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "git remote -v; echo \"---\"; ls -la .opencode"
+            },
+            "output": "---\ntotal 24\ndrwxr-xr-x  7 501 dialout   224 Oct  3 21:20 .\ndrwxr-xr-x  5 501 dialout   160 Oct  3 21:19 ..\n-rw-r--r--  1 501 dialout    63 Oct  3 21:19 .gitignore\ndrwxr-xr-x 30 501 dialout   960 Oct  3 21:20 node_modules\n-rw-r--r--  1 501 dialout 14634 Oct  3 21:20 package-lock.json\n-rw-r--r--  1 501 dialout    65 Oct  3 21:20 package.json\ndrwxr-xr-x  3 501 dialout    96 Oct  3 21:19 plugins\n",
+            "metadata": {
+              "output": "---\ntotal 24\ndrwxr-xr-x  7 501 dialout   224 Oct  3 21:20 .\ndrwxr-xr-x  5 501 dialout   160 Oct  3 21:19 ..\n-rw-r--r--  1 501 dialout    63 Oct  3 21:19 .gitignore\ndrwxr-xr-x 30 501 dialout   960 Oct  3 21:20 node_modules\n-rw-r--r--  1 501 dialout 14634 Oct  3 21:20 package-lock.json\n-rw-r--r--  1 501 dialout    65 Oct  3 21:20 package.json\ndrwxr-xr-x  3 501 dialout    96 Oct  3 21:19 plugins\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "git remote -v; echo \"---\"; ls -la .opencode",
+            "time": {
+              "start": 1791062426948,
+              "end": 1791062426987
+            }
+          },
+          "id": "prt_103a3c4e5001rpNZmaBpSCJwr0",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bf71001RfdnR2LOwMeEvq"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8025,
+            "input": 222,
+            "output": 51,
+            "reasoning": 200,
+            "cache": {
+              "write": 0,
+              "read": 7552
+            }
+          },
+          "cost": 0.000206556,
+          "id": "prt_103a3c5ac001VjAvdU7nhBLgP0",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3bf71001RfdnR2LOwMeEvq"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.004858758,
+        "tokens": {
+          "total": 16199,
+          "input": 273,
+          "output": 183,
+          "reasoning": 7807,
+          "cache": {
+            "write": 0,
+            "read": 7936
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062427146,
+          "completed": 1791062457280
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a3c60a001qc0igJDpUkBGVi",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-start",
+          "id": "prt_103a3c7f7001iT4AmZjZZ6PBj3",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3c60a001qc0igJDpUkBGVi"
+        },
+        {
+          "type": "reasoning",
+          "text": "No remote. I'll pick a module path. Since it's unspecified, maybe use a placeholder. But Go requires a valid module path. I'll use `github.com/example/mapq`? Hmm, but maybe I should ask. The instructions favor doing. Let me choose a reasonable name.\n\nThe project needs to \"conveniently access and manipulate arbitrary map[string]interface{} data with a fluent, chainable API.\" A good package name could be `maputil`, `chainmap`, `fluentmap`, `mapq`. I'll go with something descriptive.\n\nLet me design the API inspired by libraries like lodash/get (gjson/sjson style), and chainable.\n\nSomething like:\n\n```go\npackage mapx\n\nm := mapx.New(map[string]interface{}{...})\nm.Get(\"a.b.c\").String()\nm.Set(\"a.b.c\", 1)\nm.Delete(\"a.b\")\n```\n\nBut \"fluent, chainable API\" suggests wrapping and returning *Map for mutation chaining.\n\nLet me design a robust library:\n\n- `Map` type wrapping `map[string]interface{}`.\n- `New(m map[string]interface{}) *Map`\n- `NewFrom(data ...)` maybe parse JSON.\n- Path access with dot notation and array index: `Get(path string) *Value`\n- `Value` wraps interface{} with typed accessors: `String()`, `Int()`, `Bool()`, `Float()`, `Slice()`, `Map()`, `Interface()`, `Exists()`.\n- `Set(path string, value interface{}) *Map`\n- `Delete(path string) *Map`\n- `Has(path string) bool`\n- `Merge(other) *Map`\n- `Clone() *Map`\n- `Keys() []string`\n- `Each(func(key string, v *Value)) *Map`\n- `Filter(func(...) bool) *Map`\n- `JSON()` / `MarshalJSON`\n\nShould it be generic? Go 1.18+ generics. But arbitrary map[string]interface{} is the focus.\n\nLet me be careful about over-engineering. The task says \"set up a new Go module\". So minimal but functional: go.mod + library + tests. I'll create a solid implementation with tests so it compiles and passes.\n\nLet me think about path parsing with dot notation and array indices like `users[0].name` or `users.0.name`.\n\nLet me write it.\n\nModule path: I'll use `github.com/example/mapx`? The user may want their own. Since no remote, maybe just name module `mapx` (a simple module path without domain is allowed for local modules? Yes, Go allows module paths without dots for local dev, though `go get` cannot fetch). Actually a module path like `mapx` is valid. But best practice is a domain. Hmm.\n\nI'll use `mapx` as module path? Go modules: module path must be a valid import path. `mapx` works locally. But if published needs domain. I'll go with `github.com/example/mapx` and mention they can change it. Actually let me reconsider—maybe pick a name that reflects purpose: `fluentmap`.\n\nI'll name the module `github.com/example/fluentmap`? Hmm. Let me keep it simple and clear: package `mapq`? \n\nI think \"mapx\" is a fine name. Let me go with module `mapx`... Actually, I'd rather derive a sensible path. Let me just use `github.com/example/mapx`.\n\nWait - maybe I'm overthinking. Let me pick `github.com/yourname/mapx`? That's ugly. I'll use `example.com/mapx` which is the Go documentation standard for placeholder domains. Actually the Go convention for examples is `example.com/...`. That's a good placeholder. I'll use `example.com/mapx`.\n\nNow design in detail.\n\nFile structure:\n- go.mod\n- map.go — Map type and constructors\n- value.go — Value type and typed getters\n- path.go — path parsing/get/set/delete\n- map_test.go\n\nLet me write clean code.\n\n### path.go\n\nParsing path into segments where each segment is either a key or an index.\n\nFormat: keys separated by `.`, array indices in `[n]` or numeric segment.\n\nExamples: `user.name`, `users[0].name`, `users.0.name`.\n\nLet me implement a parser that tokenizes.\n\n```go\ntype segment struct {\n\tkey   string\n\tindex int\n\tisIdx bool\n}\n```\n\nParser:\n```go\nfunc parsePath(path string) []segment {\n\tvar segs []segment\n\tif path == \"\" {\n\t\treturn segs\n\t}\n\ti := 0\n\t// split\n\tvar buf strings.Builder\n\tflushKey := func() {\n\t\tif buf.Len() > 0 {\n\t\t\tsegs = append(segs, segment{key: buf.String()})\n\t\t\tbuf.Reset()\n\t\t}\n\t}\n\tfor i < len(path) {\n\t\tc := path[i]\n\t\tswitch c {\n\t\tcase '.':\n\t\t\tflushKey()\n\t\t\ti++\n\t\tcase '[':\n\t\t\tflushKey()\n\t\t\tj := strings.IndexByte(path[i:], ']')\n\t\t\tif j < 0 { // malformed, treat rest as key?\n\t\t\t\tbuf.WriteString(path[i:])\n\t\t\t\ti = len(path)\n\t\t\t\tbreak\n\t\t\t}\n\t\t\tidxStr := path[i+1 : i+j]\n\t\t\tif n, err := strconv.Atoi(idxStr); err == nil {\n\t\t\t\tsegs = append(segs, segment{index: n, isIdx: true})\n\t\t\t} else {\n\t\t\t\t// quoted key? keep simple: treat as key\n\t\t\t\tsegs = append(segs, segment{key: idxStr})\n\t\t\t}\n\t\t\ti += j + 1\n\t\tdefault:\n\t\t\tbuf.WriteByte(c)\n\t\t\ti++\n\t\t}\n\t}\n\tflushKey()\n\treturn segs\n}\n```\n\nHmm, handling numeric dot segments: `users.0.name` — the `0` would be treated as key. For maps vs slices, get should handle both: if container is a slice and segment.key is numeric, use index. I'll handle in get: when current is []interface{} and segment is key with numeric value, convert.\n\nThat's convenient.\n\n### Getting\n\n```go\nfunc get(root interface{}, segs []segment) (interface{}, bool) {\n\tcur := root\n\tfor _, s := range segs {\n\t\tif s.isIdx {\n\t\t\tarr, ok := cur.([]interface{})\n\t\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n\t\t\t\treturn nil, false\n\t\t\t}\n\t\t\tcur = arr[s.index]\n\t\t\tcontinue\n\t\t}\n\t\t// key or numeric on slice\n\t\tif m, ok := asMap(cur); ok {\n\t\t\tv, ok := m[s.key]\n\t\t\tif !ok { return nil, false }\n\t\t\tcur = v\n\t\t\tcontinue\n\t\t}\n\t\tif arr, ok := cur.([]interface{}); ok {\n\t\t\tif n, err := strconv.Atoi(s.key); err == nil && n >= 0 && n < len(arr) {\n\t\t\t\tcur = arr[n]\n\t\t\t\tcontinue\n\t\t\t}\n\t\t}\n\t\treturn nil, false\n\t}\n\treturn cur, true\n}\n```\n\nasMap handles `map[string]interface{}` and also `map[string]any` is same. Could also handle `Map` type? Keep to map[string]interface{}.\n\n### Setting\n\nSet needs to create intermediate maps. For slices, if index == len, append; else set if in range. Support `-` for append? Nice touch: `arr[-]` or `arr[]`. Let's support index -1 meaning append? If path uses `[]` empty index, parse as append. Let me support empty brackets as append: segment{isIdx:true, index:-1}. Then set appends.\n\nSet:\n```go\nfunc set(root *map[string]interface{}, segs []segment, value interface{}) {\n\tif len(segs) == 0 {\n\t\t// replace? If value is map, set contents\n\t\treturn\n\t}\n\t...\n}\n```\n\nActually root is a *Map wrapping map. Let's implement set recursively returning the new container, because assigning into nested maps/slices requires mutation by reference. Maps are reference types so mutation works, but slices inside maps: modifying an element of a slice works by index (backing array), but appending may reallocate so must assign back.\n\nSimplest: recursive function that returns the (possibly new) value for the current node, and caller assigns.\n\n```go\nfunc setIn(container interface{}, segs []segment, value interface{}) interface{} {\n\tif len(segs) == 1 {\n\t\ts := segs[0]\n\t\tif s.isIdx {\n\t\t\tarr := toSlice(container)\n\t\t\tif s.index < 0 || s.index >= len(arr) {\n\t\t\t\t// append\n\t\t\t\tarr = append(arr, value)\n\t\t\t} else {\n\t\t\t\tarr[s.index] = value\n\t\t\t}\n\t\t\treturn arr\n\t\t}\n\t\tm := toMap(container)\n\t\tm[s.key] = value\n\t\treturn m\n\t}\n\t// more segments\n\ts := segs[0]\n\tif s.isIdx {\n\t\tarr := toSlice(container)\n\t\tvar child interface{}\n\t\tif s.index >= 0 && s.index < len(arr) {\n\t\t\tchild = arr[s.index]\n\t\t}\n\t\tnewChild := setIn(child, segs[1:], value)\n\t\tif s.index < 0 || s.index >= len(arr) {\n\t\t\tarr = append(arr, newChild)\n\t\t} else {\n\t\t\tarr[s.index] = newChild\n\t\t}\n\t\treturn arr\n\t}\n\tm := toMap(container)\n\tnewChild := setIn(m[s.key], segs[1:], value)\n\tm[s.key] = newChild\n\treturn m\n}\n```\n\nWhere toMap and toSlice create new ones if type mismatch/nil. But creating a slice when next segment is index vs map when key. In setIn, when child is nil and next segment is index, toSlice(nil) returns empty slice; when next is key, toMap(nil) returns new map. But the decision of which to create for the *current* segment is based on current segment type. Let me restructure: for segment s, we need a container of the right kind: if s.isIdx we need slice, else map. If existing container wrong type, we replace it (or keep?). Let's replace with fresh.\n\nActually in code above for the non-last branch: if s.isIdx, arr := toSlice(container) which if container isn't a slice returns nil, losing data. Better to start with fresh when mismatch.\n\nLet me write helpers:\n```go\nfunc asMap(v interface{}) (map[string]interface{}, bool) {\n\tm, ok := v.(map[string]interface{})\n\treturn m, ok\n}\nfunc asSlice(v interface{}) ([]interface{}, bool) {\n\ts, ok := v.([]interface{})\n\treturn s, ok\n}\n```\n\nFor set:\n```go\nif s.isIdx {\n\tarr, ok := asSlice(container)\n\tif !ok { arr = nil }\n\t...\n\treturn arr\n}\n```\n\nThat's fine; overwrites mismatched types.\n\nFor top-level Map.Set path, root is a map. If segs empty (path \"\"), do nothing? Or if value is map, replace root. Let's handle: if path == \"\", and value is map[string]interface{}, copy. Else ignore. Actually simpler: empty path not allowed. I'll just handle by replacing root contents if it's a map.\n\nHmm, root replacement: Map has pointer to map. We can do `*m.data = ...`. Let's keep Map struct as `type Map struct { data map[string]interface{} }`. Set with empty path: do nothing. Fine.\n\n### Value\n\n```go\ntype Value struct {\n\traw interface{}\n\texists bool\n}\n```\n\nMethods:\n- `Interface() interface{}`\n- `Exists() bool`\n- `String() string` (fmt for non-strings? or \"\" default). Provide `StringOr(def)`.\n- `Int() int`, `IntOr`\n- `Float() float64`\n- `Bool() bool`\n- `Slice() []interface{}`\n- `Map() *Map`\n- `String` conversions: numbers -> string?\n- `IsNil()`\n\nI want a clean, useful set. Let me implement typed getters with sensible conversions and `Or` variants.\n\nAlso `Get` returns `*Value`.\n\n### Map methods\n\n- `New(data map[string]interface{}) *Map`\n- `NewFromJSON([]byte) (*Map, error)`\n- `From(v interface{}) *Map`?\n- `Data() map[string]interface{}`\n- `Get(path string) *Value`\n- `Set(path string, value interface{}) *Map`\n- `SetIfEmpty`?\n- `Delete(path string) *Map`\n- `Has(path string) bool`\n- `Keys() []string`\n- `Len() int`\n- `Clone() *Map`\n- `Merge(others ...*Map) *Map` (deep merge? shallow)\n- `Each(fn func(key string, v *Value)) *Map`\n- `Filter(fn func(key string, v *Value) bool) *Map`\n- `Map(fn ...)`? maybe not.\n- `MarshalJSON() ([]byte, error)` and `UnmarshalJSON`.\n- `String() string` maybe JSON.\n\nFluent API: all mutating methods return *Map.\n\nDeep merge is nice. Let me implement `Merge` as deep merge where nested maps get merged. Provide `Merge` (deep) and maybe `MergeShallow`. Keep just deep merge? I'll implement deep.\n\nClone: deep copy via reflection? Simpler: marshal/unmarshal JSON. But that loses non-JSON types. Implement recursive copy for maps/slices, otherwise return value as-is. That's reasonable.\n\nLet me also add top-level convenience functions? Maybe `Get(data, path)`.\n\nI think this is enough. Let me be careful not to bloat. I'll implement:\n\nmap.go: Map type, New, From, Data, Keys, Len, Get, Set, Delete, Has, Clone, Merge, Each, Filter, MarshalJSON, UnmarshalJSON, String.\nvalue.go: Value type + accessors.\npath.go: parsing + get/set/delete.\n\nActually let me combine path helpers into map.go or internal file. I'll make `path.go`.\n\nLet me write tests covering main behaviors.\n\nLet me also add a README? Instructions say don't proactively create docs. I'll skip README. But a module usually benefits. The instruction: \"NEVER proactively create documentation files (*.md)\". So skip.\n\nNow module path. Let me use `example.com/mapx`. Package name `mapx`.\n\nHold on, maybe I should quickly consider whether the user expects a specific known library. \"conveniently access and manipulate arbitrary map[string]interface{} data with a fluent, chainable API\" — this is a description, not naming a specific lib. I'll build it.\n\nLet me create files.\n\ngo.mod:\n```\nmodule example.com/mapx\n\ngo 1.27\n```\nWait, go 1.27.1 is installed but go directive typically uses major.minor. `go 1.27` maybe invalid? Go directives allow 1.27. Let me use go 1.27. Actually toolchain 1.27.1; go directive `go 1.27.1` is allowed too. I'll use `go 1.27`. Hmm, better to use `go 1.24` for wide compat? But only 1.27 installed. The go directive can be lower than toolchain; fine. I'll use `go 1.24` for broad compatibility? Generics need 1.18+. I'll use `go 1.21`. Actually let me just use `go 1.27` to match environment, simpler. But then module requires 1.27. It's a new module; fine. I'll use `go 1.24` to be safe and broadly usable. Hmm, gofmt doesn't care. Let me use `go 1.24`.\n\nActually, I realize I should not overthink; use `go 1.24`.\n\nLet me write value.go first.\n\nDialect: no comments per instructions? \"DO NOT ADD ANY COMMENTS unless asked\". So no comments in code. Good, keep it comment-free.\n\nLet me draft.\n\n```go\npackage mapx\n\nimport (\n\t\"fmt\"\n\t\"strconv\"\n)\n\ntype Value struct {\n\traw    interface{}\n\texists bool\n}\n\nfunc newValue(raw interface{}, exists bool) *Value {\n\treturn &Value{raw: raw, exists: exists}\n}\n\nfunc (v *Value) Interface() interface{} {\n\tif v == nil {\n\t\treturn nil\n\t}\n\treturn v.raw\n}\n\nfunc (v *Value) Exists() bool {\n\treturn v != nil && v.exists\n}\n\nfunc (v *Value) IsNil() bool {\n\treturn v == nil || v.raw == nil\n}\n\nfunc (v *Value) Raw() (interface{}, bool) {\n\tif v == nil {\n\t\treturn nil, false\n\t}\n\treturn v.raw, v.exists\n}\n\nfunc (v *Value) String() string {\n\tif v == nil || v.raw == nil {\n\t\treturn \"\"\n\t}\n\tswitch t := v.raw.(type) {\n\tcase string:\n\t\treturn t\n\tcase []byte:\n\t\treturn string(t)\n\tcase fmt.Stringer:\n\t\treturn t.String()\n\tcase bool:\n\t\treturn strconv.FormatBool(t)\n\tcase float64:\n\t\treturn strconv.FormatFloat(t, 'f', -1, 64)\n\tcase float32:\n\t\treturn strconv.FormatFloat(float64(t), 'f', -1, 32)\n\tcase int:\n\t\treturn strconv.Itoa(t)\n\tcase int64:\n\t\treturn strconv.FormatInt(t, 10)\n\tcase int32:\n\t\treturn strconv.FormatInt(int64(t), 10)\n\tcase uint64:\n\t\treturn strconv.FormatUint(t, 10)\n\tdefault:\n\t\treturn fmt.Sprintf(\"%v\", t)\n\t}\n}\n\nfunc (v *Value) StringOr(def string) string {\n\tif v == nil || !v.exists {\n\t\treturn def\n\t}\n\treturn v.String()\n}\n```\n\nInt:\n```go\nfunc (v *Value) Int() int {\n\tn, _ := v.Int64()\n\treturn int(n)\n}\nfunc (v *Value) Int64() (int64, bool) { ... }\n```\nReturn (int, bool)? Common libs return int only. Let me provide `Int() int` and `IntOr(def int) int`, plus `Int64() int64`. But detecting parse error? I'll silently return 0 on failure to keep fluent.\n\nLet me make them simple returning values, with Or variants.\n\nConversion helper:\n```go\nfunc toInt64(raw interface{}) (int64, bool) {\n\tswitch t := raw.(type) {\n\tcase int: return int64(t), true\n\tcase int8: ...\n\tcase int16, int32, int64\n\tcase uint...\n\tcase float64: return int64(t), true\n\tcase float32\n\tcase json.Number: n, err := t.Int64()\n\tcase string: n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)\n\tcase bool: if t {return 1,true}; return 0,true\n\t}\n\treturn 0,false\n}\n```\n\njson.Number requires encoding/json import — fine.\n\ntoFloat64 similarly, toBool.\n\nBool conversions: accept bool, strings \"true\"/\"false\"/\"1\"/\"0\", numbers !=0.\n\nLet me write these.\n\nAlso `Value.Map() *Map`:\n```go\nfunc (v *Value) Map() *Map {\n\tm, _ := asMap(v.Interface())\n\tif m == nil {\n\t\tm = map[string]interface{}{}\n\t}\n\treturn New(m)\n}\n```\nHmm returning a Map even if not a map. Maybe return nil if not map? For chainable convenience, return empty Map? I think returning *Map wrapping a newly allocated map when raw is nil could be surprising. Let me have `Map()` return *Map that wraps existing map or an empty map; and Exists tells. Actually better: `Map() *Map` returns nil if not a map? Then chaining panics. Let me return a Map wrapping a fresh empty map, but that loses write-through. Hmm.\n\nI'll make `Map()` return `*Map` whose data is the underlying map if present, else empty new map. Document via tests.\n\n`Slice() []interface{}` returns slice or nil.\n\n`SliceValue`? no.\n\nLet me also add `Value.Each` for slices? Not needed.\n\nNow map.go.\n\n```go\npackage mapx\n\nimport (\n\t\"encoding/json\"\n)\n\ntype Map struct {\n\tdata map[string]interface{}\n}\n\nfunc New(data map[string]interface{}) *Map {\n\tif data == nil {\n\t\tdata = map[string]interface{}{}\n\t}\n\treturn &Map{data: data}\n}\n\nfunc NewFrom(v interface{}) *Map {\n\tm, ok := v.(map[string]interface{})\n\tif !ok {\n\t\treturn New(nil)\n\t}\n\treturn New(m)\n}\n\nfunc FromJSON(b []byte) (*Map, error) {\n\tm := map[string]interface{}{}\n\tif err := json.Unmarshal(b, &m); err != nil {\n\t\treturn nil, err\n\t}\n\treturn New(m), nil\n}\n```\n\nGet:\n```go\nfunc (m *Map) Get(path string) *Value {\n\tif m == nil {\n\t\treturn newValue(nil, false)\n\t}\n\traw, ok := getPath(m.data, parsePath(path))\n\treturn newValue(raw, ok)\n}\n```\n\nSet:\n```go\nfunc (m *Map) Set(path string, value interface{}) *Map {\n\tif m == nil { return m }\n\tsegs := parsePath(path)\n\tif len(segs) == 0 {\n\t\tif vm, ok := asMap(value); ok {\n\t\t\tm.data = vm\n\t\t}\n\t\treturn m\n\t}\n\tres := setPath(m.data, segs, value)\n\tif rm, ok := asMap(res); ok {\n\t\tm.data = rm\n\t}\n\treturn m\n}\n```\n\nDelete:\n```go\nfunc (m *Map) Delete(path string) *Map {\n\t... deletePath\n}\n```\n\nHas:\n```go\nfunc (m *Map) Has(path string) bool {\n\t_, ok := getPath(m.data, parsePath(path))\n\treturn ok\n}\n```\n\nKeys, Len, Data, Clone, Merge, Each, Filter.\n\nKeys sorted? I'll sort for deterministic output. Use sort.Strings.\n\n```go\nfunc (m *Map) Keys() []string {\n\tif m == nil { return nil }\n\tkeys := make([]string, 0, len(m.data))\n\tfor k := range m.data { keys = append(keys, k) }\n\tsort.Strings(keys)\n\treturn keys\n}\n```\n\nClone deep:\n```go\nfunc deepCopy(v interface{}) interface{} {\n\tswitch t := v.(type) {\n\tcase map[string]interface{}:\n\t\tout := make(map[string]interface{}, len(t))\n\t\tfor k, val := range t { out[k] = deepCopy(val) }\n\t\treturn out\n\tcase []interface{}:\n\t\tout := make([]interface{}, len(t))\n\t\tfor i, val := range t { out[i] = deepCopy(val) }\n\t\treturn out\n\tdefault:\n\t\treturn v\n\t}\n}\n```\n\nMerge deep:\n```go\nfunc (m *Map) Merge(others ...*Map) *Map {\n\tfor _, o := range others {\n\t\tif o == nil { continue }\n\t\tmergeMaps(m.data, o.data)\n\t}\n\treturn m\n}\n\nfunc mergeMaps(dst, src map[string]interface{}) {\n\tfor k, sv := range src {\n\t\tif dv, ok := dst[k]; ok {\n\t\t\tdm, dok := dv.(map[string]interface{})\n\t\t\tsm, sok := sv.(map[string]interface{})\n\t\t\tif dok && sok {\n\t\t\t\tmergeMaps(dm, sm)\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tif da, dok := dv.([]interface{}); dok {\n\t\t\t\tif sa, sok := sv.([]interface{}); sok {\n\t\t\t\t\tdst[k] = append(da, sa...)\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\tdst[k] = deepCopy(sv)\n\t}\n}\n```\n\nHmm appending slices on merge is a design choice. Maybe replacing is more expected. I'll replace (deepCopy) rather than append to be predictable. Actually many merge implementations append. I'll keep it simple: deep merge nested maps, otherwise overwrite. Remove slice append.\n\nEach:\n```go\nfunc (m *Map) Each(fn func(key string, v *Value)) *Map {\n\tif m == nil || fn == nil { return m }\n\tfor k, raw := range m.data {\n\t\tfn(k, newValue(raw, true))\n\t}\n\treturn m\n}\n```\nIteration order random. Fine.\n\nFilter:\n```go\nfunc (m *Map) Filter(fn func(key string, v *Value) bool) *Map {\n\tif m == nil { return m }\n\tout := map[string]interface{}{}\n\tfor k, raw := range m.data {\n\t\tif fn(k, newValue(raw, true)) {\n\t\t\tout[k] = raw\n\t\t}\n\t}\n\treturn New(out)\n}\n```\n\nMarshalJSON:\n```go\nfunc (m *Map) MarshalJSON() ([]byte, error) {\n\tif m == nil { return []byte(\"null\"), nil }\n\treturn json.Marshal(m.data)\n}\nfunc (m *Map) UnmarshalJSON(b []byte) error {\n\treturn json.Unmarshal(b, &m.data)\n}\n```\n\nString:\n```go\nfunc (m *Map) String() string {\n\tb, err := json.Marshal(m)\n\tif err != nil { return \"\" }\n\treturn string(b)\n}\n```\n\nMaybe add convenience top-level:\n```go\nfunc Get(data map[string]interface{}, path string) *Value {\n\treturn New(data).Get(path)\n}\n```\n\nNot necessary but convenient. I'll add `Get`, `Set`? Set returns new map? Keep only New and FromJSON. Actually `Get` top-level is handy. I'll skip to avoid confusion.\n\nNow path.go with getPath, setPath, deletePath.\n\ndeletePath: navigate to parent, delete key or splice slice index.\n```go\nfunc deletePath(root interface{}, segs []segment) interface{} {\n\tif len(segs) == 0 { return root }\n\tif len(segs) == 1 {\n\t\ts := segs[0]\n\t\tif s.isIdx {\n\t\t\tarr, ok := asSlice(root)\n\t\t\tif !ok { return root }\n\t\t\tif s.index >= 0 && s.index < len(arr) {\n\t\t\t\tarr = append(arr[:s.index], arr[s.index+1:]...)\n\t\t\t}\n\t\t\treturn arr\n\t\t}\n\t\tif m, ok := asMap(root); ok {\n\t\t\tdelete(m, s.key)\n\t\t}\n\t\treturn root\n\t}\n\t// recurse\n\ts := segs[0]\n\tif s.isIdx {\n\t\tarr, ok := asSlice(root)\n\t\tif !ok || s.index < 0 || s.index >= len(arr) { return root }\n\t\tarr[s.index] = deletePath(arr[s.index], segs[1:])\n\t\treturn arr\n\t}\n\tm, ok := asMap(root)\n\tif !ok { return root }\n\tm[s.key] = deletePath(m[s.key], segs[1:])\n\treturn m\n}\n```\n\nsetPath as designed. Let me finalize setPath:\n\n```go\nfunc setPath(container interface{}, segs []segment, value interface{}) interface{} {\n\tif len(segs) == 0 {\n\t\treturn value\n\t}\n\ts := segs[0]\n\tif s.isIdx {\n\t\tarr, _ := asSlice(container)\n\t\tif s.index < 0 { // append\n\t\t\treturn append(arr, value)\n\t\t}\n\t\tfor len(arr) <= s.index {\n\t\t\tarr = append(arr, nil)\n\t\t}\n\t\tif len(segs) == 1 {\n\t\t\tarr[s.index] = value\n\t\t} else {\n\t\t\tarr[s.index] = setPath(arr[s.index], segs[1:], value)\n\t\t}\n\t\treturn arr\n\t}\n\tm, _ := asMap(container)\n\tif m == nil {\n\t\tm = map[string]interface{}{}\n\t}\n\tif len(segs) == 1 {\n\t\tm[s.key] = value\n\t} else {\n\t\tm[s.key] = setPath(m[s.key], segs[1:], value)\n\t}\n\treturn m\n}\n```\n\nWait: when s.isIdx and len(segs)==1 and index >= len, the \"for len(arr) <= s.index\" pads then sets. Good. When s.isIdx and there are more segs but arr[s.index] is nil, setPath(nil, rest, value) creates appropriate container. Good.\n\nFor append case index<0: if more segs, we should append a new child and recurse. `arr = append(arr, nil); arr[len(arr)-1] = setPath(nil, segs[1:], value)`. Let me handle:\n\n```go\nif s.index < 0 {\n\tif len(segs) == 1 {\n\t\treturn append(arr, value)\n\t}\n\treturn append(arr, setPath(nil, segs[1:], value))\n}\n```\n\nGood.\n\nparsePath: also need to handle empty bracket `[]` as append. In parser, when `[` and `]` adjacent, idxStr == \"\" -> append segment index:-1. Also `[-1]`? parse -1 -> append? I'll treat -1 as append too. Let's do: if idxStr==\"\" => append (-1). else Atoi; if err, treat as key segment.\n\nAlso handle trimmed key? no.\n\nNow numeric dot segment handling in getPath (slice + key numeric). Already planned.\n\nAlso, what about `m.Get(\"a\")` where a is a map, then `.Map()`. Fine.\n\nNow tests. Write map_test.go covering:\n- Get nested dot + array\n- Set create nested + array append\n- Delete\n- Has\n- Merge deep\n- Clone independence\n- Filter\n- JSON round trip\n- Value conversions\n\nLet me write.\n\nNow, module path and package naming. I'll name package `mapx`. Directory? Since files at repo root, package at root works with module `example.com/mapx`. Good.\n\nLet me write files.\n\nOne concern: gofmt. I'll run gofmt and go test.\n\nLet me write value.go.\n\nI need `encoding/json` for json.Number, `strings`, `strconv`, `fmt`.\n\nLet me write out toBool:\n```go\nfunc toBool(raw interface{}) (bool, bool) {\n\tswitch t := raw.(type) {\n\tcase bool:\n\t\treturn t, true\n\tcase string:\n\t\tb, err := strconv.ParseBool(strings.TrimSpace(t))\n\t\tif err != nil {\n\t\t\tif t == \"1\" { return true, true }\n\t\t\tif t == \"0\" { return false, true }\n\t\t\tif t == \"yes\" { return true, true }\n\t\t\tif t == \"no\" { return false, true }\n\t\t\treturn false, false\n\t\t}\n\t\treturn b, true\n\tcase json.Number:\n\t\tf, err := t.Float64()\n\t\tif err != nil { return false, false }\n\t\treturn f != 0, true\n\t}\n\tif f, ok := toFloat64(raw); ok {\n\t\treturn f != 0, true\n\t}\n\treturn false, false\n}\n```\nBut toFloat64 for bool would... toFloat64 shouldn't handle bool. Fine, because bool handled above.\n\ntoFloat64:\n```go\nfunc toFloat64(raw interface{}) (float64, bool) {\n\tswitch t := raw.(type) {\n\tcase float64: return t, true\n\tcase float32: return float64(t), true\n\tcase int: return float64(t), true\n\tcase int8: ...\n\t...\n\tcase uint, uint8... \n\tcase json.Number: f, err := t.Float64(); return f, err==nil\n\tcase string: f, err := strconv.ParseFloat(strings.TrimSpace(t), 64); return f, err==nil\n\t}\n\treturn 0, false\n}\n```\n\ntoInt64 uses toFloat64 for float but need strings parse int first; I'll handle string with ParseInt then fallback ParseFloat. Let me just implement:\n```go\nfunc toInt64(raw interface{}) (int64, bool) {\n\tswitch t := raw.(type) {\n\tcase int: return int64(t), true\n\t... all ints\n\tcase uint...: return int64(t), true\n\tcase float64: return int64(t), true\n\tcase float32: return int64(t), true\n\tcase bool: if t { return 1, true }; return 0, true\n\tcase json.Number:\n\t\tif n, err := t.Int64(); err == nil { return n, true }\n\t\tf, err := t.Float64(); if err == nil { return int64(f), true }\n\t\treturn 0, false\n\tcase string:\n\t\ts := strings.TrimSpace(t)\n\t\tif n, err := strconv.ParseInt(s, 10, 64); err == nil { return n, true }\n\t\tif f, err := strconv.ParseFloat(s, 64); err == nil { return int64(f), true }\n\t\treturn 0, false\n\t}\n\treturn 0, false\n}\n```\n\nValue methods:\n```go\nfunc (v *Value) Int() int { n, _ := toInt64(v.Interface()); return int(n) }\nfunc (v *Value) IntOr(def int) int { if _, ok := toInt64(v.Interface()); !ok { return def }; return v.Int() }\n```\nCareful v may be nil; v.Interface() handles nil receiver returning nil. Good.\n\nActually `toInt64(v.Interface())` when v nil returns false -> Int returns 0. Fine.\n\nFor IntOr: if !exists maybe return def. Let's define: if !v.Exists() return def. And if conversion fails return def.\n\n```go\nfunc (v *Value) IntOr(def int) int {\n\tif !v.Exists() { return def }\n\tn, ok := toInt64(v.raw)\n\tif !ok { return def }\n\treturn int(n)\n}\n```\n\nSimilarly others.\n\nFloat, FloatOr, Bool, BoolOr, String, StringOr.\n\nSlice:\n```go\nfunc (v *Value) Slice() []interface{} {\n\tarr, _ := asSlice(v.Interface())\n\treturn arr\n}\nfunc (v *Value) Strings() []string { ... convert each to string }\n```\nMaybe add Strings() convenience. Nice.\n\nMap():\n```go\nfunc (v *Value) Map() *Map {\n\tm, _ := asMap(v.Interface())\n\treturn New(m)\n}\n```\nIf not map, returns empty Map (New(nil)). Fine.\n\nAlso `Value.Len()`? skip.\n\nNow let me also add `Map.Int`, etc? Not needed since Get returns Value.\n\nTop-level convenience: `func Get(data map[string]interface{}, path string) *Value { return New(data).Get(path) }`. I'll add.\n\nLet me write the files now.\n\nFor go.mod module path, I'll go with `example.com/mapx`. Hmm, but maybe better to reflect the project: user said \"a project that needs to conveniently access and manipulate arbitrary map[string]interface{} data\". The module is likely their app. But they asked to \"set up a new Go module for a project\" — so this is the project. Package name could be `main`? No, they want a library API. I'll make it a library package.\n\nI'll proceed.\n\nLet me create the files with the write tool.\n\nActually one more: The instructions say to use todowrite for multi-step tasks. This is a moderate task. Let me create a todo list. It's 3+ steps (go.mod, implementation, tests, verify). I'll use it.\n\nLet me create todos then write.",
+          "time": {
+            "start": 1791062427797,
+            "end": 1791062456017
+          },
+          "id": "prt_103a3c895001o1XFVbTNDAikdl",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3c60a001qc0igJDpUkBGVi"
+        },
+        {
+          "type": "text",
+          "text": "I'll set up a Go module with a chainable map library. Let me plan the work.",
+          "time": {
+            "start": 1791062456043,
+            "end": 1791062456865
+          },
+          "id": "prt_103a436eb001E9PFHiHtULPaUr",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3c60a001qc0igJDpUkBGVi"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_lVvqQx2TtNqkZmME9dvP6110",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Initialize go.mod module",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement path parsing/lookup (dot + array indices)",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement chainable Map API",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement typed Value accessors",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify with go test/gofmt/vet",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Initialize go.mod module\",\n    \"status\": \"in_progress\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement path parsing/lookup (dot + array indices)\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement chainable Map API\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement typed Value accessors\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests and verify with go test/gofmt/vet\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Initialize go.mod module",
+                  "status": "in_progress",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement path parsing/lookup (dot + array indices)",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement chainable Map API",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement typed Value accessors",
+                  "status": "pending",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify with go test/gofmt/vet",
+                  "status": "pending",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "5 todos",
+            "time": {
+              "start": 1791062456789,
+              "end": 1791062456895
+            }
+          },
+          "id": "prt_103a43740001V6U5HlnvRoFjO5",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3c60a001qc0igJDpUkBGVi"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-finish",
+          "tokens": {
+            "total": 16199,
+            "input": 273,
+            "output": 183,
+            "reasoning": 7807,
+            "cache": {
+              "write": 0,
+              "read": 7936
+            }
+          },
+          "cost": 0.004858758,
+          "id": "prt_103a43b15001xPMzExL8vEMfSA",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a3c60a001qc0igJDpUkBGVi"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000126234,
+        "tokens": {
+          "total": 16440,
+          "input": 243,
+          "output": 69,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 16128
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062457315,
+          "completed": 1791062458929
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a43be300166YmQAo2bkA5te",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "type": "step-start",
+          "id": "prt_103a43f140013wWvFgUnzHjZ7J",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a43be300166YmQAo2bkA5te"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_86Luc5g0tVZda8XDVOV33239",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/go.mod",
+              "content": "module example.com/mapx\n\ngo 1.24\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/go.mod",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "go.mod",
+            "time": {
+              "start": 1791062458584,
+              "end": 1791062458609
+            }
+          },
+          "id": "prt_103a44017001NjMx1Hn0NJ99kB",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a43be300166YmQAo2bkA5te"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "0e4cb0d3c4e7a73d33822b04ecf27357aa4fba0c",
+          "type": "step-finish",
+          "tokens": {
+            "total": 16440,
+            "input": 243,
+            "output": 69,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 16128
+            }
+          },
+          "cost": 0.000126234,
+          "id": "prt_103a441d7001hIHDgyKqmTvP6j",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a43be300166YmQAo2bkA5te"
+        },
+        {
+          "type": "patch",
+          "hash": "afb576b6926e71cf7a57b117fbafe61ee755f548",
+          "files": [
+            "/work/go.mod"
+          ],
+          "id": "prt_103a44229001hJFaj6mdnYa9qW",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a43be300166YmQAo2bkA5te"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000908568,
+        "tokens": {
+          "total": 17839,
+          "input": 200,
+          "output": 1383,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 16256
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062458935,
+          "completed": 1791062463683
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a44237001UppsrdwCeu05fP",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "0e4cb0d3c4e7a73d33822b04ecf27357aa4fba0c",
+          "type": "step-start",
+          "id": "prt_103a444c400145vogvWxAepl6X",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a44237001UppsrdwCeu05fP"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ET_uCr0o2tFCkI2XlfFsL6d7927",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/path.go",
+              "content": "package mapx\n\nimport (\n\t\"strconv\"\n\t\"strings\"\n)\n\ntype segment struct {\n\tkey   string\n\tindex int\n\tisIdx bool\n}\n\nfunc parsePath(path string) []segment {\n\tif path == \"\" {\n\t\treturn nil\n\t}\n\tvar segs []segment\n\tvar buf strings.Builder\n\tflush := func() {\n\t\tif buf.Len() > 0 {\n\t\t\tsegs = append(segs, segment{key: buf.String()})\n\t\t\tbuf.Reset()\n\t\t}\n\t}\n\tfor i := 0; i < len(path); {\n\t\tswitch c := path[i]; c {\n\t\tcase '.':\n\t\t\tflush()\n\t\t\ti++\n\t\tcase '[':\n\t\t\tflush()\n\t\t\tend := strings.IndexByte(path[i:], ']')\n\t\t\tif end < 0 {\n\t\t\t\tbuf.WriteString(path[i:])\n\t\t\t\ti = len(path)\n\t\t\t\tbreak\n\t\t\t}\n\t\t\traw := path[i+1 : i+end]\n\t\t\tif raw == \"\" || raw == \"-1\" {\n\t\t\t\tsegs = append(segs, segment{index: -1, isIdx: true})\n\t\t\t} else if n, err := strconv.Atoi(raw); err == nil {\n\t\t\t\tsegs = append(segs, segment{index: n, isIdx: true})\n\t\t\t} else {\n\t\t\t\tsegs = append(segs, segment{key: raw})\n\t\t\t}\n\t\t\ti += end + 1\n\t\tdefault:\n\t\t\tbuf.WriteByte(c)\n\t\t\ti++\n\t\t}\n\t}\n\tflush()\n\treturn segs\n}\n\nfunc asMap(v interface{}) (map[string]interface{}, bool) {\n\tm, ok := v.(map[string]interface{})\n\treturn m, ok\n}\n\nfunc asSlice(v interface{}) ([]interface{}, bool) {\n\ts, ok := v.([]interface{})\n\treturn s, ok\n}\n\nfunc getPath(root interface{}, segs []segment) (interface{}, bool) {\n\tcur := root\n\tfor _, s := range segs {\n\t\tif s.isIdx {\n\t\t\tarr, ok := asSlice(cur)\n\t\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n\t\t\t\treturn nil, false\n\t\t\t}\n\t\t\tcur = arr[s.index]\n\t\t\tcontinue\n\t\t}\n\t\tif m, ok := asMap(cur); ok {\n\t\t\tv, ok := m[s.key]\n\t\t\tif !ok {\n\t\t\t\treturn nil, false\n\t\t\t}\n\t\t\tcur = v\n\t\t\tcontinue\n\t\t}\n\t\tif arr, ok := asSlice(cur); ok {\n\t\t\tif n, err := strconv.Atoi(s.key); err == nil && n >= 0 && n < len(arr) {\n\t\t\t\tcur = arr[n]\n\t\t\t\tcontinue\n\t\t\t}\n\t\t}\n\t\treturn nil, false\n\t}\n\treturn cur, true\n}\n\nfunc setPath(container interface{}, segs []segment, value interface{}) interface{} {\n\tif len(segs) == 0 {\n\t\treturn value\n\t}\n\ts := segs[0]\n\tif s.isIdx {\n\t\tarr, _ := asSlice(container)\n\t\tif s.index < 0 {\n\t\t\tif len(segs) == 1 {\n\t\t\t\treturn append(arr, value)\n\t\t\t}\n\t\t\treturn append(arr, setPath(nil, segs[1:], value))\n\t\t}\n\t\tfor len(arr) <= s.index {\n\t\t\tarr = append(arr, nil)\n\t\t}\n\t\tif len(segs) == 1 {\n\t\t\tarr[s.index] = value\n\t\t} else {\n\t\t\tarr[s.index] = setPath(arr[s.index], segs[1:], value)\n\t\t}\n\t\treturn arr\n\t}\n\tm, _ := asMap(container)\n\tif m == nil {\n\t\tm = map[string]interface{}{}\n\t}\n\tif len(segs) == 1 {\n\t\tm[s.key] = value\n\t} else {\n\t\tm[s.key] = setPath(m[s.key], segs[1:], value)\n\t}\n\treturn m\n}\n\nfunc deletePath(root interface{}, segs []segment) interface{} {\n\tif len(segs) == 0 {\n\t\treturn root\n\t}\n\ts := segs[0]\n\tif len(segs) == 1 {\n\t\tif s.isIdx {\n\t\t\tarr, ok := asSlice(root)\n\t\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n\t\t\t\treturn root\n\t\t\t}\n\t\t\treturn append(arr[:s.index], arr[s.index+1:]...)\n\t\t}\n\t\tif m, ok := asMap(root); ok {\n\t\t\tdelete(m, s.key)\n\t\t}\n\t\treturn root\n\t}\n\tif s.isIdx {\n\t\tarr, ok := asSlice(root)\n\t\tif !ok || s.index < 0 || s.index >= len(arr) {\n\t\t\treturn root\n\t\t}\n\t\tarr[s.index] = deletePath(arr[s.index], segs[1:])\n\t\treturn arr\n\t}\n\tm, ok := asMap(root)\n\tif !ok {\n\t\treturn root\n\t}\n\tif _, ok := m[s.key]; !ok {\n\t\treturn root\n\t}\n\tm[s.key] = deletePath(m[s.key], segs[1:])\n\treturn m\n}\n\nfunc deepCopy(v interface{}) interface{} {\n\tswitch t := v.(type) {\n\tcase map[string]interface{}:\n\t\tout := make(map[string]interface{}, len(t))\n\t\tfor k, val := range t {\n\t\t\tout[k] = deepCopy(val)\n\t\t}\n\t\treturn out\n\tcase []interface{}:\n\t\tout := make([]interface{}, len(t))\n\t\tfor i, val := range t {\n\t\t\tout[i] = deepCopy(val)\n\t\t}\n\t\treturn out\n\tdefault:\n\t\treturn v\n\t}\n}\n\nfunc mergeMaps(dst, src map[string]interface{}) {\n\tfor k, sv := range src {\n\t\tif dv, ok := dst[k]; ok {\n\t\t\tdm, dok := dv.(map[string]interface{})\n\t\t\tsm, sok := sv.(map[string]interface{})\n\t\t\tif dok && sok {\n\t\t\t\tmergeMaps(dm, sm)\n\t\t\t\tcontinue\n\t\t\t}\n\t\t}\n\t\tdst[k] = deepCopy(sv)\n\t}\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/path.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "path.go",
+            "time": {
+              "start": 1791062463312,
+              "end": 1791062463340
+            }
+          },
+          "id": "prt_103a446930015t3XpnnFTtKXnr",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a44237001UppsrdwCeu05fP"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "b1ea9d394e3b285eac7808b03e2012805a48dcca",
+          "type": "step-finish",
+          "tokens": {
+            "total": 17839,
+            "input": 200,
+            "output": 1383,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 16256
+            }
+          },
+          "cost": 0.000908568,
+          "id": "prt_103a4542f001A3gim76aiSCu38",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a44237001UppsrdwCeu05fP"
+        },
+        {
+          "type": "patch",
+          "hash": "0e4cb0d3c4e7a73d33822b04ecf27357aa4fba0c",
+          "files": [
+            "/work/path.go"
+          ],
+          "id": "prt_103a454bc001dXq1zAukHUpra8",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a44237001UppsrdwCeu05fP"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001024242,
+        "tokens": {
+          "total": 19426,
+          "input": 191,
+          "output": 1567,
+          "reasoning": 4,
+          "cache": {
+            "write": 0,
+            "read": 17664
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062463689,
+          "completed": 1791062468875
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a454c9001fNg7z9803e2TCy",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "b1ea9d394e3b285eac7808b03e2012805a48dcca",
+          "type": "step-start",
+          "id": "prt_103a4570f00101Oyj2s8jfKCAU",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a454c9001fNg7z9803e2TCy"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now value.go.",
+          "time": {
+            "start": 1791062464573,
+            "end": 1791062464750
+          },
+          "id": "prt_103a4583d001VM5bU7VJWhXlc0",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a454c9001fNg7z9803e2TCy"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_ZJIVUw2Yfl0vFLNJJSPG1314",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/value.go",
+              "content": "package mapx\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n\t\"strconv\"\n\t\"strings\"\n)\n\ntype Value struct {\n\traw    interface{}\n\texists bool\n}\n\nfunc newValue(raw interface{}, exists bool) *Value {\n\treturn &Value{raw: raw, exists: exists}\n}\n\nfunc (v *Value) Interface() interface{} {\n\tif v == nil {\n\t\treturn nil\n\t}\n\treturn v.raw\n}\n\nfunc (v *Value) Raw() (interface{}, bool) {\n\tif v == nil {\n\t\treturn nil, false\n\t}\n\treturn v.raw, v.exists\n}\n\nfunc (v *Value) Exists() bool {\n\treturn v != nil && v.exists\n}\n\nfunc (v *Value) IsNil() bool {\n\treturn v == nil || v.raw == nil\n}\n\nfunc (v *Value) String() string {\n\tif v == nil || v.raw == nil {\n\t\treturn \"\"\n\t}\n\tswitch t := v.raw.(type) {\n\tcase string:\n\t\treturn t\n\tcase []byte:\n\t\treturn string(t)\n\tcase bool:\n\t\treturn strconv.FormatBool(t)\n\tcase float64:\n\t\treturn strconv.FormatFloat(t, 'f', -1, 64)\n\tcase float32:\n\t\treturn strconv.FormatFloat(float64(t), 'f', -1, 32)\n\tcase int:\n\t\treturn strconv.Itoa(t)\n\tcase int64:\n\t\treturn strconv.FormatInt(t, 10)\n\tcase int32:\n\t\treturn strconv.FormatInt(int64(t), 10)\n\tcase uint64:\n\t\treturn strconv.FormatUint(t, 10)\n\tcase fmt.Stringer:\n\t\treturn t.String()\n\tdefault:\n\t\treturn fmt.Sprintf(\"%v\", t)\n\t}\n}\n\nfunc (v *Value) StringOr(def string) string {\n\tif !v.Exists() {\n\t\treturn def\n\t}\n\treturn v.String()\n}\n\nfunc (v *Value) Int() int {\n\tn, _ := toInt64(v.Interface())\n\treturn int(n)\n}\n\nfunc (v *Value) Int64() int64 {\n\tn, _ := toInt64(v.Interface())\n\treturn n\n}\n\nfunc (v *Value) IntOr(def int) int {\n\tif !v.Exists() {\n\t\treturn def\n\t}\n\tn, ok := toInt64(v.raw)\n\tif !ok {\n\t\treturn def\n\t}\n\treturn int(n)\n}\n\nfunc (v *Value) Float() float64 {\n\tf, _ := toFloat64(v.Interface())\n\treturn f\n}\n\nfunc (v *Value) FloatOr(def float64) float64 {\n\tif !v.Exists() {\n\t\treturn def\n\t}\n\tf, ok := toFloat64(v.raw)\n\tif !ok {\n\t\treturn def\n\t}\n\treturn f\n}\n\nfunc (v *Value) Bool() bool {\n\tb, _ := toBool(v.Interface())\n\treturn b\n}\n\nfunc (v *Value) BoolOr(def bool) bool {\n\tif !v.Exists() {\n\t\treturn def\n\t}\n\tb, ok := toBool(v.raw)\n\tif !ok {\n\t\treturn def\n\t}\n\treturn b\n}\n\nfunc (v *Value) Slice() []interface{} {\n\tarr, _ := asSlice(v.Interface())\n\treturn arr\n}\n\nfunc (v *Value) Strings() []string {\n\tarr := v.Slice()\n\tif arr == nil {\n\t\treturn nil\n\t}\n\tout := make([]string, len(arr))\n\tfor i, item := range arr {\n\t\tout[i] = newValue(item, true).String()\n\t}\n\treturn out\n}\n\nfunc (v *Value) Map() *Map {\n\tm, _ := asMap(v.Interface())\n\treturn New(m)\n}\n\nfunc toInt64(raw interface{}) (int64, bool) {\n\tswitch t := raw.(type) {\n\tcase int:\n\t\treturn int64(t), true\n\tcase int8:\n\t\treturn int64(t), true\n\tcase int16:\n\t\treturn int64(t), true\n\tcase int32:\n\t\treturn int64(t), true\n\tcase int64:\n\t\treturn t, true\n\tcase uint:\n\t\treturn int64(t), true\n\tcase uint8:\n\t\treturn int64(t), true\n\tcase uint16:\n\t\treturn int64(t), true\n\tcase uint32:\n\t\treturn int64(t), true\n\tcase uint64:\n\t\treturn int64(t), true\n\tcase float32:\n\t\treturn int64(t), true\n\tcase float64:\n\t\treturn int64(t), true\n\tcase bool:\n\t\tif t {\n\t\t\treturn 1, true\n\t\t}\n\t\treturn 0, true\n\tcase json.Number:\n\t\tif n, err := t.Int64(); err == nil {\n\t\t\treturn n, true\n\t\t}\n\t\tif f, err := t.Float64(); err == nil {\n\t\t\treturn int64(f), true\n\t\t}\n\t\treturn 0, false\n\tcase string:\n\t\ts := strings.TrimSpace(t)\n\t\tif n, err := strconv.ParseInt(s, 10, 64); err == nil {\n\t\t\treturn n, true\n\t\t}\n\t\tif f, err := strconv.ParseFloat(s, 64); err == nil {\n\t\t\treturn int64(f), true\n\t\t}\n\t\treturn 0, false\n\tdefault:\n\t\treturn 0, false\n\t}\n}\n\nfunc toFloat64(raw interface{}) (float64, bool) {\n\tswitch t := raw.(type) {\n\tcase float64:\n\t\treturn t, true\n\tcase float32:\n\t\treturn float64(t), true\n\tcase int:\n\t\treturn float64(t), true\n\tcase int8:\n\t\treturn float64(t), true\n\tcase int16:\n\t\treturn float64(t), true\n\tcase int32:\n\t\treturn float64(t), true\n\tcase int64:\n\t\treturn float64(t), true\n\tcase uint:\n\t\treturn float64(t), true\n\tcase uint8:\n\t\treturn float64(t), true\n\tcase uint16:\n\t\treturn float64(t), true\n\tcase uint32:\n\t\treturn float64(t), true\n\tcase uint64:\n\t\treturn float64(t), true\n\tcase json.Number:\n\t\tf, err := t.Float64()\n\t\treturn f, err == nil\n\tcase string:\n\t\tf, err := strconv.ParseFloat(strings.TrimSpace(t), 64)\n\t\treturn f, err == nil\n\tdefault:\n\t\treturn 0, false\n\t}\n}\n\nfunc toBool(raw interface{}) (bool, bool) {\n\tswitch t := raw.(type) {\n\tcase bool:\n\t\treturn t, true\n\tcase json.Number:\n\t\tf, err := t.Float64()\n\t\tif err != nil {\n\t\t\treturn false, false\n\t\t}\n\t\treturn f != 0, true\n\tcase string:\n\t\ts := strings.TrimSpace(t)\n\t\tif b, err := strconv.ParseBool(s); err == nil {\n\t\t\treturn b, true\n\t\t}\n\t\tswitch strings.ToLower(s) {\n\t\tcase \"yes\":\n\t\t\treturn true, true\n\t\tcase \"no\":\n\t\t\treturn false, true\n\t\t}\n\t\treturn false, false\n\t}\n\tif f, ok := toFloat64(raw); ok {\n\t\treturn f != 0, true\n\t}\n\treturn false, false\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/value.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "value.go",
+            "time": {
+              "start": 1791062468449,
+              "end": 1791062468503
+            }
+          },
+          "id": "prt_103a458f3001WL5aYL5TPDIQVv",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a454c9001fNg7z9803e2TCy"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "1da16a60553aed67365262431a39fa33afd61863",
+          "type": "step-finish",
+          "tokens": {
+            "total": 19426,
+            "input": 191,
+            "output": 1567,
+            "reasoning": 4,
+            "cache": {
+              "write": 0,
+              "read": 17664
+            }
+          },
+          "cost": 0.001024242,
+          "id": "prt_103a46857001Ab03zCO2XjtP4G",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a454c9001fNg7z9803e2TCy"
+        },
+        {
+          "type": "patch",
+          "hash": "b1ea9d394e3b285eac7808b03e2012805a48dcca",
+          "files": [
+            "/work/value.go"
+          ],
+          "id": "prt_103a468fc001zsdm2ith1DxzIA",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a454c9001fNg7z9803e2TCy"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.0006753,
+        "tokens": {
+          "total": 20411,
+          "input": 242,
+          "output": 965,
+          "reasoning": 4,
+          "cache": {
+            "write": 0,
+            "read": 19200
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062468900,
+          "completed": 1791062473124
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a4692400112oo5hE0LE7nSE",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "1da16a60553aed67365262431a39fa33afd61863",
+          "type": "step-start",
+          "id": "prt_103a46bce001JgiTJSM4sxZLzA",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4692400112oo5hE0LE7nSE"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now map.go.",
+          "time": {
+            "start": 1791062470203,
+            "end": 1791062470373
+          },
+          "id": "prt_103a46e3a001tMXHCGeXhWMh3S",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4692400112oo5hE0LE7nSE"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_bfQxnRo2pYbbWpzHeOdg4826",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/map.go",
+              "content": "package mapx\n\nimport (\n\t\"encoding/json\"\n\t\"sort\"\n)\n\ntype Map struct {\n\tdata map[string]interface{}\n}\n\nfunc New(data map[string]interface{}) *Map {\n\tif data == nil {\n\t\tdata = map[string]interface{}{}\n\t}\n\treturn &Map{data: data}\n}\n\nfunc From(v interface{}) *Map {\n\tm, _ := asMap(v)\n\treturn New(m)\n}\n\nfunc FromJSON(b []byte) (*Map, error) {\n\tm := map[string]interface{}{}\n\tif err := json.Unmarshal(b, &m); err != nil {\n\t\treturn nil, err\n\t}\n\treturn New(m), nil\n}\n\nfunc (m *Map) Data() map[string]interface{} {\n\tif m == nil {\n\t\treturn nil\n\t}\n\treturn m.data\n}\n\nfunc (m *Map) Len() int {\n\tif m == nil {\n\t\treturn 0\n\t}\n\treturn len(m.data)\n}\n\nfunc (m *Map) Keys() []string {\n\tif m == nil {\n\t\treturn nil\n\t}\n\tkeys := make([]string, 0, len(m.data))\n\tfor k := range m.data {\n\t\tkeys = append(keys, k)\n\t}\n\tsort.Strings(keys)\n\treturn keys\n}\n\nfunc (m *Map) Get(path string) *Value {\n\tif m == nil {\n\t\treturn newValue(nil, false)\n\t}\n\traw, ok := getPath(m.data, parsePath(path))\n\treturn newValue(raw, ok)\n}\n\nfunc (m *Map) Has(path string) bool {\n\tif m == nil {\n\t\treturn false\n\t}\n\t_, ok := getPath(m.data, parsePath(path))\n\treturn ok\n}\n\nfunc (m *Map) Set(path string, value interface{}) *Map {\n\tif m == nil {\n\t\treturn m\n\t}\n\tsegs := parsePath(path)\n\tif len(segs) == 0 {\n\t\tif vm, ok := asMap(value); ok {\n\t\t\tm.data = vm\n\t\t}\n\t\treturn m\n\t}\n\tif res, ok := asMap(setPath(m.data, segs, value)); ok {\n\t\tm.data = res\n\t}\n\treturn m\n}\n\nfunc (m *Map) Delete(path string) *Map {\n\tif m == nil {\n\t\treturn m\n\t}\n\tsegs := parsePath(path)\n\tif len(segs) == 0 {\n\t\treturn m\n\t}\n\tif res, ok := asMap(deletePath(m.data, segs)); ok {\n\t\tm.data = res\n\t}\n\treturn m\n}\n\nfunc (m *Map) Clone() *Map {\n\tif m == nil {\n\t\treturn nil\n\t}\n\treturn New(deepCopy(m.data).(map[string]interface{}))\n}\n\nfunc (m *Map) Merge(others ...*Map) *Map {\n\tif m == nil {\n\t\treturn m\n\t}\n\tfor _, o := range others {\n\t\tif o == nil {\n\t\t\tcontinue\n\t\t}\n\t\tmergeMaps(m.data, o.data)\n\t}\n\treturn m\n}\n\nfunc (m *Map) Each(fn func(key string, v *Value)) *Map {\n\tif m == nil || fn == nil {\n\t\treturn m\n\t}\n\tfor k, raw := range m.data {\n\t\tfn(k, newValue(raw, true))\n\t}\n\treturn m\n}\n\nfunc (m *Map) Filter(fn func(key string, v *Value) bool) *Map {\n\tif m == nil {\n\t\treturn m\n\t}\n\tout := make(map[string]interface{}, len(m.data))\n\tfor k, raw := range m.data {\n\t\tif fn(k, newValue(raw, true)) {\n\t\t\tout[k] = raw\n\t\t}\n\t}\n\treturn New(out)\n}\n\nfunc (m *Map) MarshalJSON() ([]byte, error) {\n\tif m == nil {\n\t\treturn []byte(\"null\"), nil\n\t}\n\treturn json.Marshal(m.data)\n}\n\nfunc (m *Map) UnmarshalJSON(b []byte) error {\n\treturn json.Unmarshal(b, &m.data)\n}\n\nfunc (m *Map) String() string {\n\tb, err := json.Marshal(m)\n\tif err != nil {\n\t\treturn \"\"\n\t}\n\treturn string(b)\n}\n\nfunc Get(data map[string]interface{}, path string) *Value {\n\treturn New(data).Get(path)\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/map.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "map.go",
+            "time": {
+              "start": 1791062472779,
+              "end": 1791062472813
+            }
+          },
+          "id": "prt_103a46eee001c3qUVJZ95ACaHE",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4692400112oo5hE0LE7nSE"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "406823e6f0a5e9c93b83be1a0a4610e17bdb41f5",
+          "type": "step-finish",
+          "tokens": {
+            "total": 20411,
+            "input": 242,
+            "output": 965,
+            "reasoning": 4,
+            "cache": {
+              "write": 0,
+              "read": 19200
+            }
+          },
+          "cost": 0.0006753,
+          "id": "prt_103a4790e00151zaGMDPgBb5gu",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4692400112oo5hE0LE7nSE"
+        },
+        {
+          "type": "patch",
+          "hash": "1da16a60553aed67365262431a39fa33afd61863",
+          "files": [
+            "/work/map.go"
+          ],
+          "id": "prt_103a4799b001Jv2i1h0VW25oDX",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4692400112oo5hE0LE7nSE"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.001205322,
+        "tokens": {
+          "total": 22284,
+          "input": 203,
+          "output": 1769,
+          "reasoning": 88,
+          "cache": {
+            "write": 0,
+            "read": 20224
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062473140,
+          "completed": 1791062479695
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a479b40013qf7UocPYTheXx",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "406823e6f0a5e9c93b83be1a0a4610e17bdb41f5",
+          "type": "step-start",
+          "id": "prt_103a47c70001nC6SEOneN7bJVZ",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a479b40013qf7UocPYTheXx"
+        },
+        {
+          "type": "reasoning",
+          "text": "Now tests. Let me write comprehensive tests.\n\nNote potential bug in FromJSON: `json.Unmarshal(b, &m)` where m is map -> fine. But `Map.UnmarshalJSON(b []byte) error { return json.Unmarshal(b, &m.data) }` fine.\n\nOne issue: `Map.Merge` when o.data is nil? New always non-nil. Fine.\n\nLet me write tests.",
+          "time": {
+            "start": 1791062474300,
+            "end": 1791062474759
+          },
+          "id": "prt_103a47e3b0012jU1Y66shsPiOE",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a479b40013qf7UocPYTheXx"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_00_OniidW8XAk6VdctHMEVh8343",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/work/map_test.go",
+              "content": "package mapx\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestGetNestedAndIndex(t *testing.T) {\n\tm := New(map[string]interface{}{\n\t\t\"user\": map[string]interface{}{\n\t\t\t\"name\": \"ada\",\n\t\t\t\"tags\": []interface{}{\"math\", \"code\"},\n\t\t},\n\t\t\"list\": []interface{}{\n\t\t\tmap[string]interface{}{\"id\": float64(7)},\n\t\t},\n\t})\n\n\tif got := m.Get(\"user.name\").String(); got != \"ada\" {\n\t\tt.Fatalf(\"got %q\", got)\n\t}\n\tif got := m.Get(\"user.tags[1]\").String(); got != \"code\" {\n\t\tt.Fatalf(\"got %q\", got)\n\t}\n\tif got := m.Get(\"list.0.id\").Int(); got != 7 {\n\t\tt.Fatalf(\"got %d\", got)\n\t}\n\tif v := m.Get(\"user.missing\"); v.Exists() {\n\t\tt.Fatalf(\"expected missing\")\n\t}\n\tif !m.Has(\"user.tags[0]\") {\n\t\tt.Fatalf(\"expected has\")\n\t}\n}\n\nfunc TestSetCreatesPath(t *testing.T) {\n\tm := New(nil)\n\tm.Set(\"a.b.c\", 1).Set(\"a.b.d\", 2).Set(\"items[]\", \"x\").Set(\"items[]\", \"y\")\n\tif got := m.Get(\"a.b.c\").Int(); got != 1 {\n\t\tt.Fatalf(\"c = %d\", got)\n\t}\n\tif got := m.Get(\"a.b.d\").Int(); got != 2 {\n\t\tt.Fatalf(\"d = %d\", got)\n\t}\n\twant := []interface{}{\"x\", \"y\"}\n\tif got := m.Get(\"items\").Slice(); !reflect.DeepEqual(got, want) {\n\t\tt.Fatalf(\"items = %#v\", got)\n\t}\n}\n\nfunc TestSetSliceIndexAndGrow(t *testing.T) {\n\tm := New(map[string]interface{}{\"a\": []interface{}{1, 2}})\n\tm.Set(\"a[1]\", 9).Set(\"a[3]\", 4)\n\tif got := m.Get(\"a\").Slice(); !reflect.DeepEqual(got, []interface{}{1, 9, nil, 4}) {\n\t\tt.Fatalf(\"a = %#v\", got)\n\t}\n}\n\nfunc TestDelete(t *testing.T) {\n\tm := New(map[string]interface{}{\n\t\t\"a\": map[string]interface{}{\"b\": 1, \"c\": 2},\n\t\t\"l\": []interface{}{\"x\", \"y\", \"z\"},\n\t})\n\tm.Delete(\"a.b\").Delete(\"l[1]\")\n\tif m.Has(\"a.b\") {\n\t\tt.Fatalf(\"a.b should be gone\")\n\t}\n\tif got := m.Get(\"a.c\").Int(); got != 2 {\n\t\tt.Fatalf(\"a.c = %d\", got)\n\t}\n\tif got := m.Get(\"l\").Slice(); !reflect.DeepEqual(got, []interface{}{\"x\", \"z\"}) {\n\t\tt.Fatalf(\"l = %#v\", got)\n\t}\n}\n\nfunc TestMergeDeep(t *testing.T) {\n\ta := New(map[string]interface{}{\n\t\t\"x\": map[string]interface{}{\"a\": 1, \"b\": 2},\n\t\t\"y\": 1,\n\t})\n\tb := New(map[string]interface{}{\n\t\t\"x\": map[string]interface{}{\"b\": 3, \"c\": 4},\n\t\t\"z\": 5,\n\t})\n\ta.Merge(b)\n\tif got := a.Get(\"x.a\").Int(); got != 1 {\n\t\tt.Fatalf(\"x.a = %d\", got)\n\t}\n\tif got := a.Get(\"x.b\").Int(); got != 3 {\n\t\tt.Fatalf(\"x.b = %d\", got)\n\t}\n\tif got := a.Get(\"x.c\").Int(); got != 4 {\n\t\tt.Fatalf(\"x.c = %d\", got)\n\t}\n\tif got := a.Get(\"z\").Int(); got != 5 {\n\t\tt.Fatalf(\"z = %d\", got)\n\t}\n}\n\nfunc TestCloneIsDeep(t *testing.T) {\n\tsrc := New(map[string]interface{}{\"a\": map[string]interface{}{\"b\": 1}})\n\tcp := src.Clone()\n\tcp.Set(\"a.b\", 2)\n\tif got := src.Get(\"a.b\").Int(); got != 1 {\n\t\tt.Fatalf(\"src a.b = %d\", got)\n\t}\n\tif got := cp.Get(\"a.b\").Int(); got != 2 {\n\t\tt.Fatalf(\"cp a.b = %d\", got)\n\t}\n}\n\nfunc TestFilterAndKeys(t *testing.T) {\n\tm := New(map[string]interface{}{\"a\": 1, \"b\": 2, \"c\": 3})\n\tgot := m.Filter(func(_ string, v *Value) bool { return v.Int() > 1 })\n\tif !reflect.DeepEqual(got.Keys(), []string{\"b\", \"c\"}) {\n\t\tt.Fatalf(\"keys = %v\", got.Keys())\n\t}\n\tif !reflect.DeepEqual(m.Keys(), []string{\"a\", \"b\", \"c\"}) {\n\t\tt.Fatalf(\"keys = %v\", m.Keys())\n\t}\n}\n\nfunc TestValueConversions(t *testing.T) {\n\tm := New(map[string]interface{}{\n\t\t\"n\":   \"42\",\n\t\t\"f\":   float64(3.5),\n\t\t\"b\":   \"true\",\n\t\t\"arr\": []interface{}{1, true, \"x\"},\n\t})\n\tif got := m.Get(\"n\").Int(); got != 42 {\n\t\tt.Fatalf(\"n = %d\", got)\n\t}\n\tif got := m.Get(\"f\").Float(); got != 3.5 {\n\t\tt.Fatalf(\"f = %v\", got)\n\t}\n\tif got := m.Get(\"b\").Bool(); !got {\n\t\tt.Fatalf(\"b = %v\", got)\n\t}\n\tif got := m.Get(\"missing\").IntOr(9); got != 9 {\n\t\tt.Fatalf(\"missing = %d\", got)\n\t}\n\tif got := m.Get(\"missing\").StringOr(\"def\"); got != \"def\" {\n\t\tt.Fatalf(\"missing = %q\", got)\n\t}\n\twant := []string{\"1\", \"true\", \"x\"}\n\tif got := m.Get(\"arr\").Strings(); !reflect.DeepEqual(got, want) {\n\t\tt.Fatalf(\"arr = %#v\", got)\n\t}\n}\n\nfunc TestJSONRoundTrip(t *testing.T) {\n\tm, err := FromJSON([]byte(`{\"a\":{\"b\":[1,2,{\"c\":true}]}}`))\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif !m.Get(\"a.b[2].c\").Bool() {\n\t\tt.Fatalf(\"unexpected: %s\", m)\n\t}\n\tb, err := m.MarshalJSON()\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tagain, err := FromJSON(b)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif !reflect.DeepEqual(m.Data(), again.Data()) {\n\t\tt.Fatalf(\"round trip mismatch: %s vs %s\", m, again)\n\t}\n}\n\nfunc TestEach(t *testing.T) {\n\tm := New(map[string]interface{}{\"a\": 1, \"b\": 2})\n\tsum := 0\n\tseen := m.Each(func(_ string, v *Value) { sum += v.Int() })\n\tif seen != m || sum != 3 {\n\t\tt.Fatalf(\"sum = %d\", sum)\n\t}\n}\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/work/map_test.go",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "map_test.go",
+            "time": {
+              "start": 1791062479493,
+              "end": 1791062479521
+            }
+          },
+          "id": "prt_103a4800d001Ht0kTRVRTgi2xo",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a479b40013qf7UocPYTheXx"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-finish",
+          "tokens": {
+            "total": 22284,
+            "input": 203,
+            "output": 1769,
+            "reasoning": 88,
+            "cache": {
+              "write": 0,
+              "read": 20224
+            }
+          },
+          "cost": 0.001205322,
+          "id": "prt_103a49315001sI4YCMnkf4VXgd",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a479b40013qf7UocPYTheXx"
+        },
+        {
+          "type": "patch",
+          "hash": "406823e6f0a5e9c93b83be1a0a4610e17bdb41f5",
+          "files": [
+            "/work/map_test.go"
+          ],
+          "id": "prt_103a4934a001l1P4M0saTtEy3x",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a479b40013qf7UocPYTheXx"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000134232,
+        "tokens": {
+          "total": 22374,
+          "input": 156,
+          "output": 74,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 22144
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062479703,
+          "completed": 1791062489667
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a49357001B5GfLtCf9rum5s",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-start",
+          "id": "prt_103a49642001PeAggfjNgDxNo2",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a49357001B5GfLtCf9rum5s"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_00_ET_lD6JIeyVdj7ftS9cO3qX5153",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "gofmt -l . && go vet ./... && go test ./... 2>&1",
+              "workdir": "/work"
+            },
+            "output": "ok  \texample.com/mapx\t0.003s\n",
+            "metadata": {
+              "output": "ok  \texample.com/mapx\t0.003s\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "gofmt -l . && go vet ./... && go test ./... 2>&1",
+            "time": {
+              "start": 1791062481410,
+              "end": 1791062489568
+            }
+          },
+          "id": "prt_103a49972001rErQV5hwdAXez7",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a49357001B5GfLtCf9rum5s"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-finish",
+          "tokens": {
+            "total": 22374,
+            "input": 156,
+            "output": 74,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 22144
+            }
+          },
+          "cost": 0.000134232,
+          "id": "prt_103a4ba12001TY3QolsfrlEkGy",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a49357001B5GfLtCf9rum5s"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000238632,
+        "tokens": {
+          "total": 22623,
+          "input": 256,
+          "output": 162,
+          "reasoning": 61,
+          "cache": {
+            "write": 0,
+            "read": 22144
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062489675,
+          "completed": 1791062491833
+        },
+        "finish": "tool-calls",
+        "id": "msg_103a4ba4b0013JJEFr09Q94jNE",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-start",
+          "id": "prt_103a4bc95001J88xYwgHFFEtDJ",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4ba4b0013JJEFr09Q94jNE"
+        },
+        {
+          "type": "reasoning",
+          "text": "All passing, gofmt clean, vet clean. Let me update todos.\n\nLet me double-check one edge: `getPath` with numeric key on slice `list.0.id` worked in tests. Good.\n\nLet me also verify `go build`. go test already builds.\n\nUpdate todos to complete.",
+          "time": {
+            "start": 1791062490997,
+            "end": 1791062491366
+          },
+          "id": "prt_103a4bf75001CizX3s8Z8gacFd",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4ba4b0013JJEFr09Q94jNE"
+        },
+        {
+          "type": "tool",
+          "tool": "todowrite",
+          "callID": "call_00_vOGYfwhJ9bF9g1fYXnAd4680",
+          "state": {
+            "status": "completed",
+            "input": {
+              "todos": [
+                {
+                  "content": "Initialize go.mod module",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement path parsing/lookup (dot + array indices)",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement chainable Map API",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement typed Value accessors",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify with go test/gofmt/vet",
+                  "status": "completed",
+                  "priority": "high"
+                }
+              ]
+            },
+            "output": "[\n  {\n    \"content\": \"Initialize go.mod module\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement path parsing/lookup (dot + array indices)\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement chainable Map API\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Implement typed Value accessors\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"Add tests and verify with go test/gofmt/vet\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  }\n]",
+            "metadata": {
+              "todos": [
+                {
+                  "content": "Initialize go.mod module",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement path parsing/lookup (dot + array indices)",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement chainable Map API",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Implement typed Value accessors",
+                  "status": "completed",
+                  "priority": "high"
+                },
+                {
+                  "content": "Add tests and verify with go test/gofmt/vet",
+                  "status": "completed",
+                  "priority": "high"
+                }
+              ],
+              "truncated": false
+            },
+            "title": "0 todos",
+            "time": {
+              "start": 1791062491708,
+              "end": 1791062491712
+            }
+          },
+          "id": "prt_103a4c0e90013JokAY1GKd6j3f",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4ba4b0013JJEFr09Q94jNE"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-finish",
+          "tokens": {
+            "total": 22623,
+            "input": 256,
+            "output": 162,
+            "reasoning": 61,
+            "cache": {
+              "write": 0,
+              "read": 22144
+            }
+          },
+          "cost": 0.000238632,
+          "id": "prt_103a4c295001Q4BXgdneZGIr0J",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4ba4b0013JJEFr09Q94jNE"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_103a3ad66001LnqT4A0R3xXFkW",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/work",
+          "root": "/work"
+        },
+        "cost": 0.000302334,
+        "tokens": {
+          "total": 23118,
+          "input": 265,
+          "output": 325,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 22528
+          }
+        },
+        "modelID": "deepseek-flash",
+        "providerID": "deepseek",
+        "time": {
+          "created": 1791062491838,
+          "completed": 1791062494383
+        },
+        "finish": "stop",
+        "id": "msg_103a4c2be001CHABG2e0EswJ96",
+        "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC"
+      },
+      "parts": [
+        {
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-start",
+          "id": "prt_103a4c558001CF8RQJkOW8As7R",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4c2be001CHABG2e0EswJ96"
+        },
+        {
+          "type": "text",
+          "text": "Done. Module `example.com/mapx` with a fluent `map[string]interface{}` API; `gofmt`, `go vet`, and `go test` all pass.\n\n```go\nm := mapx.New(nil).\n    Set(\"user.name\", \"ada\").\n    Set(\"user.tags[]\", \"math\").\n    Set(\"user.tags[]\", \"code\")\n\nname := m.Get(\"user.name\").String()   // \"ada\"\nfirst := m.Get(\"user.tags[0]\").String() // \"math\"\n```\n\nFiles:\n- `map.go:1` — chainable `Map`: `New`, `FromJSON`, `Get`, `Set`, `Delete`, `Has`, `Merge`, `Clone`, `Filter`, `Each`, `Keys`, JSON marshal.\n- `value.go:1` — `Value` with `String/Int/Float/Bool` + `*Or` fallbacks and `Slice/Strings/Map`.\n- `path.go:1` — dot/`[n]`/`[]` path parsing plus get/set/delete/deep-copy/merge.\n- `map_test.go:1` — coverage for nesting, arrays, deep merge, clone, conversions, JSON round-trip.\n\nPath notes: `a.b.c`, `arr[0]`, `arr.0` (numeric key on a slice), `arr[]` appends. Set auto-creates missing containers. Change the module path in `go.mod:1` to your repo when ready.",
+          "time": {
+            "start": 1791062493137,
+            "end": 1791062494278
+          },
+          "id": "prt_103a4c7d1001XAHaaoRVI6JsKe",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4c2be001CHABG2e0EswJ96"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "ea264783504219f913e5b4e313c148fd5311e462",
+          "type": "step-finish",
+          "tokens": {
+            "total": 23118,
+            "input": 265,
+            "output": 325,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 22528
+            }
+          },
+          "cost": 0.000302334,
+          "id": "prt_103a4cc6e0019j1ODCq5JWlA3N",
+          "sessionID": "ses_efc5c530bffeXm6gmMbg6QZ9TC",
+          "messageID": "msg_103a4c2be001CHABG2e0EswJ96"
+        }
+      ]
+    }
+  ]
+}
