@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -47,7 +48,9 @@ var registries = map[string]registry{
 // registry directly instead of a mirror such as ecosyste.ms, which syncs on
 // its own schedule and can lag upstream by days. Purl types it has no
 // registry for, and lookups that fail (registry down, rate limited, timed
-// out, or unknown package), are passed to Fallback.
+// out, or unknown package), are passed to Fallback. A package the registry
+// says doesn't exist, and Fallback doesn't know either, is reported as
+// NotFound.
 type RegistryResolver struct {
 	Fallback Resolver
 
@@ -70,6 +73,7 @@ func (r *RegistryResolver) LatestVersions(ctx context.Context, purls []string) (
 		sem      = make(chan struct{}, maxConcurrent)
 		latest   = make(map[string]string, len(purls))
 		fallback []string
+		notFound []string
 	)
 	for _, p := range purls {
 		parsed, err := purl.Parse(p)
@@ -89,6 +93,9 @@ func (r *RegistryResolver) LatestVersions(ctx context.Context, purls []string) (
 			defer mu.Unlock()
 			if err != nil || v == "" {
 				fallback = append(fallback, p)
+				if errors.Is(err, errNotFound) {
+					notFound = append(notFound, p)
+				}
 				return
 			}
 			latest[p] = v
@@ -102,6 +109,11 @@ func (r *RegistryResolver) LatestVersions(ctx context.Context, purls []string) (
 			return nil, err
 		}
 		maps.Copy(latest, got)
+	}
+	for _, p := range notFound {
+		if _, ok := latest[p]; !ok {
+			latest[p] = NotFound
+		}
 	}
 	return latest, nil
 }
@@ -122,6 +134,11 @@ func fullName(p string, parsed *purl.PURL) string {
 	return name
 }
 
+// errNotFound is returned when a registry responds that a package doesn't
+// exist: a 404, or a 410 from the Go module proxy, whose protocol treats
+// both the same.
+var errNotFound = errors.New("not found")
+
 // get fetches reqURL and returns the response if it's a 200, closing it
 // otherwise.
 func get(ctx context.Context, c *http.Client, reqURL, accept string) (*http.Response, error) {
@@ -137,6 +154,9 @@ func get(ctx context.Context, c *http.Client, reqURL, accept string) (*http.Resp
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+			return nil, fmt.Errorf("fetching %s: %w", reqURL, errNotFound)
+		}
 		return nil, fmt.Errorf("fetching %s: unexpected status %d", reqURL, resp.StatusCode)
 	}
 	return resp, nil

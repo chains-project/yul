@@ -52,6 +52,7 @@ package golang
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/git-pkgs/manifests"
@@ -117,5 +118,39 @@ func CheckGoMod(before, after string, res resolver.Resolver) ([]mismatch.Mismatc
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport, nil)
+	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// A replaced module is built from its replacement, often a local
+	// directory, so its own path not existing upstream is expected.
+	replaced, err := replacedModules(after)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(mismatches, func(m mismatch.Mismatch) bool {
+		return m.NotFound && replaced[m.Name]
+	}), nil
+}
+
+// replacedModules returns the required modules a replace directive points
+// elsewhere: git-pkgs/manifests lists them under Dependencies, but leaves
+// them out of Declarations.
+func replacedModules(content string) (map[string]bool, error) {
+	parsed, err := manifests.Parse("go.mod", []byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("parsing go.mod: %w", err)
+	}
+	declared := make(map[string]bool, len(parsed.Declarations))
+	for _, decl := range parsed.Declarations {
+		declared[decl.Name] = true
+	}
+	replaced := make(map[string]bool)
+	for _, dep := range parsed.Dependencies {
+		if !declared[dep.Name] {
+			replaced[dep.Name] = true
+		}
+	}
+	return replaced, nil
 }

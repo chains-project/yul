@@ -3,6 +3,8 @@ package pins
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
 func TestExactVersion(t *testing.T) {
@@ -177,6 +179,32 @@ func TestDiffFailsOpenOnUnresolvedPurl(t *testing.T) {
 
 	if _, err := Diff(context.Background(), before, after, "npm", res, true, nil); err == nil {
 		t.Fatal("Diff() returned nil error, want an error for an unresolved purl")
+	}
+}
+
+func TestDiffFlagsNotFoundPackages(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:npm/hallucinated":       resolver.NotFound,
+		"pkg:npm/hallucinated-range": resolver.NotFound,
+	}}
+
+	before := map[string]Pin{}
+	after := map[string]Pin{
+		"hallucinated":       {Name: "hallucinated", Version: "1.0.0", PURL: "pkg:npm/hallucinated"},
+		"hallucinated-range": {Name: "hallucinated-range", Version: "^1.0.0", PURL: "pkg:npm/hallucinated-range", Range: true},
+	}
+
+	got, err := Diff(context.Background(), before, after, "npm", res, true, nil)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Diff() returned %d mismatches, want 2: %#v", len(got), got)
+	}
+	for _, m := range got {
+		if !m.NotFound || m.Range || m.Latest != "" {
+			t.Fatalf("Diff() mismatch = %#v, want NotFound with no Range or Latest", m)
+		}
 	}
 }
 

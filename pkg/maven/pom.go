@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/git-pkgs/manifests"
@@ -138,5 +139,14 @@ func CheckPOM(before, after string, res resolver.Resolver) ([]mismatch.Mismatch,
 	if err != nil {
 		return nil, err
 	}
-	return pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport, nil)
+	mismatches, err := pins.Diff(context.Background(), beforePins, afterPins, scheme, res, pins.NoRangeSupport, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Maven Central never hosts SNAPSHOTs, so one missing there is
+	// expected, typically a sibling module in the same build.
+	return slices.DeleteFunc(mismatches, func(m mismatch.Mismatch) bool {
+		return m.NotFound && strings.HasSuffix(m.Current, "-SNAPSHOT")
+	}), nil
 }

@@ -3,6 +3,8 @@ package maven
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
 type fakeResolver struct {
@@ -230,6 +232,26 @@ func TestCheckPOMOnlyChecksChangedPinnedCoordinates(t *testing.T) {
 		got[0].Current != "1.0.0" ||
 		got[0].Latest != "2.0.0" {
 		t.Fatalf("CheckPOM() mismatch = %#v", got[0])
+	}
+}
+
+func TestCheckPOMSkipsNotFoundSnapshots(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:maven/org.example/sibling":      resolver.NotFound,
+		"pkg:maven/org.example/hallucinated": resolver.NotFound,
+	}}
+
+	after := `<project><dependencies>
+		<dependency><groupId>org.example</groupId><artifactId>sibling</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
+		<dependency><groupId>org.example</groupId><artifactId>hallucinated</artifactId><version>1.0.0</version></dependency>
+	</dependencies></project>`
+
+	got, err := CheckPOM("", after, res)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "hallucinated" || !got[0].NotFound {
+		t.Fatalf("CheckPOM() = %#v, want only the hallucinated artifact as NotFound", got)
 	}
 }
 
