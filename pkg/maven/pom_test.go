@@ -235,23 +235,26 @@ func TestCheckPOMOnlyChecksChangedPinnedCoordinates(t *testing.T) {
 	}
 }
 
-func TestCheckPOMSkipsNotFoundSnapshots(t *testing.T) {
+func TestCheckPOMBlocksOnlyNewNotFoundSnapshots(t *testing.T) {
 	res := &fakeResolver{latest: map[string]string{
-		"pkg:maven/org.example/sibling":      resolver.NotFound,
-		"pkg:maven/org.example/hallucinated": resolver.NotFound,
+		"pkg:maven/org.example/existing": resolver.NotFound,
+		"pkg:maven/org.example/added":    resolver.NotFound,
 	}}
 
+	before := `<project><dependencies>
+		<dependency><groupId>org.example</groupId><artifactId>existing</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
+	</dependencies></project>`
 	after := `<project><dependencies>
-		<dependency><groupId>org.example</groupId><artifactId>sibling</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
-		<dependency><groupId>org.example</groupId><artifactId>hallucinated</artifactId><version>1.0.0</version></dependency>
+		<dependency><groupId>org.example</groupId><artifactId>existing</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
+		<dependency><groupId>org.example</groupId><artifactId>added</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
 	</dependencies></project>`
 
-	got, err := CheckPOM("", after, res)
+	got, err := CheckPOM(before, after, res)
 	if err != nil {
 		t.Fatalf("CheckPOM() error = %v", err)
 	}
-	if len(got) != 1 || got[0].Name != "hallucinated" || !got[0].NotFound {
-		t.Fatalf("CheckPOM() = %#v, want only the hallucinated artifact as NotFound", got)
+	if len(got) != 1 || got[0].Name != "added" || !got[0].NotFound {
+		t.Fatalf("CheckPOM() = %#v, want only the added SNAPSHOT as NotFound", got)
 	}
 }
 
