@@ -1,8 +1,6 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/icons/yul-readme-dark.svg">
-    <img alt="yul — Keeps dependencies current for coding agents." src="docs/icons/yul-readme-light.svg" width="640">
-  </picture>
+  <img alt="yul — Keeps dependencies current for coding agents." src="docs/icons/yul-readme-light.svg#gh-light-mode-only" width="640">
+  <img alt="yul — Keeps dependencies current for coding agents." src="docs/icons/yul-readme-dark.svg#gh-dark-mode-only" width="640">
 </p>
 
 Force your AI agents (Claude and OpenCode) to use the latest release of dependencies instead of them writing the outdated version from training data.
