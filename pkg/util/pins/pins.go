@@ -155,9 +155,10 @@ func satisfiesRange(latest, spec, scheme string) bool {
 }
 
 // Diff reports pins in after that are new or changed from before and need
-// attention: an exact pin older than the latest release res knows about
-// (compared under scheme's ordering rules); a range that excludes the
-// latest release, recommending a replacement range that includes it; or a
+// attention: a package res says doesn't exist (resolver.NotFound); an
+// exact pin older than the latest release res knows about (compared under
+// scheme's ordering rules); a range that excludes the latest release,
+// recommending a replacement range that includes it; or a
 // range that already allows latest but has no lockfile alongside the
 // manifest (hasLockfile), so its actually-installed version isn't pinned
 // anywhere. Pins left untouched by the write are ignored even if outdated.
@@ -194,6 +195,15 @@ func Diff(ctx context.Context, before, after map[string]Pin, scheme string, res 
 		latestVersion, ok := latest[pin.PURL]
 		if !ok {
 			return nil, fmt.Errorf("resolving %s: no latest version found", pin.Name)
+		}
+		if latestVersion == resolver.NotFound {
+			mismatches = append(mismatches, mismatch.Mismatch{
+				Namespace: pin.Namespace,
+				Name:      pin.Name,
+				Current:   pin.Version,
+				NotFound:  true,
+			})
+			continue
 		}
 		if pin.Range {
 			m := mismatch.Mismatch{

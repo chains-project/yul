@@ -3,6 +3,8 @@ package maven
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
 type fakeResolver struct {
@@ -230,6 +232,29 @@ func TestCheckPOMOnlyChecksChangedPinnedCoordinates(t *testing.T) {
 		got[0].Current != "1.0.0" ||
 		got[0].Latest != "2.0.0" {
 		t.Fatalf("CheckPOM() mismatch = %#v", got[0])
+	}
+}
+
+func TestCheckPOMBlocksOnlyNewNotFoundSnapshots(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:maven/org.example/existing": resolver.NotFound,
+		"pkg:maven/org.example/added":    resolver.NotFound,
+	}}
+
+	before := `<project><dependencies>
+		<dependency><groupId>org.example</groupId><artifactId>existing</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
+	</dependencies></project>`
+	after := `<project><dependencies>
+		<dependency><groupId>org.example</groupId><artifactId>existing</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
+		<dependency><groupId>org.example</groupId><artifactId>added</artifactId><version>1.0.0-SNAPSHOT</version></dependency>
+	</dependencies></project>`
+
+	got, err := CheckPOM(before, after, res)
+	if err != nil {
+		t.Fatalf("CheckPOM() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "added" || !got[0].NotFound {
+		t.Fatalf("CheckPOM() = %#v, want only the added SNAPSHOT as NotFound", got)
 	}
 }
 
