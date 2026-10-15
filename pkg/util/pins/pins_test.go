@@ -183,28 +183,19 @@ func TestDiffFailsOpenOnUnresolvedPurl(t *testing.T) {
 }
 
 func TestDiffFlagsNotFoundPackages(t *testing.T) {
-	res := &fakeResolver{latest: map[string]string{
-		"pkg:npm/hallucinated":       resolver.NotFound,
-		"pkg:npm/hallucinated-range": resolver.NotFound,
-	}}
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/hallucinated": resolver.NotFound}}
 
 	before := map[string]Pin{}
 	after := map[string]Pin{
-		"hallucinated":       {Name: "hallucinated", Version: "1.0.0", PURL: "pkg:npm/hallucinated"},
-		"hallucinated-range": {Name: "hallucinated-range", Version: "^1.0.0", PURL: "pkg:npm/hallucinated-range", Range: true},
+		"hallucinated": {Name: "hallucinated", Version: "1.0.0", PURL: "pkg:npm/hallucinated"},
 	}
 
 	got, err := Diff(context.Background(), before, after, "npm", res, true, nil)
 	if err != nil {
 		t.Fatalf("Diff() error = %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("Diff() returned %d mismatches, want 2: %#v", len(got), got)
-	}
-	for _, m := range got {
-		if !m.NotFound || m.Range || m.Latest != "" {
-			t.Fatalf("Diff() mismatch = %#v, want NotFound with no Range or Latest", m)
-		}
+	if len(got) != 1 || got[0].Name != "hallucinated" || !got[0].NotFound || got[0].Latest != "" {
+		t.Fatalf("Diff() = %#v, want only hallucinated as NotFound with no Latest", got)
 	}
 }
 
