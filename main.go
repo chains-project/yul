@@ -188,7 +188,7 @@ func checkPkgManagerPin(scheme, name, pinnedVersion string) {
 	}
 
 	if m := mismatches[0]; m.NotFound {
-		fmt.Fprintln(os.Stderr, "dependency pinned via package manager CLI doesn't exist on its registry, so it's likely hallucinated; use a real package instead:")
+		fmt.Fprintln(os.Stderr, "replace this dependency pinned via package manager CLI with a real package; it doesn't exist on its registry, so it's likely hallucinated:")
 		fmt.Fprintf(os.Stderr, "  %s  %s\n", m.Name, m.Current)
 		os.Exit(2)
 	}
@@ -304,7 +304,7 @@ func runHook() {
 	}
 
 	if len(notFound) > 0 {
-		fmt.Fprintln(os.Stderr, "these dependencies don't exist on their registry, so they're likely hallucinated; use a real package instead:")
+		fmt.Fprintln(os.Stderr, "replace these dependencies with real packages; they don't exist on their registry, so they're likely hallucinated:")
 		for _, m := range notFound {
 			name := m.Name
 			if m.Namespace != "" {
