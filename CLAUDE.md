@@ -42,7 +42,7 @@ There is no linter config in this repo beyond `go vet`/`gofmt` defaults.
 > [!WARNING]
 > This burns A LOT of tokens!
 
-`benchmark/` evaluates the hook empirically rather than via `go test`: `run_all.sh <cases.json> <output_dir> [parallelism]` runs each case in `cases.json` under both `hook` and `nohook` conditions in parallel, invoking `run_case.sh`, which drives `claude -p` non-interactively (`--permission-mode bypassPermissions`) and captures the full turn-by-turn transcript (`transcript.jsonl`) plus the resulting manifest (`final_manifest`) per run. `benchmark/runs/` holds recorded runs per case (e.g. `ghactions-01-checkout-test`, `maven-03-okhttp`, `npm-04-react`, `pyproject-02-pydantic`).
+The benchmark lives in its own repo, [chains-project/yul-benchmark](https://github.com/chains-project/yul-benchmark). Its `benchmark/` evaluates the hook empirically rather than via `go test`: `run_all.sh <cases.json> <output_dir> [parallelism]` runs each case in `cases.json` under both `hook` and `nohook` conditions in parallel, invoking `run_case.sh`, which drives `claude -p` non-interactively (`--permission-mode bypassPermissions`) and captures the full turn-by-turn transcript (`transcript.jsonl`) plus the resulting manifest (`final_manifest`) per run. `benchmark/runs/` holds recorded runs per case (e.g. `ghactions-01-checkout-test`, `maven-03-okhttp`, `npm-04-react`, `pyproject-02-pydantic`), and `CASES.md` summarizes every run of the 60 top-package cases.
 
 ## PR conventions
 
