@@ -126,7 +126,7 @@ If you're already working on a project when you install the hook, `yul` does an 
 
 `yul` only ever fires on a manifest write that hand-pins an exact, already-stale version. Some ecosystems have a CLI command that resolves and writes the latest version for you, so Claude reaches for that instead of typing a version number — which means there's nothing stale for the hook to catch. Others have no such command, so Claude has to type a version from memory (often stale, since that's frozen at training time), which is exactly the case `yul` is built to guard.
 
-This was observed empirically across the `benchmark/` scaffolding runs (see [`benchmark/runs`](benchmark/runs), and the [write-up](https://chains.proj.kth.se/ai-bump.html)): in the `nohook` condition, Claude's own tool choice split cleanly along these lines.
+This was observed empirically across the [benchmark](https://github.com/chains-project/yul-benchmark) scaffolding runs (see [`benchmark/runs`](https://github.com/chains-project/yul-benchmark/tree/main/benchmark/runs), and the [write-up](https://chains.proj.kth.se/ai-bump.html)): in the `nohook` condition, Claude's own tool choice split cleanly along these lines.
 
 | Ecosystem | Direct "give me latest" command? | What Claude actually did (nohook) |
 | --- | --- | --- |
