@@ -5,9 +5,12 @@
 
 Force your AI agents (Claude Code and OpenCode) to use the latest release of a dependency instead of the outdated version they remember from training data. When an agent writes a stale pin into a manifest, yul blocks the write and tells the agent the latest version, so it retries with that one.
 
+For example, both agents we tested write `actions/checkout@v4` when the latest release was v7.0.1. yul blocks these writes and the agent retries with the latest release.
+
 ## Examples
 
-Here Claude scaffolds a Maven project with a GitHub Actions workflow. yul blocks both stale pins and Claude retries with the versions it's given.
+Here Claude scaffolds a Maven project with a GitHub Actions workflow.
+yul blocks both stale pins and Claude retries with the versions it's given.
 
 ![claude](docs/claude.png)
 
@@ -34,8 +37,6 @@ yul checks every dependency a write adds or changes, if it's pinned to an exact 
 - `Cargo.toml`: crates.io, `=` pins (a bare `"1.2.3"` is a caret range, not an exact pin)
 
 ## Scientific evaluation
-
-Coding agents often write a dependency version from memory, and that version is usually outdated. For example, both agents we tested write `actions/checkout@v4` when the latest release was v7.0.1. yul blocks these writes and the agent retries with the latest release.
 
 We ran the [benchmark](https://github.com/chains-project/yul-benchmark) tasks three times each without and with yul 0.0.21, on Claude Code with Claude Opus 5.5 and OpenCode with DeepSeek V4.1 Flash. yul helps most for GitHub Actions and Maven, where agents type versions from memory.
 
