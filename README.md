@@ -122,6 +122,23 @@ If you're already working on a project when you install the hook, `yul` does an 
 ![init-scan](docs/init-scan.png)
 
 
+## Results
+
+Coding agents often write a dependency version from memory, and that version is usually outdated. For example, both agents we tested write `actions/checkout@v4` when the latest release was v7.0.1. yul blocks these writes and the agent retries with the latest release.
+
+We ran the [benchmark](https://github.com/chains-project/yul-benchmark) tasks three times each without and with yul 0.0.21, on Claude Code with Claude Opus 5.5 and OpenCode with DeepSeek V4.1 Flash. yul helps most for GitHub Actions and Maven, where agents type versions from memory.
+
+| Ecosystem | Agent | Without yul: runs with an outdated version | With yul: outdated writes fixed |
+| --- | --- | --- | --- |
+| GitHub Actions | Claude Opus 5.5 | 30 of 30 | 29 of 29 |
+| GitHub Actions | DeepSeek V4.1 Flash | 30 of 30 | 27 of 29 |
+| Maven | Claude Opus 5.5 | 6 of 30 | 5 of 6 |
+| Maven | DeepSeek V4.1 Flash | 19 of 30 | 22 of 22 |
+
+An outdated write is fixed when yul blocks it and the agent's retry uses the latest release.
+
+We also tried Cargo, Go, npm, and PyPI, and yul works there too. It fixed 8 of the 10 outdated writes in those ecosystems. But in most runs the agent gets the latest version on its own, because it runs `cargo add`, `go get`, `npm install`, or `uv add`. See [below](#why-some-ecosystems-need-this-more-than-others) for the analysis.
+
 ## Why some ecosystems need this more than others
 
 `yul` only ever fires on a manifest write that hand-pins an exact, already-stale version. Some ecosystems have a CLI command that resolves and writes the latest version for you, so Claude reaches for that instead of typing a version number — which means there's nothing stale for the hook to catch. Others have no such command, so Claude has to type a version from memory (often stale, since that's frozen at training time), which is exactly the case `yul` is built to guard.
