@@ -124,19 +124,20 @@ If you're already working on a project when you install the hook, `yul` does an 
 
 ## Results
 
-The [benchmark](https://github.com/chains-project/yul-benchmark) runs 60 tasks, 10 per ecosystem, three times each without and with yul 0.0.21. It uses Claude Code with Claude Opus 5.5 and OpenCode with DeepSeek V4.1 Flash. A run is stale if the agent's own write doesn't pin the latest release. A run is mitigated if yul blocks a stale write and the agent's retry pins the latest release. Mitigated is out of the stale runs with yul. Runs where the agent never declares the target dependency are left out.
+Coding agents often write a dependency version from memory, and that version is usually outdated. For example, both agents we tested write `actions/checkout@v4` when the latest release was v7.0.1. yul blocks these writes and the agent retries with the latest release.
 
-| Ecosystem | Opus: stale without yul | Opus: mitigated by yul | DeepSeek: stale without yul | DeepSeek: mitigated by yul |
-| --- | --- | --- | --- | --- |
-| **GitHub Actions** | 30/30 (100%) | **29/29 (100%)** | 30/30 (100%) | **27/29 (93%)** |
-| **Maven** | 6/30 (20%) | **5/6 (83%)** | 19/30 (63%) | **22/22 (100%)** |
-| Cargo | 3/26 (12%) | 3/5 (60%) | 2/25 (8%) | 2/2 (100%) |
-| Go | 3/30 (10%) | 2/2 (100%) | 3/23 (13%) | 1/1 (100%) |
-| npm | 0/9 (0%) | – | 0/8 (0%) | – |
-| PyPI | 0/21 (0%) | – | 0/23 (0%) | – |
-| All | 42/146 (29%) | 39/42 (93%) | 54/139 (39%) | 52/54 (96%) |
+We ran the [benchmark](https://github.com/chains-project/yul-benchmark) tasks three times each without and with yul 0.0.21, on Claude Code with Claude Opus 5.5 and OpenCode with DeepSeek V4.1 Flash. yul helps most for GitHub Actions and Maven, where agents type versions from memory.
 
-yul does the most for GitHub Actions and Maven, shown in bold. Agents type those versions from memory, so they often go stale, and yul blocks nearly all of them. For Go, Cargo, npm, and PyPI the agents mostly run `go get`, `cargo add`, `npm install`, or `uv add`, which already write the latest release. Those rows have few stale runs, so their mitigation rates rest on a handful of runs.
+| Ecosystem | Agent | Without yul: runs with an outdated version | With yul: outdated writes fixed |
+| --- | --- | --- | --- |
+| GitHub Actions | Claude Opus 5.5 | 30 of 30 | 29 of 29 |
+| GitHub Actions | DeepSeek V4.1 Flash | 30 of 30 | 27 of 29 |
+| Maven | Claude Opus 5.5 | 6 of 30 | 5 of 6 |
+| Maven | DeepSeek V4.1 Flash | 19 of 30 | 22 of 22 |
+
+An outdated write is fixed when yul blocks it and the agent's retry uses the latest release.
+
+We also tried Cargo, Go, npm, and PyPI, and yul works there too. It fixed 8 of the 10 outdated writes in those ecosystems. But in most runs the agent gets the latest version on its own, because it runs `cargo add`, `go get`, `npm install`, or `uv add`. See [below](#why-some-ecosystems-need-this-more-than-others) for the analysis.
 
 ## Why some ecosystems need this more than others
 
