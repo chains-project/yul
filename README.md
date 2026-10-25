@@ -122,6 +122,22 @@ If you're already working on a project when you install the hook, `yul` does an 
 ![init-scan](docs/init-scan.png)
 
 
+## Results
+
+The [benchmark](https://github.com/chains-project/yul-benchmark) runs 60 tasks, 10 per ecosystem, three times each without and with yul 0.0.21. It uses Claude Code with Claude Opus 5.5 and OpenCode with DeepSeek V4.1 Flash. A run is stale if the agent's own write doesn't pin the latest release. A run is mitigated if yul blocks a stale write and the agent's retry pins the latest release. Mitigated is out of the stale runs with yul. Runs where the agent never declares the target dependency are left out.
+
+| Ecosystem | Opus: stale without yul | Opus: mitigated by yul | DeepSeek: stale without yul | DeepSeek: mitigated by yul |
+| --- | --- | --- | --- | --- |
+| **GitHub Actions** | 30/30 (100%) | **29/29 (100%)** | 30/30 (100%) | **27/29 (93%)** |
+| **Maven** | 6/30 (20%) | **5/6 (83%)** | 19/30 (63%) | **22/22 (100%)** |
+| Cargo | 3/26 (12%) | 3/5 (60%) | 2/25 (8%) | 2/2 (100%) |
+| Go | 3/30 (10%) | 2/2 (100%) | 3/23 (13%) | 1/1 (100%) |
+| npm | 0/9 (0%) | – | 0/8 (0%) | – |
+| PyPI | 0/21 (0%) | – | 0/23 (0%) | – |
+| All | 42/146 (29%) | 39/42 (93%) | 54/139 (39%) | 52/54 (96%) |
+
+yul does the most for GitHub Actions and Maven, shown in bold. Agents type those versions from memory, so they often go stale, and yul blocks nearly all of them. For Go, Cargo, npm, and PyPI the agents mostly run `go get`, `cargo add`, `npm install`, or `uv add`, which already write the latest release. Those rows have few stale runs, so their mitigation rates rest on a handful of runs.
+
 ## Why some ecosystems need this more than others
 
 `yul` only ever fires on a manifest write that hand-pins an exact, already-stale version. Some ecosystems have a CLI command that resolves and writes the latest version for you, so Claude reaches for that instead of typing a version number — which means there's nothing stale for the hook to catch. Others have no such command, so Claude has to type a version from memory (often stale, since that's frozen at training time), which is exactly the case `yul` is built to guard.
