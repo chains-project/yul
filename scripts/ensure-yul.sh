@@ -10,9 +10,10 @@
 # for its own update notices.
 set -u
 
-root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
+script_dir=$(dirname -- "$0")
+root=${CLAUDE_PLUGIN_ROOT:-$script_dir/..}
 
-version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n1)"
+version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n1)
 [ -n "$version" ] || exit 0
 
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/yul"
@@ -33,16 +34,22 @@ fi
 # version_gt A B: true (exit 0) if dotted-numeric version A > B.
 version_gt() {
 	[ "$1" = "$2" ] && return 1
-	highest="$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)"
+	highest=$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)
 	[ "$highest" = "$1" ]
 }
 
-latest_tag="$(curl -fsSL --max-time 5 "https://api.github.com/repos/chains-project/yul/releases/latest" 2>/dev/null |
-	grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')"
+release_json=$(curl -fsSL --max-time 5 "https://api.github.com/repos/chains-project/yul/releases/latest" 2>/dev/null)
+tag_line=$(printf '%s\n' "$release_json" | grep '"tag_name"' | head -n1)
+latest_tag=$(printf '%s\n' "$tag_line" | sed 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/')
 
 if [ -n "$latest_tag" ] && version_gt "$latest_tag" "$version"; then
-	notice="yul: a newer release (v${latest_tag}) is available; this session is running the cached v${version}. To pick it up now: \`claude plugin update yul@chains-project\`, then /reload-plugins (or restart). To stop seeing this: add \"autoUpdate\": true to the chains-project entry under extraKnownMarketplaces, wherever it's registered (~/.claude/settings.json for user scope, .claude/settings.json for project scope, or .claude/settings.local.json for local scope), so Claude Code updates it in the background automatically (this is off by default for third-party marketplaces)."
-	escaped="$(printf '%s' "$notice" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+	notice="yul: a newer release (v${latest_tag}) is available; this session is running the cached v${version}."
+	notice="$notice To pick it up now: 'claude plugin update yul@chains-project', then /reload-plugins (or restart)."
+	notice="$notice To stop seeing this: add \"autoUpdate\": true to the chains-project entry under extraKnownMarketplaces,"
+	notice="$notice wherever it's registered (~/.claude/settings.json for user scope, .claude/settings.json for project scope,"
+	notice="$notice or .claude/settings.local.json for local scope), so Claude Code updates it in the background automatically"
+	notice="$notice (this is off by default for third-party marketplaces)."
+	escaped=$(printf '%s' "$notice" | sed 's/\\/\\\\/g; s/"/\\"/g')
 	printf '{"systemMessage":"%s"}\n' "$escaped"
 fi
 
