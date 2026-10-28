@@ -1,17 +1,72 @@
-# yul
+<p align="center">
+  <img alt="yul — Keeps dependencies current for coding agents." src="docs/icons/yul-readme-light.svg#gh-light-mode-only" width="640">
+  <img alt="yul — Keeps dependencies current for coding agents." src="docs/icons/yul-readme-dark.svg#gh-dark-mode-only" width="640">
+</p>
 
-Force your AI agents (Claude and OpenCode) to use the latest release of dependencies instead of them writing the outdated version from training data.
+Force your AI agents (Claude Code and OpenCode) to use the latest release of a dependency instead of the outdated version they remember from training data. When an agent writes a stale pin into a manifest, yul blocks the write and tells the agent the latest version, so it retries with that one.
 
-Supported manifests:
-- `pom.xml` — Maven Central
-- `requirements.txt` — PyPI, `==` pins only
-- `pyproject.toml` — PyPI, `[project.dependencies]` / `[project.optional-dependencies]`, `==` pins only
-- `package.json` — npm registry, `dependencies` / `devDependencies` / `optionalDependencies` / `peerDependencies`, exact version pins only
-- `.github/workflows/*.yml`/`*.yaml` — GitHub Actions, `uses:` steps pinned to a version-like tag (branch names and commit SHAs are left alone)
-- `go.mod` — Go modules, `require` entries (single-line and block form, direct and indirect)
-- `Cargo.toml` — crates.io, `dependencies` / `dev-dependencies` / `build-dependencies`, `=` pins only (a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin)
+For example, both agents we tested write `actions/checkout@v4` when the latest release was v7.0.1. yul blocks these writes and the agent retries with the latest release.
 
-## Install as a Claude Code plugin
+## Examples
+
+Here Claude scaffolds a Maven project with a GitHub Actions workflow.
+yul blocks both stale pins and Claude retries with the versions it's given.
+
+![claude](docs/claude.png)
+
+<details>
+<summary>The same task in OpenCode</summary>
+
+![opencode](docs/opencode.png)
+
+</details>
+
+When a session starts, yul also scans the whole project for stale pins and asks whether to update them. Say no and it remembers your decision.
+
+![init-scan](docs/init-scan.png)
+
+## Supported manifests
+
+yul checks every dependency a write adds or changes, if it's pinned to an exact version:
+
+- `pom.xml`: Maven Central
+- `requirements.txt` and `pyproject.toml`: PyPI, `==` pins
+- `package.json`: npm, exact pins in any of the four dependency fields
+- `.github/workflows/*.yml`: GitHub Actions, `uses:` steps pinned to a version tag (branches and SHAs are left alone)
+- `go.mod`: Go modules, `require` entries
+- `Cargo.toml`: crates.io, `=` pins (a bare `"1.2.3"` is a caret range, not an exact pin)
+
+## Scientific evaluation
+
+We ran the [benchmark](https://github.com/chains-project/yul-benchmark) tasks three times each without and with yul 0.0.21, on Claude Code with Claude Opus 5.5 and OpenCode with DeepSeek V4.1 Flash. yul helps most for GitHub Actions and Maven, where agents type versions from memory.
+
+| Ecosystem | Agent | Without yul: runs with an outdated version | With yul: outdated writes fixed |
+| --- | --- | --- | --- |
+| GitHub Actions | Claude Opus 5.5 | 30 of 30 | 29 of 29 |
+| GitHub Actions | DeepSeek V4.1 Flash | 30 of 30 | 27 of 29 |
+| Maven | Claude Opus 5.5 | 6 of 30 | 5 of 6 |
+| Maven | DeepSeek V4.1 Flash | 19 of 30 | 22 of 22 |
+
+An outdated write is fixed when yul blocks it and the agent's retry uses the latest release.
+
+We also tried Cargo, Go, npm, and PyPI, and yul works there too. It fixed 8 of the 10 outdated writes in those ecosystems. But in most runs the agent gets the latest version on its own, because it runs `cargo add`, `go get`, `npm install`, or `uv add`. See [below](#why-some-ecosystems-need-this-more-than-others) for the analysis.
+
+### Why some ecosystems need this more than others
+
+yul only fires when an agent types an exact version that's already outdated. Some ecosystems have a command that looks up the latest release and writes it for you, so the agent rarely types a version. Others don't, so the agent types one from memory. The [benchmark runs](https://github.com/chains-project/yul-benchmark/tree/main/benchmark/runs) without yul split along these lines. There's more in the [write-up](https://chains.proj.kth.se/ai-bump.html).
+
+| Ecosystem | Command that writes the latest version | What the agent did without yul |
+| --- | --- | --- |
+| Go | `go get` | Ran `go get`. |
+| npm | `npm install` | Ran `npm install`, which writes a `^` range. |
+| Cargo | `cargo add` | Ran `cargo add` in most runs, which writes a caret range. |
+| PyPI | `uv add` for `pyproject.toml`, none for `requirements.txt` | Ran `uv add`, or typed a `>=` range that admits the latest release. |
+| Maven | None | Typed the `<version>` from memory. |
+| GitHub Actions | None, since versions are git tags | Typed the `@vX` tag from memory. |
+
+## Installation
+
+### Claude Code
 
 Inside Claude Code, run:
 
@@ -19,8 +74,6 @@ Inside Claude Code, run:
 /plugin marketplace add chains-project/chains-hooks
 /plugin install yul@chains-project
 ```
-
-### Enabling it for a whole team
 
 To enable it for everyone working in a repo, check this into the repo's `.claude/settings.json`:
 
@@ -35,13 +88,11 @@ To enable it for everyone working in a repo, check this into the repo's `.claude
 }
 ```
 
-The `extraKnownMarketplaces` entry matters: it tells collaborators' Claude Code where `yul@chains-project` lives, so they don't need to have added the marketplace themselves.
+Collaborators don't run any install commands. Claude Code asks them to trust the plugin the first time they open the repo. Declining leaves it disabled.
 
-Collaborators then don't run any install commands. The first time they start Claude Code in the repo, it reads the checked-in settings, asks them to confirm they trust the `chains-project` marketplace and the `yul` plugin, and — once accepted — installs the plugin and downloads the release binary on session start. Declining just leaves the plugin disabled for them; nothing else breaks. Updates are picked up automatically as new plugin versions are released.
+### OpenCode
 
-## Use with OpenCode
-
-Also ships as [`opencode-yul`](https://www.npmjs.com/package/opencode-yul), an [OpenCode](https://opencode.ai) plugin driving the same release binary through OpenCode's `tool.execute.before` hook instead of Claude Code's `PreToolUse`. Add it to `opencode.json`/`opencode.jsonc`:
+Add [`opencode-yul`](https://www.npmjs.com/package/opencode-yul) to `opencode.json` or `opencode.jsonc`. See [`opencode-yul/README.md`](opencode-yul/README.md) for details.
 
 ```json
 {
@@ -49,35 +100,21 @@ Also ships as [`opencode-yul`](https://www.npmjs.com/package/opencode-yul), an [
 }
 ```
 
-See [`opencode-yul/README.md`](opencode-yul/README.md) for details.
+### Manual
 
-## Manual install
-
-> [!NOTE]
-> Prefer this method if you want control over which version you run.
-> The `/plugin` installs above updates automatically as new releases ship.
-> OpenCode install also ensures that the updates are automatically pulled in
-> whenever the [NPM package](https://www.npmjs.com/package/opencode-yul) is updated.
-
-If you have Go installed, this is the preferred way to install the `yul` binary yourself:
+Install the binary yourself if you want to control which version you run. With Go:
 
 ```sh
 go install github.com/chains-project/yul@latest
 ```
 
-This places the binary at `$(go env GOPATH)/bin`. Unlike a `curl | sh` script, `go install` builds from the module proxy over a verified, checksummed (`GONOSUMCHECK`/`go.sum`-backed) supply chain, so you're not piping an arbitrary internet script into your shell.
-
-If you don't have Go installed:
+Without Go, this installs the latest release to `~/.local/bin` after verifying its checksum. Set `YUL_INSTALL_DIR` to change the directory, or `YUL_VERSION` to pin a version.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/chains-project/yul/main/install.sh | sh
 ```
 
-This downloads the right `yul` binary for your OS/arch from the [latest release](https://github.com/chains-project/yul/releases), verifies its checksum, and installs it to `~/.local/bin` (override with `YUL_INSTALL_DIR`; pin a version with `YUL_VERSION`).
-
-## Manual usage
-
-If you installed the binary manually instead of using the plugin, add to `.claude/settings.json`:
+Then add the hook to `.claude/settings.json`, with `command` set to the binary's absolute path:
 
 ```json
 {
@@ -86,11 +123,7 @@ If you installed the binary manually instead of using the plugin, add to `.claud
       {
         "matcher": "Write|Edit",
         "hooks": [
-          {
-            "type": "command",
-            "command": "/home/<user>/go/bin/yul",
-            "timeout": 30
-          }
+          { "type": "command", "command": "/home/<user>/go/bin/yul", "timeout": 30 }
         ]
       }
     ]
@@ -98,44 +131,4 @@ If you installed the binary manually instead of using the plugin, add to `.claud
 }
 ```
 
-Point `command` at the installed binary's absolute path (`~/.local/bin/yul` if you used the installer above, or `$(go env GOPATH)/bin/yul` if you used `go install`) — never at `go run`. `go run` always exits 1 on program failure regardless of the program's actual exit code ([golang/go#17813](https://github.com/golang/go/issues/17813)), so a blocking exit 2 from this hook is flattened to exit 1. Claude Code treats exit 1 as a non-blocking error, so the write goes through instead of being blocked.
-
-### Example
-
-Claude scaffolds a Maven project with a GitHub Actions workflow; the hook blocks both stale pins and Claude retries with the versions it's given:
-
-**Claude Code**
-
-![claude](docs/claude.png)
-
-**OpenCode**
-
-![opencode](docs/opencode.png)
-
-#### Initial scan
-
-If you're already working on a project when you install the hook, `yul` does an init-scan and asks whether you want to update any stale pins it finds. Say yes and it updates on the fly; say no and it remembers your decision and won't prompt again.
-
-![init-scan](docs/init-scan.png)
-
-
-## Why some ecosystems need this more than others
-
-`yul` only ever fires on a manifest write that hand-pins an exact, already-stale version. Some ecosystems have a CLI command that resolves and writes the latest version for you, so Claude reaches for that instead of typing a version number — which means there's nothing stale for the hook to catch. Others have no such command, so Claude has to type a version from memory (often stale, since that's frozen at training time), which is exactly the case `yul` is built to guard.
-
-This was observed empirically across the `benchmark/` scaffolding runs (see [`benchmark/runs`](benchmark/runs), and the [write-up](https://chains.proj.kth.se/ai-bump.html)): in the `nohook` condition, Claude's own tool choice split cleanly along these lines.
-
-| Ecosystem | Direct "give me latest" command? | What Claude actually did (nohook) |
-| --- | --- | --- |
-| Go (`go.mod`) | Yes — `go get <module>` / `go mod tidy` | Ran `go get`, which hits the module proxy and writes the resolved latest version itself. Nothing to catch. |
-| npm (`package.json`) | Yes — `npm install <pkg>` | Ran `npm install`, which resolves the latest release and writes it (as a `^` range) at install time, before any Write/Edit reaches the hook. |
-| pip (`requirements.txt`) | No | `pip install <pkg>` installs into the venv but doesn't add the package to `requirements.txt` — Claude typed the line by hand (often unpinned, or an exact `==` pin recalled from memory). |
-| PyPI (`pyproject.toml`) | No | Same gap as pip — no command resolves a version straight into `[project.dependencies]`, so Claude hand-typed the pin (or a `>=` range). |
-| Maven (`pom.xml`) | No | There's no Maven equivalent of `npm install`/`go get` that adds a resolved `<dependency>` block; Claude always hand-typed the `<version>`. |
-| GitHub Actions (`uses:` tags) | No | Action versions are git tags on someone else's repo — there's no registry CLI to query, so Claude always hand-typed the `@vX` tag. |
-| Cargo (`Cargo.toml`) | Yes — `cargo add <crate>` | Ran `cargo add` in 9 of 10 cases, which resolves the latest version and writes it as Cargo's implicit caret range (no `=`) — nothing for the hook to catch. The exception, `cargo-top-10-winapi-i686-pc-windows-gnu`, hand-edits `Cargo.toml` directly with `Write`/`Edit` in both the `hook` and `nohook` runs; the hook still finds nothing to mitigate there because the exact pin Claude writes from memory already matches the latest release. |
-
-`go.mod`, `package.json`, and `Cargo.toml` are the manifests where the
-ecosystem's own tooling already avoids the stale-pin problem.
-However, `yul` still acts as a safety net for those ecosystems.
-
+Don't point `command` at `go run`. It turns yul's blocking exit 2 into exit 1, so Claude Code lets the write through.

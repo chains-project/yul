@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`yul` is a Claude Code `PreToolUse` hook (Go binary) that keeps dependencies current. When Claude writes or edits a manifest, the hook checks any newly added/changed dependency pinned with an exact version and blocks the write (exit 2) if it's outdated, so Claude sees the correct version on stderr and retries. Other files and untouched dependencies pass through untouched; resolver/network errors fail open (exit 0).
+`yul` is a Claude Code `PreToolUse` hook (Go binary) that keeps dependencies current. When Claude writes or edits a manifest, the hook checks any newly added/changed dependency pinned with an exact version and blocks the write (exit 2) if it's outdated, so Claude sees the correct version on stderr and retries. It also blocks a dependency whose registry says it doesn't exist (a 404/410 that the ecosyste.ms fallback doesn't contradict), since that's likely a hallucinated name — except a go.mod module with a `replace` directive, which is expected to be missing upstream. Other files and untouched dependencies pass through untouched; resolver/network errors fail open (exit 0).
 
 Supported manifests: `pom.xml` (Maven Central), `requirements.txt` and `pyproject.toml` (PyPI, `==` pins only), `package.json` (npm, exact pins across all four dependency fields), `.github/workflows/*.yml`/`*.yaml` (GitHub Actions, `uses:` steps pinned to a version-like tag — outdated ones are blocked, and so are current ones whose SHA can be resolved, since a tag is mutable; the suggestion is `<sha> # <tag>`. Branch names and commit SHAs are left alone), `go.mod` (Go modules, `require` entries — every entry is inherently an exact pin, since go.mod has no range syntax), `Cargo.toml` (crates.io, `=` pins only — a bare version like `"1.2.3"` is Cargo's implicit caret range, not an exact pin).
 
@@ -42,7 +42,7 @@ There is no linter config in this repo beyond `go vet`/`gofmt` defaults.
 > [!WARNING]
 > This burns A LOT of tokens!
 
-`benchmark/` evaluates the hook empirically rather than via `go test`: `run_all.sh <cases.json> <output_dir> [parallelism]` runs each case in `cases.json` under both `hook` and `nohook` conditions in parallel, invoking `run_case.sh`, which drives `claude -p` non-interactively (`--permission-mode bypassPermissions`) and captures the full turn-by-turn transcript (`transcript.jsonl`) plus the resulting manifest (`final_manifest`) per run. `benchmark/runs/` holds recorded runs per case (e.g. `ghactions-01-checkout-test`, `maven-03-okhttp`, `npm-04-react`, `pyproject-02-pydantic`).
+The benchmark lives in its own repo, [chains-project/yul-benchmark](https://github.com/chains-project/yul-benchmark), checked out here as the `yul-benchmark` submodule (`git submodule update --init yul-benchmark`). Its `benchmark/` evaluates the hook empirically rather than via `go test`: `run_all.sh <cases.json> <output_dir> [parallelism]` runs each case in `cases.json` under both `hook` and `nohook` conditions in parallel, invoking `run_case.sh`, which drives `claude -p` non-interactively (`--permission-mode bypassPermissions`) and captures the full turn-by-turn transcript (`transcript.jsonl`) plus the resulting manifest (`final_manifest`) per run. `benchmark/runs/` holds recorded runs per case (e.g. `ghactions-01-checkout-test`, `maven-03-okhttp`, `npm-04-react`, `pyproject-02-pydantic`), and `CASES.md` summarizes every run of the 60 top-package cases.
 
 ## PR conventions
 

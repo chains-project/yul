@@ -10,7 +10,7 @@
 set -eu
 
 repo="chains-project/yul"
-install_dir="${YUL_INSTALL_DIR:-"$HOME/.local/bin"}"
+install_dir=${YUL_INSTALL_DIR:-$HOME/.local/bin}
 version="${YUL_VERSION:-}"
 
 log() { printf '%s\n' "$*" >&2; }
@@ -26,14 +26,14 @@ need_cmd() {
 need_cmd curl
 need_cmd tar
 
-os="$(uname -s)"
+os=$(uname -s)
 case "$os" in
 Linux) os=linux ;;
 Darwin) os=darwin ;;
 *) die "unsupported OS: $os (yul only publishes linux/darwin binaries)" ;;
 esac
 
-arch="$(uname -m)"
+arch=$(uname -m)
 case "$arch" in
 x86_64 | amd64) arch=amd64 ;;
 aarch64 | arm64) arch=arm64 ;;
@@ -41,13 +41,15 @@ aarch64 | arm64) arch=arm64 ;;
 esac
 
 if [ -z "$version" ]; then
-	version="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" |
-		grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+	release_json=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest") || true
+	tag_line=$(printf '%s\n' "$release_json" | grep '"tag_name"' | head -n1)
+	version=$(printf '%s\n' "$tag_line" | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
 	[ -n "$version" ] || die "could not determine latest release; set YUL_VERSION to install a specific version"
 fi
 
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/yul.XXXXXX")"
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/yul.XXXXXX")
+cleanup() { rm -rf "$tmp_dir"; }
+trap cleanup EXIT INT TERM
 
 archive="yul_${os}_${arch}.tar.gz"
 base_url="https://github.com/${repo}/releases/download/${version}"
@@ -59,19 +61,16 @@ curl -fsSL -o "$tmp_dir/checksums.txt" "$base_url/checksums.txt" ||
 	die "failed to download checksums.txt for $version"
 
 log "verifying checksum..."
-(
-	cd "$tmp_dir"
-	expected="$(grep "  ${archive}\$" checksums.txt | cut -d' ' -f1)"
-	[ -n "$expected" ] || die "no checksum entry for $archive"
-	if command -v sha256sum >/dev/null 2>&1; then
-		actual="$(sha256sum "$archive" | cut -d' ' -f1)"
-	elif command -v shasum >/dev/null 2>&1; then
-		actual="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
-	else
-		die "need sha256sum or shasum to verify the download"
-	fi
-	[ "$expected" = "$actual" ] || die "checksum mismatch for $archive: expected $expected, got $actual"
-)
+expected=$(grep "  ${archive}\$" "$tmp_dir/checksums.txt" | cut -d' ' -f1)
+[ -n "$expected" ] || die "no checksum entry for $archive"
+if command -v sha256sum >/dev/null 2>&1; then
+	actual=$(sha256sum <"$tmp_dir/$archive" | cut -d' ' -f1)
+elif command -v shasum >/dev/null 2>&1; then
+	actual=$(shasum -a 256 <"$tmp_dir/$archive" | cut -d' ' -f1)
+else
+	die "need sha256sum or shasum to verify the download"
+fi
+[ "$expected" = "$actual" ] || die "checksum mismatch for $archive: expected $expected, got $actual"
 
 tar -xzf "$tmp_dir/$archive" -C "$tmp_dir" yul
 

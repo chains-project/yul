@@ -3,6 +3,8 @@ package golang
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
 // fakeResolver resolves latest versions from a fixed PURL->version map, so
@@ -113,6 +115,31 @@ require (
 	}
 	if got[0].Name != "github.com/example/added" || got[0].Current != "v1.0.0" || got[0].Latest != "v2.0.0" {
 		t.Fatalf("CheckGoMod() mismatch = %#v", got[0])
+	}
+}
+
+func TestCheckGoModSkipsNotFoundReplacedModules(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{
+		"pkg:golang/example.com/local":               resolver.NotFound,
+		"pkg:golang/github.com/example/hallucinated": resolver.NotFound,
+	}}
+
+	after := `module example.com/demo
+
+require (
+	example.com/local v0.0.0
+	github.com/example/hallucinated v1.0.0
+)
+
+replace example.com/local => ../local
+`
+
+	got, err := CheckGoMod("", after, res)
+	if err != nil {
+		t.Fatalf("CheckGoMod() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "github.com/example/hallucinated" || !got[0].NotFound {
+		t.Fatalf("CheckGoMod() = %#v, want only the hallucinated module as NotFound", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 // Package mismatch defines the shared result type ecosystem manifest
 // checkers report back to the hook: a dependency that was just added or
-// changed and is pinned older than what's actually released.
+// changed and is pinned older than what's actually released, or doesn't
+// exist on its registry at all.
 package mismatch
 
 type Mismatch struct {
@@ -22,4 +23,8 @@ type Mismatch struct {
 	// next to the manifest, so the range's actually-installed version
 	// isn't pinned anywhere.
 	NoLockfile bool
+
+	// NotFound is true when the package itself doesn't exist on its
+	// registry, e.g. a hallucinated name; Latest and Range are unset.
+	NotFound bool
 }

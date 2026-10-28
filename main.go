@@ -160,9 +160,10 @@ func parsePkgManagerPin(cmd string) (scheme, name, version string, ok bool) {
 }
 
 // checkPkgManagerPin resolves name's latest released version under scheme
-// and, if pinnedVersion is older, blocks (exit 2) with the same "outdated
-// dependencies" message the Write/Edit path prints - so Claude retries with
-// the correct version instead of pinning it via bash and never finding out.
+// and, if pinnedVersion is older or name doesn't exist on its registry,
+// blocks (exit 2) with the same kind of message the Write/Edit path prints
+// - so Claude retries with the correct version instead of pinning it via
+// bash and never finding out.
 // It exits 0 (fails open) if the purl can't be built or the resolver can't
 // find a latest version, same as the Write/Edit path's own resolver errors.
 func checkPkgManagerPin(scheme, name, pinnedVersion string) {
@@ -184,6 +185,12 @@ func checkPkgManagerPin(scheme, name, pinnedVersion string) {
 	mismatches, err := pins.Diff(context.Background(), nil, map[string]pins.Pin{name: pin}, scheme, res, pins.NoRangeSupport, nil)
 	if err != nil || len(mismatches) == 0 {
 		return // fail open on a resolver error; nothing to flag if it's already latest
+	}
+
+	if m := mismatches[0]; m.NotFound {
+		fmt.Fprintln(os.Stderr, "replace this dependency pinned via package manager CLI with a real package; it doesn't exist on its registry, so it's likely hallucinated:")
+		fmt.Fprintf(os.Stderr, "  %s  %s\n", m.Name, m.Current)
+		os.Exit(2)
 	}
 
 	fmt.Fprintln(os.Stderr, "outdated dependency pinned via package manager CLI, use this version instead:")
@@ -284,15 +291,28 @@ func runHook() {
 		os.Exit(0)
 	}
 
-	var outdated, ranges []mismatch.Mismatch
+	var notFound, outdated, ranges []mismatch.Mismatch
 	for _, m := range blocking {
-		if m.Range {
+		switch {
+		case m.NotFound:
+			notFound = append(notFound, m)
+		case m.Range:
 			ranges = append(ranges, m)
-		} else {
+		default:
 			outdated = append(outdated, m)
 		}
 	}
 
+	if len(notFound) > 0 {
+		fmt.Fprintln(os.Stderr, "replace these dependencies with real packages; they don't exist on their registry, so they're likely hallucinated:")
+		for _, m := range notFound {
+			name := m.Name
+			if m.Namespace != "" {
+				name = m.Namespace + ":" + m.Name
+			}
+			fmt.Fprintf(os.Stderr, "  %s  %s\n", name, m.Current)
+		}
+	}
 	if len(outdated) > 0 {
 		fmt.Fprintln(os.Stderr, "outdated dependencies, use these versions instead:")
 		for _, m := range outdated {
@@ -432,11 +452,14 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 		os.Exit(0)
 	}
 
-	var outdated, ranges []scan.Finding
+	var notFound, outdated, ranges []scan.Finding
 	for _, f := range findings {
-		if f.Range {
+		switch {
+		case f.NotFound:
+			notFound = append(notFound, f)
+		case f.Range:
 			ranges = append(ranges, f)
-		} else {
+		default:
 			outdated = append(outdated, f)
 		}
 	}
@@ -445,6 +468,16 @@ func emitScanContext(findings []scan.Finding, scannedAt time.Time) {
 	b.WriteString("yul scanned this project's manifests")
 	fmt.Fprintf(&b, " (as of %s)", scannedAt.Format("2006-01-02"))
 	b.WriteString(" and found:\n")
+	if len(notFound) > 0 {
+		fmt.Fprintf(&b, "%d pinned dependencies that don't exist on their registry (possibly hallucinated, or from a private registry):\n", len(notFound))
+		for _, f := range notFound {
+			name := f.Name
+			if f.Namespace != "" {
+				name = f.Namespace + ":" + f.Name
+			}
+			fmt.Fprintf(&b, "  %s: %s  %s\n", f.File, name, f.Current)
+		}
+	}
 	if len(outdated) > 0 {
 		fmt.Fprintf(&b, "%d pinned dependencies older than the latest release:\n", len(outdated))
 		for _, f := range outdated {

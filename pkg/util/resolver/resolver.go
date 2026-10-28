@@ -7,7 +7,13 @@ import "context"
 
 // Resolver resolves the latest released version for packages identified by
 // Package URL (PURL), e.g. "pkg:npm/lodash" or "pkg:pypi/requests". A PURL
-// missing from the returned map has no resolvable latest version.
+// missing from the returned map has no resolvable latest version; one
+// mapped to NotFound doesn't exist at all.
 type Resolver interface {
 	LatestVersions(ctx context.Context, purls []string) (map[string]string, error)
 }
+
+// NotFound is the latest version reported for a package its registry says
+// doesn't exist (e.g. a 404), as opposed to one that just couldn't be
+// looked up, which is left out of the result instead.
+const NotFound = ""

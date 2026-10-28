@@ -4,9 +4,10 @@
 # offline install), fail open like yul itself does on resolver errors.
 set -u
 
-root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}"
+script_dir=$(dirname -- "$0")
+root=${CLAUDE_PLUGIN_ROOT:-$script_dir/..}
 
-version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n1)"
+version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -n1)
 bin="${XDG_CACHE_HOME:-$HOME/.cache}/yul/v${version}/yul"
 
 if [ -n "$version" ] && [ -x "$bin" ]; then

@@ -3,6 +3,8 @@ package pins
 import (
 	"context"
 	"testing"
+
+	"github.com/chains-project/yul/pkg/util/resolver"
 )
 
 func TestExactVersion(t *testing.T) {
@@ -177,6 +179,23 @@ func TestDiffFailsOpenOnUnresolvedPurl(t *testing.T) {
 
 	if _, err := Diff(context.Background(), before, after, "npm", res, true, nil); err == nil {
 		t.Fatal("Diff() returned nil error, want an error for an unresolved purl")
+	}
+}
+
+func TestDiffFlagsNotFoundPackages(t *testing.T) {
+	res := &fakeResolver{latest: map[string]string{"pkg:npm/hallucinated": resolver.NotFound}}
+
+	before := map[string]Pin{}
+	after := map[string]Pin{
+		"hallucinated": {Name: "hallucinated", Version: "1.0.0", PURL: "pkg:npm/hallucinated"},
+	}
+
+	got, err := Diff(context.Background(), before, after, "npm", res, true, nil)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "hallucinated" || !got[0].NotFound || got[0].Latest != "" {
+		t.Fatalf("Diff() = %#v, want only hallucinated as NotFound with no Latest", got)
 	}
 }
 
